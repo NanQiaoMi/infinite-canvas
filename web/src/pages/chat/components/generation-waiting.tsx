@@ -30,7 +30,7 @@ export function GenerationWaiting({ call, startedAt }: { call: AgentToolCall; st
     const prompt = typeof call.arguments.prompt === "string" ? call.arguments.prompt : "";
     const columns = useMemo(() => (count <= 1 ? 1 : 2), [count]);
     return (
-        <div className="flex gap-3">
+        <div className="agent-message-in flex gap-3">
             <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-400">
                 <Sparkles className="agent-spin size-3.5" />
             </div>
@@ -42,7 +42,7 @@ export function GenerationWaiting({ call, startedAt }: { call: AgentToolCall; st
                 </div>
                 <div className="mt-2 grid max-w-[360px] gap-2" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
                     {Array.from({ length: count }).map((_, index) => (
-                        <div key={index} className="agent-shimmer relative overflow-hidden rounded-xl border border-stone-200/80 dark:border-stone-800" style={{ aspectRatio: String(aspect) }}>
+                        <div key={index} className="agent-shimmer relative overflow-hidden rounded-xl border border-stone-200/80 dark:border-stone-800" style={{ aspectRatio: String(aspect), animationDelay: `${index * 0.18}s` }}>
                             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
                                 <div className="size-5 animate-spin rounded-full border-2 border-stone-300 border-t-stone-500 dark:border-stone-700 dark:border-t-stone-300" />
                                 <span className="font-mono text-[9px] uppercase tracking-[0.18em] text-stone-400 dark:text-stone-500">img {index + 1}</span>
@@ -55,7 +55,7 @@ export function GenerationWaiting({ call, startedAt }: { call: AgentToolCall; st
                         <span className="size-1.5 animate-pulse rounded-full bg-amber-500" />
                         {isEdit ? t("chat.waiting.editing") : t("chat.waiting.generating")}
                     </span>
-                    <span>{phase}</span>
+                    <span key={phase} className="agent-fade-in">{phase}</span>
                     <span className="ml-auto tabular-nums">{t("chat.waiting.elapsed", { seconds: elapsedSeconds })}</span>
                 </div>
             </div>
@@ -73,7 +73,7 @@ export function ThinkingLine({ startedAt }: { startedAt: number }) {
     }, [startedAt]);
     const elapsedSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
     return (
-        <div className="flex gap-3">
+        <div className="agent-fade-in flex gap-3">
             <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-400">
                 <Sparkles className="agent-spin size-3.5" />
             </div>

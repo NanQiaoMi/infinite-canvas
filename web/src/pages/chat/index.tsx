@@ -73,10 +73,26 @@ export default function ChatPage() {
         setLaunchContext(null);
     }, [launchContext, setLaunchContext, t]);
 
+    const lastSessionRef = useRef<string | null | undefined>(undefined);
     useLayoutEffect(() => {
         const node = scrollRef.current;
-        if (node) node.scrollTop = node.scrollHeight;
-    }, [activeSession?.messages.length, streamingText, runningTool]);
+        if (!node) return;
+        const changed = lastSessionRef.current !== activeSessionId;
+        lastSessionRef.current = activeSessionId;
+        if (changed) {
+            node.scrollTop = node.scrollHeight;
+            return;
+        }
+        if (node.scrollHeight - node.scrollTop - node.clientHeight < 160) {
+            node.scrollTo({ top: node.scrollHeight, behavior: "smooth" });
+        }
+    }, [activeSessionId, activeSession?.messages.length, runningTool]);
+
+    useLayoutEffect(() => {
+        const node = scrollRef.current;
+        if (!node || !streamingText) return;
+        if (node.scrollHeight - node.scrollTop - node.clientHeight < 200) node.scrollTop = node.scrollHeight;
+    }, [streamingText]);
 
     const buildContext = useCallback((): AgentContextInput => {
         const config = useConfigStore.getState().config;
@@ -260,7 +276,7 @@ export default function ChatPage() {
     }
 
     const welcome = (
-        <div className="flex flex-1 flex-col items-center justify-center px-2 py-16 text-center">
+        <div className="agent-fade-in flex flex-1 flex-col items-center justify-center px-2 py-16 text-center">
             <div className="mb-6 flex size-11 items-center justify-center rounded-full bg-black/[.05] dark:bg-white/[.07]">
                 <Sparkles className="size-5 text-stone-600 dark:text-stone-300" />
             </div>
@@ -318,7 +334,7 @@ export default function ChatPage() {
                             <GenerationWaiting call={runningTool} startedAt={turnStartedAt || Date.now()} />
                         ) : null}
                         {runningTool && runningTool.tool === "apply_prompt" ? (
-                            <div className="flex gap-3">
+                            <div className="agent-fade-in flex gap-3">
                                 <div className="w-7 shrink-0" />
                                 <div className="flex items-center gap-2 text-xs text-stone-400 dark:text-stone-500">
                                     <span className="inline-block size-2 animate-pulse rounded-full bg-amber-500" />

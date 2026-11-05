@@ -709,3 +709,88 @@
 .dark .agent-shimmer-text {
     background-image: linear-gradient(90deg, #a8a29e 0%, #57534e 35%, #a8a29e 70%);
 }
+
+/* ---------- AI 对话动效 ---------- */
+
+@keyframes agent-message-in {
+    from {
+        opacity: 0;
+        transform: translateY(6px);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+.agent-message-in {
+    animation: agent-message-in 0.22s ease-out both;
+}
+
+@keyframes agent-fade-in {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+.agent-fade-in {
+    animation: agent-fade-in 0.24s ease-out both;
+}
+
+@keyframes agent-pop-in {
+    from {
+        opacity: 0;
+        transform: translateY(4px) scale(0.985);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+.agent-pop-in {
+    animation: agent-pop-in 0.16s ease-out both;
+}
+
+.agent-collapse {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 0.22s ease;
+}
+
+.agent-collapse.is-open {
+    grid-template-rows: 1fr;
+}
+
+.agent-collapse > div {
+    overflow: hidden;
+}
+
+@keyframes agent-progress-pulse {
+    0%,
+    100% {
+        opacity: 0.45;
+    }
+    50% {
+        opacity: 1;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .agent-message-in,
+    .agent-fade-in,
+    .agent-pop-in,
+    .agent-spin,
+    .agent-shimmer,
+    .agent-shimmer-text,
+    .agent-cursor::after {
+        animation: none !important;
+    }
+
+    .agent-collapse {
+        transition: none !important;
+    }
+}

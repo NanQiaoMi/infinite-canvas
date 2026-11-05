@@ -63,7 +63,7 @@ export function ChatComposer({ value, onChange, onSend, onStop, running, modelLa
     return (
         <div className="relative">
             {slashOpen ? (
-                <div className="absolute bottom-full left-0 right-0 mb-2 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-lg dark:border-stone-700 dark:bg-stone-900">
+                <div className="agent-pop-in absolute bottom-full left-0 right-0 mb-2 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-lg dark:border-stone-700 dark:bg-stone-900">
                     {matches.map((command) => (
                         <button
                             key={command.command}
@@ -77,7 +77,7 @@ export function ChatComposer({ value, onChange, onSend, onStop, running, modelLa
                     ))}
                 </div>
             ) : null}
-            <div className="rounded-2xl border border-stone-300/80 bg-white p-2.5 shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition focus-within:border-stone-400/80 dark:border-stone-700 dark:bg-stone-900 dark:focus-within:border-stone-600">
+            <div className="rounded-2xl border border-stone-300/80 bg-white p-2.5 shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-all duration-200 focus-within:border-stone-400/80 focus-within:shadow-[0_2px_14px_rgba(0,0,0,0.06)] dark:border-stone-700 dark:bg-stone-900 dark:focus-within:border-stone-600">
                 {references.length ? (
                     <div className="flex flex-wrap gap-2 px-1 pb-2">
                         {references.map((reference) => (
@@ -116,7 +116,7 @@ export function ChatComposer({ value, onChange, onSend, onStop, running, modelLa
                                 />
                                 <button
                                     type="button"
-                                    className="flex size-8 items-center justify-center rounded-full text-stone-500 transition hover:bg-black/[.05] dark:text-stone-400 dark:hover:bg-white/[.08]"
+                                    className="flex size-8 items-center justify-center rounded-full text-stone-500 transition-all duration-150 hover:bg-black/[.05] active:scale-90 dark:text-stone-400 dark:hover:bg-white/[.08]"
                                     onClick={() => fileInputRef.current?.click()}
                                     title={t("chat.actions.uploadReference")}
                                 >
@@ -134,7 +134,7 @@ export function ChatComposer({ value, onChange, onSend, onStop, running, modelLa
                         <button
                             type="button"
                             className={cn(
-                                "flex size-8 items-center justify-center rounded-full transition",
+                                "flex size-8 items-center justify-center rounded-full transition-all duration-150 active:scale-90",
                                 running
                                     ? "bg-stone-900 text-white hover:bg-stone-700 dark:bg-stone-100 dark:text-stone-900"
                                     : canSend

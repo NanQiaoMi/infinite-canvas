@@ -59,10 +59,10 @@ export function ImageResultCard({ image, onUseAsReference }: { image: AgentImage
     const thumb = previewUrlFor(image.storageKey) || preview;
 
     return (
-        <div className="overflow-hidden rounded-lg border border-stone-200 bg-card dark:border-stone-800">
-            <div className="relative flex aspect-square items-center justify-center bg-stone-100 dark:bg-stone-800">
+        <div className="group overflow-hidden rounded-lg border border-stone-200 bg-card transition-all duration-200 hover:-translate-y-0.5 hover:border-stone-300 hover:shadow-md dark:border-stone-800 dark:hover:border-stone-700">
+            <div className="relative flex aspect-square items-center justify-center overflow-hidden bg-stone-100 dark:bg-stone-800">
                 {thumb ? (
-                    <Image src={thumb} alt={image.prompt.slice(0, 40)} className="!h-full !w-full object-cover" />
+                    <Image src={thumb} alt={image.prompt.slice(0, 40)} className="agent-fade-in !h-full !w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]" />
                 ) : (
                     <LoaderCircle className="size-5 animate-spin text-stone-400" />
                 )}

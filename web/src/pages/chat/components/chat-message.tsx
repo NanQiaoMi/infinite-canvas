@@ -117,7 +117,7 @@ function ToolMessage({ message, onUseReference }: { message: Extract<AgentMessag
     const { t } = useTranslation();
     const [expanded, setExpanded] = useState(false);
     return (
-        <div className="flex gap-3">
+        <div className="agent-message-in flex gap-3">
             <div className="w-7 shrink-0" />
             <div className="min-w-0 flex-1">
                 <button
@@ -131,11 +131,13 @@ function ToolMessage({ message, onUseReference }: { message: Extract<AgentMessag
                     <span className="shrink-0 text-[10px] tabular-nums text-stone-400 dark:text-stone-500">{toolResultSummary(message.result, t)}</span>
                     <ChevronDown className={cn("size-3.5 shrink-0 text-stone-400 transition-transform", expanded && "rotate-180")} />
                 </button>
-                {expanded ? (
-                    <pre className="mt-1.5 max-h-56 overflow-auto rounded-xl border border-stone-200/80 bg-stone-50 px-3 py-2 font-mono text-[10.5px] leading-5 text-stone-500 hover-scrollbar dark:border-stone-800 dark:bg-stone-900/60 dark:text-stone-400">
-                        {JSON.stringify(message.call.arguments, null, 2)}
-                    </pre>
-                ) : null}
+                <div className={cn("agent-collapse", expanded && "is-open")}>
+                    <div>
+                        <pre className="mt-1.5 max-h-56 overflow-auto rounded-xl border border-stone-200/80 bg-stone-50 px-3 py-2 font-mono text-[10.5px] leading-5 text-stone-500 hover-scrollbar dark:border-stone-800 dark:bg-stone-900/60 dark:text-stone-400">
+                            {JSON.stringify(message.call.arguments, null, 2)}
+                        </pre>
+                    </div>
+                </div>
                 <ToolResultBody result={message.result} onUseReference={onUseReference} />
             </div>
         </div>
@@ -146,7 +148,7 @@ export function ChatMessage({ message, onRetry, onUseReference }: { message: Age
     const { t } = useTranslation();
     if (message.role === "user") {
         return (
-            <div className="flex flex-col items-end">
+            <div className="agent-message-in flex flex-col items-end">
                 <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl bg-stone-200/75 px-4 py-2.5 text-sm leading-6 text-stone-800 dark:bg-stone-800 dark:text-stone-100">{message.text}</div>
                 {message.attachments?.length ? <UserAttachments images={message.attachments} /> : null}
             </div>
@@ -154,7 +156,7 @@ export function ChatMessage({ message, onRetry, onUseReference }: { message: Age
     }
     if (message.role === "assistant") {
         return (
-            <div className="flex gap-3">
+            <div className="agent-message-in flex gap-3">
                 <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-400">
                     <Sparkles className="size-3.5" />
                 </div>
@@ -173,7 +175,7 @@ export function ChatMessage({ message, onRetry, onUseReference }: { message: Age
     }
     if (message.role === "tool") return <ToolMessage message={message} onUseReference={onUseReference} />;
     return (
-        <div className="flex gap-3">
+        <div className="agent-message-in flex gap-3">
             <div className="w-7 shrink-0" />
             <div className="flex max-w-[85%] items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs leading-5 text-amber-700 dark:border-amber-950 dark:bg-amber-950/20 dark:text-amber-300">
                 <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
