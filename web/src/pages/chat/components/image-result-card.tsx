@@ -59,7 +59,7 @@ export function ImageResultCard({ image, onUseAsReference }: { image: AgentImage
     const thumb = previewUrlFor(image.storageKey) || preview;
 
     return (
-        <div className="overflow-hidden rounded-xl border border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900">
+        <div className="overflow-hidden rounded-lg border border-stone-200 bg-card dark:border-stone-800">
             <div className="relative flex aspect-square items-center justify-center bg-stone-100 dark:bg-stone-800">
                 {thumb ? (
                     <Image src={thumb} alt={image.prompt.slice(0, 40)} className="!h-full !w-full object-cover" />

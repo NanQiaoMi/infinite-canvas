@@ -225,87 +225,92 @@ export default function ChatPage() {
     }
 
     return (
-        <div className="flex h-full min-h-0 bg-background text-foreground">
-            <div className="hidden md:flex">{sessionList}</div>
-            <Drawer open={listOpen} placement="left" width={260} onClose={() => setListOpen(false)} styles={{ body: { padding: 0 } }}>
+        <div className="flex h-full flex-col overflow-hidden bg-stone-50 text-stone-900 dark:bg-stone-950 dark:text-stone-100">
+            <main className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-hidden p-3 lg:grid-cols-[260px_minmax(0,1fr)]">
+                <aside className="thin-scrollbar hidden min-h-0 flex-col overflow-hidden rounded-lg border border-stone-200 bg-card shadow-sm lg:flex dark:border-stone-800">{sessionList}</aside>
+                <section className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-stone-200 bg-card shadow-sm dark:border-stone-800">
+                    <div className="flex shrink-0 items-center gap-2 border-b border-stone-200 px-4 py-3 dark:border-stone-800">
+                        <Button className="lg:!hidden" size="small" type="text" icon={<Menu className="size-4" />} onClick={() => setListOpen(true)} />
+                        <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                                <MessagesSquare className="size-4 text-stone-400 dark:text-stone-500" />
+                                <h1 className="text-base font-semibold text-stone-950 dark:text-stone-100">{t("chat.title")}</h1>
+                            </div>
+                            <p className="mt-0.5 hidden truncate text-xs text-stone-500 sm:block dark:text-stone-400">{t("chat.subtitle")}</p>
+                        </div>
+                        <div className="ml-auto flex shrink-0 items-center gap-1.5">
+                            <Button size="small" icon={<Sparkles className="size-3.5" />} onClick={createAndClose}>
+                                {t("chat.newSession")}
+                            </Button>
+                        </div>
+                    </div>
+                    <div ref={scrollRef} className="hover-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-5">
+                        <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
+                            {!activeSession || activeSession.messages.length === 0 ? (
+                                <div className="flex flex-col items-center justify-center gap-4 py-16 text-center">
+                                    <div className="flex size-12 items-center justify-center rounded-lg border border-stone-200 bg-background dark:border-stone-800">
+                                        <MessagesSquare className="size-5 text-stone-400 dark:text-stone-500" />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <div className="text-base font-semibold text-stone-900 dark:text-stone-100">{t("chat.emptyTitle")}</div>
+                                        <div className="text-sm text-stone-500 dark:text-stone-400">{t("chat.emptyHint")}</div>
+                                    </div>
+                                    <div className="flex flex-wrap justify-center gap-2">
+                                        {[
+                                            { key: "write", text: t("chat.example.write") },
+                                            { key: "optimize", text: t("chat.example.optimize") },
+                                            { key: "generate", text: t("chat.example.generate") },
+                                        ].map((item) => (
+                                            <Button key={item.key} size="small" onClick={() => setInput(item.text)}>
+                                                {item.text}
+                                            </Button>
+                                        ))}
+                                    </div>
+                                </div>
+                            ) : (
+                                activeSession.messages.map((item, index) => (
+                                    <ChatMessage key={item.id} message={item} onRetry={item.role === "error" ? () => retryMessage(index) : undefined} onUseReference={useReference} />
+                                ))
+                            )}
+                            {running && streamingText ? (
+                                <div className="flex justify-start">
+                                    <div className="w-full min-w-0">
+                                        <Streamdown className="agent-streamdown text-sm leading-7">{streamingText}</Streamdown>
+                                    </div>
+                                </div>
+                            ) : null}
+                            {runningTool ? (
+                                <div className="flex items-center gap-2 rounded-md bg-black/[.025] px-3 py-2 text-xs text-stone-500 dark:bg-white/[.05] dark:text-stone-400">
+                                    <Spin size="small" />
+                                    {runningTool.tool === "generate_image" ? t("chat.tools.names.generate_image") : runningTool.tool === "edit_image" ? t("chat.tools.names.edit_image") : runningTool.tool === "apply_prompt" ? t("chat.tools.names.apply_prompt") : runningTool.tool}
+                                    {typeof runningTool.arguments.prompt === "string" ? <span className="truncate">：{runningTool.arguments.prompt}</span> : null}
+                                </div>
+                            ) : null}
+                            {running && !streamingText && !runningTool ? (
+                                <div className="flex items-center gap-2 text-xs text-stone-400 dark:text-stone-500">
+                                    <Spin size="small" />
+                                    {t("chat.thinking")}
+                                </div>
+                            ) : null}
+                        </div>
+                    </div>
+                    <ChatComposer
+                        value={input}
+                        onChange={setInput}
+                        onSend={() => void send()}
+                        onStop={stop}
+                        running={running}
+                        modelLabel={textModel ? modelLabelOf(textModel) : ""}
+                        references={references}
+                        onAddFiles={(files) => void addReferenceFiles(files)}
+                        onRemoveReference={(id) => setReferences((current) => current.filter((item) => item.id !== id))}
+                        quotaHint={quotaHint}
+                    />
+                </section>
+            </main>
+            <Drawer open={listOpen} placement="left" width={280} onClose={() => setListOpen(false)} styles={{ body: { padding: 0 } }} title={t("chat.sessionList")}>
                 {sessionList}
             </Drawer>
-            <div className="flex min-w-0 flex-1 flex-col">
-                <div className="flex h-12 shrink-0 items-center gap-2 border-b border-stone-200 px-4 dark:border-stone-800">
-                    <Button className="md:hidden" size="small" type="text" icon={<Menu className="size-4" />} onClick={() => setListOpen(true)} />
-                    <MessagesSquare className="size-4 text-stone-500" />
-                    <span className="text-sm font-medium">{t("chat.title")}</span>
-                    <span className="hidden truncate text-xs text-stone-400 sm:inline">{t("chat.subtitle")}</span>
-                    <div className="ml-auto flex items-center gap-2">
-                        <span className="hidden text-xs text-stone-400 sm:inline">{t("chat.internalOnly")}</span>
-                        <Button size="small" icon={<Sparkles className="size-3.5" />} onClick={createAndClose}>
-                            {t("chat.newSession")}
-                        </Button>
-                    </div>
-                </div>
-                <div ref={scrollRef} className="hover-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-5">
-                    <div className="mx-auto flex max-w-3xl flex-col gap-4">
-                        {!activeSession || activeSession.messages.length === 0 ? (
-                            <div className="flex flex-col items-center justify-center gap-4 py-16 text-center">
-                                <div className="rounded-2xl bg-stone-100 p-3 dark:bg-stone-800">
-                                    <MessagesSquare className="size-6 text-stone-500" />
-                                </div>
-                                <div className="space-y-1">
-                                    <div className="text-base font-medium">{t("chat.emptyTitle")}</div>
-                                    <div className="text-sm text-stone-500 dark:text-stone-400">{t("chat.emptyHint")}</div>
-                                </div>
-                                <div className="flex flex-wrap justify-center gap-2">
-                                    {[
-                                        { key: "write", text: t("chat.example.write") },
-                                        { key: "optimize", text: t("chat.example.optimize") },
-                                        { key: "generate", text: t("chat.example.generate") },
-                                    ].map((item) => (
-                                        <Button key={item.key} size="small" onClick={() => setInput(item.text)}>
-                                            {item.text}
-                                        </Button>
-                                    ))}
-                                </div>
-                            </div>
-                        ) : (
-                            activeSession.messages.map((item, index) => (
-                                <ChatMessage key={item.id} message={item} onRetry={item.role === "error" ? () => retryMessage(index) : undefined} onUseReference={useReference} />
-                            ))
-                        )}
-                        {running && streamingText ? (
-                            <div className="flex justify-start">
-                                <div className="w-full min-w-0">
-                                    <Streamdown className="agent-streamdown text-sm leading-7">{streamingText}</Streamdown>
-                                </div>
-                            </div>
-                        ) : null}
-                        {runningTool ? (
-                            <div className="flex items-center gap-2 text-xs text-stone-500 dark:text-stone-400">
-                                <Spin size="small" />
-                                {runningTool.tool === "generate_image" ? t("chat.tools.names.generate_image") : runningTool.tool === "apply_prompt" ? t("chat.tools.names.apply_prompt") : runningTool.tool}
-                                {typeof runningTool.arguments.prompt === "string" ? <span className="truncate">：{runningTool.arguments.prompt}</span> : null}
-                            </div>
-                        ) : null}
-                        {running && !streamingText && !runningTool ? (
-                            <div className="flex items-center gap-2 text-xs text-stone-400">
-                                <Spin size="small" />
-                                {t("chat.thinking")}
-                            </div>
-                        ) : null}
-                    </div>
-                </div>
-                <ChatComposer
-                    value={input}
-                    onChange={setInput}
-                    onSend={() => void send()}
-                    onStop={stop}
-                    running={running}
-                    modelLabel={textModel ? modelLabelOf(textModel) : ""}
-                    references={references}
-                    onAddFiles={(files) => void addReferenceFiles(files)}
-                    onRemoveReference={(id) => setReferences((current) => current.filter((item) => item.id !== id))}
-                    quotaHint={quotaHint}
-                />
-            </div>
         </div>
     );
 }

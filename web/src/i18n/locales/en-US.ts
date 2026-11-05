@@ -830,6 +830,7 @@ export default {
         },
     },
     chat: {
+        sessionList: "Chats",
         title: "AI Chat",
         subtitle: "Built-in creation assistant · no local Agent",
         internalOnly: "Built-in assistant, no Agent connection",

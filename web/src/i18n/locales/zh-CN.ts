@@ -830,6 +830,7 @@ export default {
         },
     },
     chat: {
+        sessionList: "对话列表",
         title: "AI 对话",
         subtitle: "内置创作助手 · 不连接本地 Agent",
         internalOnly: "内置助手，无需连接 Agent",

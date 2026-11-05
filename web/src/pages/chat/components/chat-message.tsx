@@ -21,7 +21,7 @@ function PromptCard({ text }: { text: string }) {
         message.success(t("chat.actions.filledWorkbench"));
     };
     return (
-        <div className="overflow-hidden rounded-xl border border-stone-200 bg-stone-50 dark:border-stone-800 dark:bg-stone-900/60">
+        <div className="overflow-hidden rounded-xl border border-stone-200 bg-black/[.025] dark:border-stone-800 dark:bg-white/[.04]">
             <div className="flex items-center justify-between gap-2 border-b border-stone-200 px-3 py-1.5 text-[11px] text-stone-500 dark:border-stone-800 dark:text-stone-400">
                 <span>{t("chat.promptCard")}</span>
                 <span className="tabular-nums">{text.length}</span>
@@ -132,7 +132,7 @@ export function ChatMessage({ message, onRetry, onUseReference }: { message: Age
     if (message.role === "tool") {
         return (
             <div className="flex justify-start">
-                <div className="w-full min-w-0 space-y-2 rounded-xl border border-stone-200 bg-stone-50/70 px-3 py-2 dark:border-stone-800 dark:bg-stone-900/40">
+                <div className="w-full min-w-0 space-y-2 rounded-lg border border-stone-200 bg-black/[.02] px-3 py-2.5 dark:border-stone-800 dark:bg-white/[.03]">
                     <div className="flex items-center gap-2 text-xs font-medium text-stone-600 dark:text-stone-300">
                         <Wrench className="size-3.5" />
                         {toolLabel(message.call.tool, t)}
