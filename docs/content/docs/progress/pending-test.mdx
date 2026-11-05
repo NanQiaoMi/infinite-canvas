@@ -85,3 +85,17 @@ The Chinese version contains the complete item-by-item acceptance checklist.
 - 分辨率为自动时保留比例选择，比例为自动时禁用 W/H；手动输入 W/H 后，对齐开关仍应按原有方式工作。
 - Gemini 请求应带 aspectRatio（所选比例）；分辨率选了 1K / 2K / 4K 时应按尺寸表带上 imageConfig.imageSize，选自动时不带。质量不参与分辨率换算，视频尺寸设置保持原有行为。
 - 图像质量可选自动与 5 档（低 / 中 / 高 / 极高 / 最高），请求里的 quality 字段应与所选档位一致，且尺寸不随质量变化。
+
+## 服务端模式：额度与管理员（本地方案）
+
+验收步骤：
+
+1. `cp .env.example .env` 并设置 `ADMIN_PASSWORD`，执行 `docker compose -f docker-compose.local.yml up -d --build`。
+2. 用全新的浏览器配置打开 `http://localhost:3002`：无需任何配置，顶栏应显示图片额度 `今日 x/100`。
+3. 打开 `http://localhost:3002/admin`，用 `.env` 中的管理员账号登录；新增渠道（Base URL + API Key + 模型），设置默认模型并保存。
+4. 生成一张图片：应成功并扣减额度；`/admin` 的「用户与 IP」应出现该访客的浏览器指纹、IP、UA、今日/本周用量。
+5. 在「额度策略」把图片每日额度改为 1，再生成两次：第二次应被拦截并提示重置时间；在「用户与 IP」重置该访客额度后可继续生成。
+6. 跨过自然日（或调整测试数据库时间）后日额度自动恢复；跨过周一后周额度自动恢复。
+7. 连续输错管理员密码应触发限流；未登录访问 `/api/admin/*` 应返回 401。
+8. 静态模式回归：停掉服务端容器后，通过静态部署（或上游镜像）打开前端，原有浏览器本地渠道配置仍可用，且不出现额度 UI。
+9. 确认浏览器始终拿不到真实 Key：生成请求中不存在 `Authorization: Bearer sk-...`；管理后台渠道列表只显示掩码 Key。

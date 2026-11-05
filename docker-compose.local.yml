@@ -1,9 +1,17 @@
 services:
   app:
-    image: infinite-canvas:local
+    image: infinite-canvas:server
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.server
+    container_name: infinite-canvas
     ports:
-      - "3000:3000"
+      - "3002:3000"
     restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - ./data:/app/data

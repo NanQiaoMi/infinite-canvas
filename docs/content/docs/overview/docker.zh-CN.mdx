@@ -89,3 +89,20 @@ docker run -d -p 3000:3000 \
 <Callout type="warn">
 请只在你自己的站点上配置统计 ID，不要把 ID 提交进仓库；fork 或自托管本项目的用户默认不会产生任何统计。
 </Callout>
+
+## 服务端模式（额度与管理员）
+
+本仓库额外提供可选的本地服务端模式（`Dockerfile.server`），不属于上游静态镜像。
+
+- AI 渠道与 API Key 只保存在服务端，普通用户打开网站即可直接生成，无需配置。
+- 服务端按 IP + 浏览器指纹记录匿名访客，并强制校验按能力的图片日/周额度（默认每日 100 张、每周 700 张），到点自动刷新。
+- `/admin` 提供渠道管理、额度策略、使用统计、访客记录、手动重置额度与封禁访客。
+
+```bash
+cp .env.example .env      # 至少设置 ADMIN_PASSWORD
+docker compose -f docker-compose.local.yml up -d --build
+# 普通用户入口：http://localhost:3002
+# 管理后台：   http://localhost:3002/admin
+```
+
+数据（SQLite 与签名密钥）保存在 `./data`，重启或升级不会丢失。静态部署（GitHub Pages、Vercel、Render、上游镜像）仍按静态模式工作，不受影响。

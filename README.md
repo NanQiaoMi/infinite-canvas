@@ -140,7 +140,7 @@ bun install
 bun run dev
 ```
 
-### Docker 运行
+### Docker 运行（静态模式）
 
 ```bash
 git clone git@github.com:basketikun/infinite-canvas.git
@@ -153,6 +153,24 @@ docker compose up -d
 首次打开后进入右上角配置，填入自己的 OpenAI 兼容 `Base URL` 和 `API Key`。
 
 如果默认的OpenAI接口调用方式与您的API不同，可自定义生图/视频脚本调用。
+
+### 服务端模式（管理员统一配置 + 额度 + 访客记录）
+
+本仓库额外提供一套本地服务端模式（上游发布镜像仍为静态模式，不受影响）：
+
+- API Key、渠道与模型只保存在服务端，普通用户打开即用，无需配置；
+- 服务端记录匿名访客的 IP 与浏览器指纹，图片额度默认每日 100 张 / 每周 700 张并自动刷新；
+- `/admin` 管理后台可管理渠道、默认模型、按能力额度、IP 上限、使用统计与访客记录，并支持手动重置额度与封禁访客。
+
+```bash
+cp .env.example .env      # 至少修改 ADMIN_PASSWORD
+docker compose -f docker-compose.local.yml up -d --build
+```
+
+- 普通用户入口：`http://localhost:3002`
+- 管理后台：`http://localhost:3002/admin`
+
+数据保存在 `./data`（SQLite 与签名密钥），升级或重启不会丢失。
 
 ## 效果展示
 

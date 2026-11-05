@@ -60,3 +60,20 @@ services:
 ```
 
 SPA route changes automatically report page views to enabled providers. Only configure analytics IDs on sites you control, and do not commit them to the repository.
+
+## Server mode (local quota and admin)
+
+This repository also ships an optional local server mode (`Dockerfile.server`). It is not part of the upstream static image.
+
+- AI channels and API keys live on the server; visitors only need to open the site and generate.
+- The server records anonymous visitors by IP and browser fingerprint, and enforces per-capability daily/weekly image quotas (default 100/day, 700/week) refreshed automatically.
+- `/admin` provides channel management, quota policy, usage statistics, visitor records, manual quota reset and visitor blocking.
+
+```bash
+cp .env.example .env      # set ADMIN_PASSWORD
+docker compose -f docker-compose.local.yml up -d --build
+# app:   http://localhost:3002
+# admin: http://localhost:3002/admin
+```
+
+Data (SQLite and signing key) is stored in `./data` and survives restarts. Static deployments (GitHub Pages, Vercel, Render, the upstream image) keep working in static mode without any server.
