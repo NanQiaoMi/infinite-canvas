@@ -8,6 +8,7 @@ import { getMediaBlob, resolveMediaUrl, uploadMediaFile, type UploadedFile } fro
 import { imageToDataUrl } from "@/services/image-storage";
 import { boolConfig, buildApiUrl, modelOptionName, resolveModelRequestConfig, resolveModelScript, withLocalProxy, type AiConfig } from "@/stores/use-config-store";
 import { runModelPlugin } from "./model-plugin";
+import { assertQuotaAvailable } from "./quota-guard";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 
@@ -70,6 +71,7 @@ function videoTaskFailed(message: string) {
 }
 
 export async function createVideoGenerationTask(config: AiConfig, prompt: string, references: ReferenceImage[] = [], options?: VideoMediaOptions): Promise<VideoGenerationTask> {
+    assertQuotaAvailable("video");
     const selectedModel = (config.model || config.videoModel).trim();
     const requestConfig = resolveModelRequestConfig(config, selectedModel);
     const script = resolveModelScript(config, selectedModel);

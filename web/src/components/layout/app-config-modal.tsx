@@ -1,6 +1,6 @@
 import { App, Button, Form, Input, Modal, Progress, Radio, Select, Switch, Tabs } from "antd";
 import type { TFunction } from "i18next";
-import { Cloud, Download, Pencil, Plus, RefreshCw, Trash2, Upload, Wifi } from "lucide-react";
+import { Cloud, Download, Pencil, Plus, RefreshCw, ShieldCheck, Trash2, Upload, Wifi } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -61,6 +61,7 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
     const [webdavDomainProgress, setWebdavDomainProgress] = useState(createWebdavDomainProgress);
     const config = useConfigStore((state) => state.config);
     const webdav = useConfigStore((state) => state.webdav);
+    const serverMode = useConfigStore((state) => state.serverMode);
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const updateWebdavConfig = useConfigStore((state) => state.updateWebdavConfig);
     const shouldPromptContinue = useConfigStore((state) => state.shouldPromptContinue);
@@ -71,13 +72,16 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
     const locale = i18n.resolvedLanguage as AppLocale;
     const imageResolutionOptions = mediaScaleOptions.map((value) => ({ value, label: value === "auto" ? t("settingsPanels.common.auto") : value.toUpperCase() }));
     useEffect(() => setActiveTab(initialTab), [initialTab]);
+    useEffect(() => {
+        if (serverMode && (activeTab === "channels" || activeTab === "local-proxy")) setActiveTab("preferences");
+    }, [activeTab, serverMode]);
 
     const saveConfig = (nextConfig: AiConfig) => {
         (Object.keys(nextConfig) as Array<keyof AiConfig>).forEach((key) => updateConfig(key, nextConfig[key]));
     };
 
     const finishConfig = () => {
-        const ready = config.channels.some((channel) => channel.baseUrl.trim() && channel.apiKey.trim() && channel.models.length);
+        const ready = serverMode || config.channels.some((channel) => channel.baseUrl.trim() && channel.apiKey.trim() && channel.models.length);
         setConfigDialogOpen(false);
         if (!ready) return;
         message.success(t(shouldPromptContinue ? "config.savedContinue" : "config.saved"));
@@ -179,6 +183,12 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
                     <input ref={configInputRef} type="file" accept="application/json,.json" className="hidden" onChange={(event) => event.target.files?.[0] && void loadConfigFile(event.target.files[0])} />
                 </div>
             </div>
+            {serverMode ? (
+                <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs text-stone-500 dark:border-stone-800">
+                    <ShieldCheck className="size-4 shrink-0" />
+                    <span>{t("server.managedConfig")}</span>
+                </div>
+            ) : null}
             <Tabs
                 activeKey={activeTab}
                 onChange={(key) => setActiveTab(key as ConfigTabKey)}
@@ -350,7 +360,7 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
                         label: t("config.tabs.localStorage"),
                         children: <ConfigLocalStorage active={activeTab === "local-storage"} />,
                     },
-                ]}
+                ].filter((item) => !serverMode || (item.key !== "channels" && item.key !== "local-proxy"))}
             />
             {showDoneButton ? (
                 <div className="mt-4 flex justify-end">
@@ -359,7 +369,7 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
                     </Button>
                 </div>
             ) : null}
-            <ChannelEditorDrawer open={Boolean(editingChannel)} channel={editingChannel} onSave={saveChannel} onClose={() => setEditingChannelId("")} />
+            {serverMode ? null : <ChannelEditorDrawer open={Boolean(editingChannel)} channel={editingChannel} onSave={saveChannel} onClose={() => setEditingChannelId("")} />}
         </>
     );
 }

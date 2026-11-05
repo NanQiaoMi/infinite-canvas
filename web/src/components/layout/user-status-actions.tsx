@@ -1,10 +1,12 @@
 import type { CSSProperties } from "react";
 import { Tooltip } from "antd";
-import { BookOpen, Keyboard, Puzzle, Settings2 } from "lucide-react";
+import { BookOpen, Keyboard, Puzzle, Settings2, ShieldCheck } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
 
 import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
 import { GitHubLink } from "@/components/layout/github-link";
+import { QuotaIndicator } from "@/components/layout/quota-indicator";
 import { VersionReleaseModal } from "@/components/layout/version-release-modal";
 import { DOCS_URL } from "@/constant/env";
 import { changeAppLocale, type AppLocale } from "@/i18n";
@@ -25,6 +27,8 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
     const theme = useThemeStore((state) => state.theme);
     const setTheme = useThemeStore((state) => state.setTheme);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
+    const serverMode = useConfigStore((state) => state.serverMode);
+    const isAdmin = useConfigStore((state) => state.isAdmin);
     const canvasTheme = canvasThemes[theme];
     const naturalIconClass = "inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-stone-600 transition-colors hover:bg-black/5 hover:text-stone-950 dark:text-stone-300 dark:hover:bg-white/10 dark:hover:text-white [&_svg]:size-4";
     const iconStyle: CSSProperties | undefined = variant === "canvas" ? { color: canvasTheme.node.text } : undefined;
@@ -45,6 +49,17 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
             <a href={DOCS_URL} target="_blank" rel="noopener noreferrer" className={naturalIconClass} style={iconStyle} aria-label={t("topNav.docs")} title={t("topNav.docs")}>
                 <BookOpen className="size-4" />
             </a>
+            {serverMode ? (
+                <QuotaIndicator
+                    className="inline-flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-md px-1.5 text-[11px] text-stone-600 transition-colors hover:bg-black/5 hover:text-stone-950 dark:text-stone-300 dark:hover:bg-white/10 dark:hover:text-white [&_svg]:size-3.5"
+                    style={iconStyle}
+                />
+            ) : null}
+            {serverMode && isAdmin ? (
+                <Link to="/admin" className={naturalIconClass} style={iconStyle} aria-label={t("server.admin.entry")} title={t("server.admin.entry")}>
+                    <ShieldCheck className="size-4" />
+                </Link>
+            ) : null}
             {showConfig ? (
                 <button type="button" className={naturalIconClass} style={iconStyle} onClick={() => openConfigDialog(false)} aria-label={t("navigation.config")} title={t("navigation.config")}>
                     <Settings2 className="size-4" />

@@ -4,6 +4,7 @@ import { persist } from "zustand/middleware";
 import { nanoid } from "nanoid";
 
 import i18n from "@/i18n";
+import type { BootstrapResponse, PublicSettings, ServerChannel } from "@/types/server";
 
 export type ApiCallFormat = "openai" | "gemini";
 export type ModelCapability = "image" | "video" | "text" | "audio";
@@ -73,6 +74,8 @@ export type ChannelCredentialsImportResult = {
 };
 
 export const CONFIG_STORE_KEY = "infinite-canvas:ai_config_store";
+/** 服务端模式下前端持有的占位 Key：真实 Key 只存在于服务端。 */
+export const SERVER_MANAGED_KEY = "__server_managed__";
 const CHANNEL_MODEL_SEPARATOR = "::";
 const OPENAI_BASE_URL = "https://api.openai.com";
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com";
@@ -141,6 +144,12 @@ type ConfigStore = {
     isConfigOpen: boolean;
     configTab: ConfigTabKey;
     shouldPromptContinue: boolean;
+    serverMode: boolean;
+    bootstrapped: boolean;
+    bootstrapChecked: boolean;
+    serverChannels: ServerChannel[];
+    publicSettings: PublicSettings;
+    isAdmin: boolean;
     updateConfig: <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
     importChannelCredentials: (input: { baseUrl?: string | null; apiKey?: string | null }) => ChannelCredentialsImportResult;
     updateWebdavConfig: <K extends keyof WebdavSyncConfig>(key: K, value: WebdavSyncConfig[K]) => void;
@@ -148,6 +157,8 @@ type ConfigStore = {
     openConfigDialog: (shouldPromptContinue?: boolean, tab?: ConfigTabKey) => void;
     setConfigDialogOpen: (isOpen: boolean) => void;
     clearPromptContinue: () => void;
+    applyServerBootstrap: (bootstrap: BootstrapResponse) => void;
+    markBootstrapChecked: () => void;
 };
 
 const VIDEO_KEYWORDS = ["video", "sora", "veo", "kling", "wan", "hailuo"];
@@ -220,6 +231,12 @@ export const useConfigStore = create<ConfigStore>()(
             isConfigOpen: false,
             configTab: "channels",
             shouldPromptContinue: false,
+            serverMode: false,
+            bootstrapped: false,
+            bootstrapChecked: false,
+            serverChannels: [],
+            publicSettings: { allowModelSelection: true, announcement: "" },
+            isAdmin: false,
             updateConfig: (key, value) =>
                 set((state) => ({
                     config: {
@@ -227,6 +244,51 @@ export const useConfigStore = create<ConfigStore>()(
                         [key]: value,
                     },
                 })),
+            applyServerBootstrap: (bootstrap) => {
+                const channels: ModelChannel[] = bootstrap.channels.map((channel) => ({
+                    id: channel.id,
+                    name: channel.name,
+                    baseUrl: channel.baseUrl,
+                    apiKey: SERVER_MANAGED_KEY,
+                    apiFormat: channel.apiFormat,
+                    models: channel.models.map((model) => ({ name: model.name, capability: model.capability, script: model.script })),
+                }));
+                const current = get().config;
+                const encodedModels = modelOptionsFromChannels(channels);
+                const hasCapabilityModel = (value: string, capability: ModelCapability) => {
+                    const decoded = decodeChannelModel(value);
+                    const name = decoded?.model || value;
+                    return channels.some((channel) => channel.models.some((model) => model.name === name && model.capability === capability));
+                };
+                const pickModel = (capability: ModelCapability, currentValue: string, serverDefault: string) => {
+                    const normalizedCurrent = normalizeModelOptionValue(currentValue, channels);
+                    if (normalizedCurrent && hasCapabilityModel(normalizedCurrent, capability)) return normalizedCurrent;
+                    const normalizedDefault = normalizeModelOptionValue(serverDefault, channels);
+                    if (normalizedDefault && hasCapabilityModel(normalizedDefault, capability)) return normalizedDefault;
+                    return encodedModels.find((value) => hasCapabilityModel(value, capability)) || "";
+                };
+                set({
+                    config: {
+                        ...current,
+                        channelMode: "local",
+                        channels,
+                        models: encodedModels,
+                        baseUrl: channels[0]?.baseUrl || "",
+                        apiKey: channels[0] ? SERVER_MANAGED_KEY : "",
+                        apiFormat: channels[0]?.apiFormat || "openai",
+                        imageModel: pickModel("image", current.imageModel, bootstrap.defaultModels.image),
+                        videoModel: pickModel("video", current.videoModel, bootstrap.defaultModels.video),
+                        textModel: pickModel("text", current.textModel, bootstrap.defaultModels.text),
+                        audioModel: pickModel("audio", current.audioModel, bootstrap.defaultModels.audio),
+                    },
+                    serverMode: true,
+                    bootstrapped: true,
+                    serverChannels: bootstrap.channels,
+                    publicSettings: bootstrap.publicSettings,
+                    isAdmin: bootstrap.admin,
+                });
+            },
+            markBootstrapChecked: () => set({ bootstrapChecked: true }),
             importChannelCredentials: (input) => {
                 const currentConfig = get().config;
                 const result = upsertChannelCredentials(currentConfig, input);
@@ -499,6 +561,10 @@ export function normalizeLocalProxyUrl(value: string) {
 
 /** Prefix an outgoing request with the local forwarding proxy so the browser is not blocked by CORS. */
 export function withLocalProxy(url: string) {
+    if (useConfigStore.getState().serverMode) {
+        if (!/^https?:\/\//i.test(url)) return url;
+        return `/api/relay?url=${encodeURIComponent(url)}`;
+    }
     const { proxyEnabled, proxyUrl } = useConfigStore.getState().config;
     if (!proxyEnabled || !/^https?:\/\//i.test(url)) return url;
     const base = normalizeLocalProxyUrl(proxyUrl);

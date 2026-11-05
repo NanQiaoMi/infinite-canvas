@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import i18n from "@/i18n";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { modelOptionLabel, modelOptionName, selectableModelsByCapability, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
+import { modelOptionLabel, modelOptionName, selectableModelsByCapability, useConfigStore, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
 
 type ModelPickerProps = {
     config: AiConfig;
@@ -20,6 +20,7 @@ type ModelPickerProps = {
 
 export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder, onMissingConfig }: ModelPickerProps) {
     const { t } = useTranslation();
+    const selectionLocked = useConfigStore((state) => state.serverMode && !state.publicSettings.allowModelSelection);
     const pickerId = useId();
     const [open, setOpen] = useState(false);
     const options = useMemo(() => Array.from(new Set([...(config.channelMode === "local" && !capability ? [value] : []), ...selectableModelsByCapability(config, capability)].filter((model): model is string => Boolean(model)))), [capability, config, value]);
@@ -37,6 +38,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
     return (
         <Select
             open={open}
+            disabled={selectionLocked}
             value={current}
             onOpenChange={(nextOpen) => {
                 if (nextOpen && !options.length && config.channelMode === "local") onMissingConfig?.();

@@ -3,6 +3,7 @@ import axios from "axios";
 import i18n from "@/i18n";
 import { buildApiUrl, resolveModelRequestConfig, resolveModelScript, withLocalProxy, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
 import { normalizePluginImages, runModelPlugin } from "./model-plugin";
+import { assertQuotaAvailable } from "./quota-guard";
 import { nanoid } from "nanoid";
 import { dataUrlToFile } from "@/lib/image-utils";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
@@ -692,6 +693,7 @@ function parseGeminiImagePayload(payload: GeminiPayload) {
 }
 
 export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
+    assertQuotaAvailable("image");
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const script = resolveModelScript(config, config.model || config.imageModel);
@@ -752,6 +754,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
 }
 
 export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], options?: RequestOptions) {
+    assertQuotaAvailable("image");
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const requestPrompt = buildImageReferencePromptText(prompt, references);
