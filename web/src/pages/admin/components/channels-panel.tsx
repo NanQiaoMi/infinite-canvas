@@ -1,7 +1,7 @@
 import { App, Button, Drawer, Input, Popconfirm, Select, Space, Switch, Table, Tag } from "antd";
 import type { TableColumnsType } from "antd";
 import { CloudDownload, Pencil, Plus, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { ModelScriptEditor } from "@/components/layout/model-script-editor";
@@ -235,7 +235,15 @@ export function ChannelsPanel() {
         },
     ];
 
-    const modelOptions = channels.flatMap((channel) => channel.models.map((model) => ({ value: `${channel.id}::${model.name}`, label: `${model.name}（${channel.name}）` })));
+    const modelOptionsByCapability = useMemo(() => {
+        const result = { image: [], video: [], text: [], audio: [] } as Record<ServerCapability, Array<{ value: string; label: string }>>;
+        for (const channel of channels) {
+            for (const model of channel.models) {
+                result[model.capability].push({ value: `${channel.id}::${model.name}`, label: `${model.name}（${channel.name}）` });
+            }
+        }
+        return result;
+    }, [channels]);
 
     return (
         <div className="space-y-4">
@@ -254,9 +262,9 @@ export function ChannelsPanel() {
                             <span className="mb-1 block text-xs text-stone-500">{t(capabilityLabelKey(capability))}</span>
                             <Select
                                 className="w-full"
-                                value={defaultModels[capability] || undefined}
+                                value={modelOptionsByCapability[capability].some((option) => option.value === defaultModels[capability]) ? defaultModels[capability] : undefined}
                                 placeholder={t("server.admin.channels.defaultModelsEmpty")}
-                                options={modelOptions}
+                                options={modelOptionsByCapability[capability]}
                                 onChange={(value) => {
                                     const next = { ...defaultModels, [capability]: value };
                                     setDefaultModels(next);

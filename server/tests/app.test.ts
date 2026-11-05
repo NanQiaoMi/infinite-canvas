@@ -175,6 +175,37 @@ describe("管理员鉴权与渠道配置", () => {
         ctx.cleanup();
     });
 
+    test("默认模型只接受能力匹配的模型", async () => {
+        const ctx = await setup();
+        const adminCookie = await adminLogin(ctx);
+        await configureChannel(ctx, adminCookie);
+        const response = await request(ctx, "/api/admin/channels", {
+            method: "PUT",
+            headers: { "content-type": "application/json", cookie: adminCookie },
+            body: JSON.stringify({
+                channels: [
+                    {
+                        id: "ch1",
+                        name: "mock",
+                        baseUrl: upstreamBase,
+                        apiFormat: "openai",
+                        apiKey: "sk-test-key",
+                        models: [
+                            { name: "img-1", capability: "image" },
+                            { name: "txt-1", capability: "text" },
+                        ],
+                    },
+                ],
+                defaultModels: { image: "ch1::txt-1", text: "ch1::img-1" },
+            }),
+        });
+        expect(response.status).toBe(200);
+        const data = (await response.json()) as any;
+        expect(data.defaultModels.image).toBe("ch1::img-1");
+        expect(data.defaultModels.text).toBe("ch1::txt-1");
+        ctx.cleanup();
+    });
+
     test("管理员可测试渠道连通性并拉取模型列表", async () => {
         const ctx = await setup();
         const adminCookie = await adminLogin(ctx);

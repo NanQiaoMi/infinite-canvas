@@ -138,15 +138,16 @@ function stringValue(value: unknown): string {
 /** 默认模型使用前端既有编码：`channelId::modelName`。 */
 export function resolveDefaultModels(db: Database, channels: InternalChannel[]): Record<Capability, string> {
     const stored = getJsonSetting<Partial<Record<Capability, string>>>(db, DEFAULT_MODELS_KEY) ?? {};
-    const available = new Set<string>();
+    const available = new Map<string, Capability>();
     for (const channel of channels) {
         if (!channel.enabled) continue;
-        for (const model of channel.models) available.add(`${channel.id}::${model.name}`);
+        for (const model of channel.models) available.set(`${channel.id}::${model.name}`, model.capability);
     }
     const result = {} as Record<Capability, string>;
     for (const capability of CAPABILITIES) {
         const storedValue = stored[capability];
-        if (storedValue && available.has(storedValue)) {
+        // 默认模型必须与能力匹配，避免把文本模型设成默认图片模型等历史脏数据继续生效。
+        if (storedValue && available.get(storedValue) === capability) {
             result[capability] = storedValue;
             continue;
         }

@@ -1022,3 +1022,11 @@ cd web && bun run build   # 构建产物在无 /api 的静态服务器下打开�
 - 能力推断规则抽到 `web/src/lib/model-capability.ts` 并扩充：先视频（sora/veo/kling/seedance/wan2.x/i2v 等）→ 音频（tts/audio/whisper/transcribe 等）→ 图片（gpt-image/dall-e/flux/imagen/seedream/nano-banana/grok-imagine 等）→ 文本；补充单元测试覆盖 chatgpt2api 与常见厂商模型名。
 - 渠道列表展示能力分布（如「图片 4 · 文本 18」），编辑抽屉新增「重新识别能力」按钮。
 - 验证：chatgpt2api 真实拉取 22 个模型，自动识别为图片 4 + 文本 18；删除 1 个模型后重新拉取会弹出「共 1 个可导入模型 · 文本 1」确认框，批量设置/添加/保存均正常。
+
+### 16.3 默认模型选项按能力过滤（2026-11-05）
+
+管理员反馈「默认模型的图片下拉里混入了文本模型，文本下拉里混入了图片模型」。已修复：
+
+- 管理后台默认模型下拉按能力过滤：图片只列 image 模型、文本只列 text 模型、视频/音频同理；已保存的默认值若与能力不匹配则显示为空而不是错误值。
+- 服务端 `resolveDefaultModels` 增加能力校验：历史脏数据（如把文本模型设为默认图片模型）自动回退到该能力下第一个可用模型，避免生成时选错模型。
+- 验证：图片下拉仅 4 个 `gpt-image-*` 模型；文本下拉仅 `auto/gpt-* /research/...`，无图片模型；服务端测试新增能力不匹配回退用例（26 项通过）。
