@@ -1,5 +1,5 @@
 import { App, Button, Drawer, Spin } from "antd";
-import { Menu, MessagesSquare, Sparkles } from "lucide-react";
+import { Menu, Sparkles } from "lucide-react";
 import { nanoid } from "nanoid";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -16,10 +16,12 @@ import { uploadImage } from "@/services/image-storage";
 import { selectableModelsByCapability, useConfigStore } from "@/stores/use-config-store";
 import { useConversationAgentStore } from "@/stores/use-conversation-agent-store";
 import { useQuotaStore } from "@/stores/use-quota-store";
+import { cn } from "@/lib/utils";
 
 import { ChatComposer } from "./components/chat-composer";
 import { ChatMessage } from "./components/chat-message";
 import { ChatSessionList } from "./components/chat-session-list";
+import { GenerationWaiting, ThinkingLine } from "./components/generation-waiting";
 
 const modelLabelOf = (option: string) => option.split("::").pop() || option;
 const NETWORK_ERROR_PATTERN = /network error|failed to fetch|load failed|networkerror|econnreset|socket hang up|fetch failed/i;
@@ -51,6 +53,7 @@ export default function ChatPage() {
     const quotaHint = imageUsage && imageUsage.dailyLimit > 0 ? t("chat.quotaHint", { used: imageUsage.dailyUsed, limit: imageUsage.dailyLimit }) : "";
     const [input, setInput] = useState("");
     const [references, setReferences] = useState<AgentImageRef[]>([]);
+    const [turnStartedAt, setTurnStartedAt] = useState(0);
     const [pageContext, setPageContext] = useState<string | undefined>(undefined);
     const [listOpen, setListOpen] = useState(false);
     const controllerRef = useRef<AbortController | null>(null);
@@ -121,9 +124,34 @@ export default function ChatPage() {
 
     const send = useCallback(
         async (rawText?: string) => {
-            const text = (rawText ?? input).trim();
+            let text = (rawText ?? input).trim();
             if (!text) return;
             if (useConversationAgentStore.getState().running) return;
+            if (text.startsWith("/")) {
+                const [command, ...rest] = text.split(/\s+/);
+                const payload = rest.join(" ").trim();
+                if (command === "/new") {
+                    createSession();
+                    setInput("");
+                    return;
+                }
+                if (command === "/help") {
+                    let sessionId = useConversationAgentStore.getState().activeSessionId;
+                    if (!sessionId) sessionId = createSession();
+                    appendMessages(sessionId, [{ id: nanoid(), role: "assistant", text: t("chat.commands.helpText"), promptBlocks: [], createdAt: Date.now() }]);
+                    setInput("");
+                    return;
+                }
+                if (command === "/prompt" && payload) text = t("chat.commands.promptPrefix", { text: payload });
+                else if (command === "/image" && payload) text = t("chat.commands.imagePrefix", { text: payload });
+                else if (command === "/edit") {
+                    if (!references.length) {
+                        message.warning(t("chat.commands.editNeedsReference"));
+                        return;
+                    }
+                    if (payload) text = t("chat.commands.editPrefix", { text: payload });
+                }
+            }
             let sessionId = useConversationAgentStore.getState().activeSessionId;
             if (!sessionId) sessionId = createSession();
             const attachments = references.length ? references : undefined;
@@ -131,6 +159,7 @@ export default function ChatPage() {
             setReferences([]);
             setInput("");
             setStreamingText("");
+            setTurnStartedAt(Date.now());
             setRunning(true);
             const controller = new AbortController();
             controllerRef.current = controller;
@@ -145,7 +174,10 @@ export default function ChatPage() {
                     executeTool: (call, context) => executeAgentTool(call, context),
                     onEvent: (event: AgentEvent) => {
                         if (event.type === "assistant-stream") setStreamingText(event.text);
-                        else if (event.type === "tool-start") setRunningTool(event.call);
+                        else if (event.type === "tool-start") {
+                            setStreamingText("");
+                            setRunningTool(event.call);
+                        }
                         else if (event.type === "tool-end") setRunningTool(null);
                     },
                     signal: controller.signal,
@@ -167,6 +199,7 @@ export default function ChatPage() {
                 setRunning(false);
                 setStreamingText("");
                 setRunningTool(null);
+                setTurnStartedAt(0);
                 useQuotaStore.getState().scheduleRefresh();
             }
         },
@@ -224,74 +257,92 @@ export default function ChatPage() {
         );
     }
 
+    const welcome = (
+        <div className="flex flex-1 flex-col items-center justify-center gap-6 py-12 text-center">
+            <div className="flex size-14 items-center justify-center rounded-2xl border border-stone-200 bg-gradient-to-br from-white to-stone-100 shadow-sm dark:border-stone-800 dark:from-stone-900 dark:to-stone-950">
+                <Sparkles className="size-6 text-stone-600 dark:text-stone-300" />
+            </div>
+            <div className="space-y-2">
+                <h2 className="text-lg font-semibold text-stone-950 dark:text-stone-100">{t("chat.welcome.title")}</h2>
+                <p className="mx-auto max-w-md text-sm leading-6 text-stone-500 dark:text-stone-400">{t("chat.welcome.description")}</p>
+            </div>
+            <div className="flex flex-wrap justify-center gap-1.5">
+                {[t("chat.welcome.capabilities.prompts"), t("chat.welcome.capabilities.images"), t("chat.welcome.capabilities.edit"), t("chat.welcome.capabilities.workbench")].map((capability) => (
+                    <span key={capability} className="rounded-full border border-stone-200 px-2.5 py-1 text-[11px] text-stone-500 dark:border-stone-700 dark:text-stone-400">
+                        {capability}
+                    </span>
+                ))}
+            </div>
+            <div className="w-full max-w-md space-y-1 text-left font-mono text-xs">
+                {[t("chat.welcome.examples.prompt"), t("chat.welcome.examples.image"), t("chat.welcome.examples.edit")].map((command) => (
+                    <button
+                        key={command}
+                        type="button"
+                        className="group flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-stone-500 transition hover:bg-black/[.03] hover:text-stone-800 dark:text-stone-400 dark:hover:bg-white/[.05] dark:hover:text-stone-100"
+                        onClick={() => setInput(command)}
+                    >
+                        <span className="text-emerald-600 dark:text-emerald-400">❯</span>
+                        <span className="truncate">{command}</span>
+                        <span className="ml-auto text-[10px] text-stone-300 opacity-0 transition group-hover:opacity-100 dark:text-stone-600">↵</span>
+                    </button>
+                ))}
+            </div>
+        </div>
+    );
+
     return (
         <div className="flex h-full flex-col overflow-hidden bg-stone-50 text-stone-900 dark:bg-stone-950 dark:text-stone-100">
-            <main className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-hidden p-3 lg:grid-cols-[260px_minmax(0,1fr)]">
+            <main className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-hidden p-3 lg:grid-cols-[240px_minmax(0,1fr)]">
                 <aside className="thin-scrollbar hidden min-h-0 flex-col overflow-hidden rounded-lg border border-stone-200 bg-card shadow-sm lg:flex dark:border-stone-800">{sessionList}</aside>
                 <section className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-stone-200 bg-card shadow-sm dark:border-stone-800">
-                    <div className="flex shrink-0 items-center gap-2 border-b border-stone-200 px-4 py-3 dark:border-stone-800">
+                    <div className="flex shrink-0 items-center gap-2.5 border-b border-stone-200 px-4 py-2.5 dark:border-stone-800">
                         <Button className="lg:!hidden" size="small" type="text" icon={<Menu className="size-4" />} onClick={() => setListOpen(true)} />
-                        <div className="min-w-0">
-                            <div className="flex items-center gap-2">
-                                <MessagesSquare className="size-4 text-stone-400 dark:text-stone-500" />
-                                <h1 className="text-base font-semibold text-stone-950 dark:text-stone-100">{t("chat.title")}</h1>
-                            </div>
-                            <p className="mt-0.5 hidden truncate text-xs text-stone-500 sm:block dark:text-stone-400">{t("chat.subtitle")}</p>
-                        </div>
+                        <span className="relative flex size-2">
+                            <span className={cn("absolute inline-flex size-full rounded-full bg-emerald-400 opacity-60", running && "animate-ping")} />
+                            <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
+                        </span>
+                        <span className="min-w-0 truncate text-sm font-medium text-stone-900 dark:text-stone-100">{activeSession?.title || t("chat.welcome.title")}</span>
+                        <span className="hidden items-center gap-1 rounded border border-stone-200 px-1.5 py-px font-mono text-[10px] text-stone-400 sm:inline-flex dark:border-stone-700 dark:text-stone-500">
+                            agent · {textModel ? modelLabelOf(textModel) : "-"}
+                        </span>
                         <div className="ml-auto flex shrink-0 items-center gap-1.5">
+                            <span className="hidden text-[11px] text-stone-400 md:inline dark:text-stone-500">{quotaHint}</span>
                             <Button size="small" icon={<Sparkles className="size-3.5" />} onClick={createAndClose}>
                                 {t("chat.newSession")}
                             </Button>
                         </div>
                     </div>
-                    <div ref={scrollRef} className="hover-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-5">
-                        <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
-                            {!activeSession || activeSession.messages.length === 0 ? (
-                                <div className="flex flex-col items-center justify-center gap-4 py-16 text-center">
-                                    <div className="flex size-12 items-center justify-center rounded-lg border border-stone-200 bg-background dark:border-stone-800">
-                                        <MessagesSquare className="size-5 text-stone-400 dark:text-stone-500" />
-                                    </div>
-                                    <div className="space-y-1">
-                                        <div className="text-base font-semibold text-stone-900 dark:text-stone-100">{t("chat.emptyTitle")}</div>
-                                        <div className="text-sm text-stone-500 dark:text-stone-400">{t("chat.emptyHint")}</div>
-                                    </div>
-                                    <div className="flex flex-wrap justify-center gap-2">
-                                        {[
-                                            { key: "write", text: t("chat.example.write") },
-                                            { key: "optimize", text: t("chat.example.optimize") },
-                                            { key: "generate", text: t("chat.example.generate") },
-                                        ].map((item) => (
-                                            <Button key={item.key} size="small" onClick={() => setInput(item.text)}>
-                                                {item.text}
-                                            </Button>
-                                        ))}
-                                    </div>
-                                </div>
-                            ) : (
-                                activeSession.messages.map((item, index) => (
-                                    <ChatMessage key={item.id} message={item} onRetry={item.role === "error" ? () => retryMessage(index) : undefined} onUseReference={useReference} />
-                                ))
-                            )}
+                    <div ref={scrollRef} className="hover-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
+                        <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col gap-5">
+                            {!activeSession || activeSession.messages.length === 0
+                                ? welcome
+                                : activeSession.messages.map((item, index) => (
+                                      <ChatMessage key={item.id} message={item} onRetry={item.role === "error" ? () => retryMessage(index) : undefined} onUseReference={useReference} />
+                                  ))}
                             {running && streamingText ? (
-                                <div className="flex justify-start">
-                                    <div className="w-full min-w-0">
-                                        <Streamdown className="agent-streamdown text-sm leading-7">{streamingText}</Streamdown>
+                                <div className="relative pl-6">
+                                    <span className="absolute left-0 top-[7px] flex size-4 items-center justify-center">
+                                        <span className="size-[7px] animate-pulse rounded-full bg-emerald-500" />
+                                    </span>
+                                    <div className="mb-1 flex items-center gap-2 text-[11px] text-stone-400 dark:text-stone-500">
+                                        <span className="font-medium text-stone-500 dark:text-stone-400">Agent</span>
+                                        <span>{t("chat.streaming")}</span>
+                                    </div>
+                                    <div className="agent-cursor">
+                                        <Streamdown className="agent-streamdown text-sm leading-7 text-stone-800 dark:text-stone-200">{streamingText}</Streamdown>
                                     </div>
                                 </div>
                             ) : null}
-                            {runningTool ? (
-                                <div className="flex items-center gap-2 rounded-md bg-black/[.025] px-3 py-2 text-xs text-stone-500 dark:bg-white/[.05] dark:text-stone-400">
-                                    <Spin size="small" />
-                                    {runningTool.tool === "generate_image" ? t("chat.tools.names.generate_image") : runningTool.tool === "edit_image" ? t("chat.tools.names.edit_image") : runningTool.tool === "apply_prompt" ? t("chat.tools.names.apply_prompt") : runningTool.tool}
-                                    {typeof runningTool.arguments.prompt === "string" ? <span className="truncate">：{runningTool.arguments.prompt}</span> : null}
+                            {runningTool && (runningTool.tool === "generate_image" || runningTool.tool === "edit_image") ? (
+                                <GenerationWaiting call={runningTool} startedAt={turnStartedAt || Date.now()} />
+                            ) : null}
+                            {runningTool && runningTool.tool === "apply_prompt" ? (
+                                <div className="flex items-center gap-2 pl-6 font-mono text-xs text-stone-400 dark:text-stone-500">
+                                    <span className="inline-block size-2 animate-pulse rounded-full bg-amber-500" />
+                                    apply_prompt · {t("chat.tools.names.apply_prompt")}
                                 </div>
                             ) : null}
-                            {running && !streamingText && !runningTool ? (
-                                <div className="flex items-center gap-2 text-xs text-stone-400 dark:text-stone-500">
-                                    <Spin size="small" />
-                                    {t("chat.thinking")}
-                                </div>
-                            ) : null}
+                            {running && !streamingText && !runningTool ? <ThinkingLine startedAt={turnStartedAt || Date.now()} /> : null}
                         </div>
                     </div>
                     <ChatComposer

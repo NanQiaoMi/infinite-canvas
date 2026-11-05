@@ -68,8 +68,8 @@ export function ImageResultCard({ image, onUseAsReference }: { image: AgentImage
                 )}
             </div>
             <div className="flex items-center justify-between gap-1 px-2 py-1.5">
-                <span className="min-w-0 truncate text-[11px] text-stone-400">
-                    {image.model} · {image.width}×{image.height}
+                <span className="min-w-0 truncate text-[10px] tabular-nums text-stone-400 dark:text-stone-500">
+                    {image.width}×{image.height}
                 </span>
                 <div className="flex shrink-0 items-center">
                     <Tooltip title={t("chat.actions.download")}>
