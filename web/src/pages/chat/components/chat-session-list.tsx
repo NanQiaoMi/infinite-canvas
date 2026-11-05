@@ -1,5 +1,5 @@
-import { Button, Input, Modal, Popconfirm } from "antd";
-import { MessageSquare, Pencil, Plus, Trash2 } from "lucide-react";
+import { App, Dropdown, Input, Modal } from "antd";
+import { MoreHorizontal, SquarePen } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -13,17 +13,13 @@ type ChatSessionListProps = {
     onCreate: () => void;
     onDelete: (id: string) => void;
     onRename: (id: string, title: string) => void;
+    modelLabel?: string;
+    quotaHint?: string;
 };
 
-function formatSessionTime(timestamp: number) {
-    const date = new Date(timestamp);
-    const now = new Date();
-    if (date.toDateString() === now.toDateString()) return date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
-    return `${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
-
-export function ChatSessionList({ sessions, activeSessionId, onSelect, onCreate, onDelete, onRename }: ChatSessionListProps) {
+export function ChatSessionList({ sessions, activeSessionId, onSelect, onCreate, onDelete, onRename, modelLabel, quotaHint }: ChatSessionListProps) {
     const { t } = useTranslation();
+    const { modal } = App.useApp();
     const [renameId, setRenameId] = useState<string | null>(null);
     const [renameValue, setRenameValue] = useState("");
     const renameSession = sessions.find((session) => session.id === renameId);
@@ -31,47 +27,75 @@ export function ChatSessionList({ sessions, activeSessionId, onSelect, onCreate,
         setRenameId(session.id);
         setRenameValue(session.title);
     };
+    const confirmDelete = (session: AgentSession) => {
+        modal.confirm({
+            title: t("chat.delete"),
+            content: t("chat.deleteConfirm"),
+            okText: t("common.delete"),
+            okButtonProps: { danger: true },
+            cancelText: t("common.cancel"),
+            onOk: () => onDelete(session.id),
+        });
+    };
     return (
         <div className="flex h-full min-h-0 flex-col">
-            <div className="flex shrink-0 items-center justify-between gap-2 border-b border-stone-200 px-3 py-3 dark:border-stone-800">
-                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-stone-400 dark:text-stone-500">
-                    <MessageSquare className="size-3.5" />
-                    {t("chat.sessionList")}
+            <div className="shrink-0 px-3 pb-1 pt-4">
+                <div className="flex items-center gap-2 px-1 pb-4">
+                    <span
+                        className="size-5 shrink-0 bg-stone-800 dark:bg-stone-100"
+                        style={{ mask: "url(/logo.svg) center / contain no-repeat", WebkitMask: "url(/logo.svg) center / contain no-repeat" }}
+                    />
+                    <span className="text-[13px] font-semibold tracking-tight text-stone-900 dark:text-stone-100">{t("meta.title")}</span>
+                    <span className="rounded border border-stone-300/80 px-1 font-mono text-[9px] uppercase tracking-widest text-stone-400 dark:border-stone-700 dark:text-stone-500">agent</span>
                 </div>
-                <Button size="small" type="text" icon={<Plus className="size-4" />} onClick={onCreate} title={t("chat.newSession")} />
+                <button
+                    type="button"
+                    className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-[13px] text-stone-600 transition hover:bg-black/[.045] dark:text-stone-300 dark:hover:bg-white/[.06]"
+                    onClick={onCreate}
+                >
+                    <SquarePen className="size-4 text-stone-500 dark:text-stone-400" />
+                    {t("chat.newSession")}
+                </button>
+                <div className="mt-5 px-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-stone-400/90 dark:text-stone-500">{t("chat.sidebar.recents")}</div>
             </div>
-            <div className="hover-scrollbar min-h-0 flex-1 space-y-0.5 overflow-y-auto p-2">
-                {sessions.length === 0 ? <div className="px-2 py-8 text-center text-xs text-stone-400 dark:text-stone-500">{t("chat.noSessions")}</div> : null}
+            <div className="hover-scrollbar min-h-0 flex-1 space-y-px overflow-y-auto px-2 pb-3">
+                {sessions.length === 0 ? <div className="px-2 py-6 text-center text-xs text-stone-400 dark:text-stone-500">{t("chat.sidebar.empty")}</div> : null}
                 {sessions.map((session) => {
                     const active = session.id === activeSessionId;
                     return (
-                        <div
-                            key={session.id}
-                            className={cn(
-                                "group flex items-center gap-1 rounded-md px-2 py-2 transition-colors",
-                                active ? "bg-black/[.055] dark:bg-white/[.09]" : "hover:bg-black/[.035] dark:hover:bg-white/[.06]",
-                            )}
-                        >
-                            <button type="button" className="min-w-0 flex-1 text-left" onClick={() => onSelect(session.id)} title={session.title || t("chat.untitled")}>
-                                <div className={cn("truncate text-[13px] leading-5", active ? "text-stone-950 dark:text-stone-100" : "text-stone-700 dark:text-stone-300")}>{session.title || t("chat.untitled")}</div>
-                                <div className="mt-0.5 text-[11px] tabular-nums text-stone-400 dark:text-stone-500">{formatSessionTime(session.updatedAt)}</div>
+                        <div key={session.id} className={cn("group flex items-center gap-1 rounded-lg px-2 py-2 transition-colors", active ? "bg-black/[.06] dark:bg-white/[.08]" : "hover:bg-black/[.04] dark:hover:bg-white/[.05]")}>
+                            <button type="button" className={cn("min-w-0 flex-1 truncate text-left text-[13px] leading-5", active ? "text-stone-900 dark:text-stone-100" : "text-stone-600 dark:text-stone-300")} onClick={() => onSelect(session.id)}>
+                                {session.title || t("chat.untitled")}
                             </button>
-                            <button
-                                type="button"
-                                className="shrink-0 rounded p-1 text-stone-400 opacity-0 transition hover:text-stone-700 group-hover:opacity-100 dark:hover:text-stone-200"
-                                onClick={() => openRename(session)}
-                                title={t("chat.rename")}
+                            <Dropdown
+                                trigger={["click"]}
+                                placement="bottomRight"
+                                menu={{
+                                    items: [
+                                        { key: "rename", label: t("chat.rename"), onClick: () => openRename(session) },
+                                        { type: "divider" },
+                                        { key: "delete", danger: true, label: t("chat.delete"), onClick: () => confirmDelete(session) },
+                                    ],
+                                }}
                             >
-                                <Pencil className="size-3.5" />
-                            </button>
-                            <Popconfirm title={t("chat.deleteConfirm")} onConfirm={() => onDelete(session.id)}>
-                                <button type="button" className="shrink-0 rounded p-1 text-stone-400 opacity-0 transition hover:text-red-500 group-hover:opacity-100" title={t("chat.delete")}>
-                                    <Trash2 className="size-3.5" />
+                                <button
+                                    type="button"
+                                    className="shrink-0 rounded p-1 text-stone-400 opacity-0 transition hover:text-stone-700 group-hover:opacity-100 dark:hover:text-stone-200"
+                                    onClick={(event) => event.stopPropagation()}
+                                >
+                                    <MoreHorizontal className="size-4" />
                                 </button>
-                            </Popconfirm>
+                            </Dropdown>
                         </div>
                     );
                 })}
+            </div>
+            <div className="shrink-0 border-t border-stone-200/70 px-3 py-3 dark:border-stone-800">
+                <div className="flex items-center gap-2 text-[11px] text-stone-500 dark:text-stone-400">
+                    <span className="size-1.5 shrink-0 rounded-full bg-emerald-500" />
+                    <span className="min-w-0 truncate font-mono">{modelLabel || "agent"}</span>
+                    {quotaHint ? <span className="ml-auto shrink-0 tabular-nums text-stone-400 dark:text-stone-500">{quotaHint}</span> : null}
+                </div>
             </div>
             <Modal
                 open={Boolean(renameSession)}

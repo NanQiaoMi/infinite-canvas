@@ -1,10 +1,11 @@
-import { Button, Input } from "antd";
-import { ImagePlus, Send, Square, X } from "lucide-react";
+import { Input } from "antd";
+import { ArrowUp, Paperclip, Square, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { AgentImageRef } from "@/lib/conversation-agent/types";
 import { ensureImagePreview, resolveImageUrl } from "@/services/image-storage";
+import { cn } from "@/lib/utils";
 
 type ChatComposerProps = {
     value: string;
@@ -19,7 +20,13 @@ type ChatComposerProps = {
     quotaHint?: string;
 };
 
-const COMMANDS = ["/prompt", "/image", "/edit", "/new", "/help"] as const;
+const COMMANDS = [
+    { command: "/prompt", labelKey: "chat.commands.items.prompt" },
+    { command: "/image", labelKey: "chat.commands.items.image" },
+    { command: "/edit", labelKey: "chat.commands.items.edit" },
+    { command: "/new", labelKey: "chat.commands.items.new" },
+    { command: "/help", labelKey: "chat.commands.items.help" },
+];
 
 function ReferenceThumb({ image, onRemove }: { image: AgentImageRef; onRemove: () => void }) {
     const [url, setUrl] = useState("");
@@ -35,7 +42,7 @@ function ReferenceThumb({ image, onRemove }: { image: AgentImageRef; onRemove: (
     }, [image.storageKey]);
     return (
         <div className="relative">
-            {url ? <img src={url} alt="reference" className="size-12 rounded-md border border-stone-200 object-cover dark:border-stone-700" /> : <div className="size-12 rounded-md bg-black/[.04] dark:bg-white/[.06]" />}
+            {url ? <img src={url} alt="reference" className="size-14 rounded-lg border border-stone-200 object-cover dark:border-stone-700" /> : <div className="size-14 rounded-lg bg-black/[.04] dark:bg-white/[.06]" />}
             <button type="button" className="absolute -right-1 -top-1 rounded-full bg-stone-900 p-0.5 text-white dark:bg-stone-100 dark:text-stone-900" onClick={onRemove}>
                 <X className="size-3" />
             </button>
@@ -46,87 +53,100 @@ function ReferenceThumb({ image, onRemove }: { image: AgentImageRef; onRemove: (
 export function ChatComposer({ value, onChange, onSend, onStop, running, modelLabel, references = [], onAddFiles, onRemoveReference, quotaHint }: ChatComposerProps) {
     const { t } = useTranslation();
     const fileInputRef = useRef<HTMLInputElement | null>(null);
-    const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+    const query = value.trimStart().startsWith("/") ? value.trimStart().split(/\s/)[0].toLowerCase() : "";
+    const slashOpen = Boolean(query) && !running && COMMANDS.some((command) => command.command.startsWith(query) && command.command !== query);
+    const matches = COMMANDS.filter((command) => command.command.startsWith(query));
     const applyCommand = (command: string) => {
         onChange(`${command} `);
-        textareaRef.current?.focus();
     };
+    const canSend = Boolean(value.trim()) && !running;
     return (
-        <div className="shrink-0 border-t border-stone-200 bg-card px-4 py-3 dark:border-stone-800">
-            <div className="mx-auto max-w-4xl">
-                <div className="rounded-lg border border-stone-200 bg-background transition-colors focus-within:border-stone-300 focus-within:ring-2 focus-within:ring-stone-200/50 dark:border-stone-800 dark:bg-stone-950/40 dark:focus-within:border-stone-700 dark:focus-within:ring-stone-800/60">
-                    <div className="flex items-start gap-2 px-3 pt-2.5">
-                        <span className="select-none pt-0.5 font-mono text-sm font-semibold text-emerald-600 dark:text-emerald-400">❯</span>
-                        <Input.TextArea
-                            ref={(node) => {
-                                textareaRef.current = node?.resizableTextArea?.textArea ?? null;
-                            }}
-                            value={value}
-                            onChange={(event) => onChange(event.target.value)}
-                            placeholder={t("chat.placeholder")}
-                            autoSize={{ minRows: 2, maxRows: 8 }}
-                            onKeyDown={(event) => {
-                                if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-                                    event.preventDefault();
-                                    if (!running) onSend();
-                                }
-                            }}
-                            className="!border-0 !bg-transparent !p-0 !shadow-none"
-                        />
+        <div className="relative">
+            {slashOpen ? (
+                <div className="absolute bottom-full left-0 right-0 mb-2 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-lg dark:border-stone-700 dark:bg-stone-900">
+                    {matches.map((command) => (
+                        <button
+                            key={command.command}
+                            type="button"
+                            className="flex w-full items-center gap-3 px-3 py-2 text-left text-xs transition hover:bg-stone-50 dark:hover:bg-stone-800"
+                            onClick={() => applyCommand(command.command)}
+                        >
+                            <span className="w-16 shrink-0 font-mono text-stone-500 dark:text-stone-400">{command.command}</span>
+                            <span className="truncate text-stone-500 dark:text-stone-400">{t(command.labelKey)}</span>
+                        </button>
+                    ))}
+                </div>
+            ) : null}
+            <div className="rounded-2xl border border-stone-300/80 bg-white p-2.5 shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition focus-within:border-stone-400/80 dark:border-stone-700 dark:bg-stone-900 dark:focus-within:border-stone-600">
+                {references.length ? (
+                    <div className="flex flex-wrap gap-2 px-1 pb-2">
+                        {references.map((reference) => (
+                            <ReferenceThumb key={reference.id} image={reference} onRemove={() => onRemoveReference?.(reference.id)} />
+                        ))}
                     </div>
-                    {references.length ? (
-                        <div className="flex flex-wrap gap-2 px-3 pt-2">
-                            {references.map((reference) => (
-                                <ReferenceThumb key={reference.id} image={reference} onRemove={() => onRemoveReference?.(reference.id)} />
-                            ))}
-                        </div>
-                    ) : null}
-                    <div className="mt-1 flex flex-wrap items-center justify-between gap-2 border-t border-stone-200/70 px-2.5 py-1.5 dark:border-stone-800/70">
-                        <div className="flex min-w-0 flex-wrap items-center gap-1">
-                            <span className="text-[11px] text-stone-400 dark:text-stone-500">{t("chat.commands.label")}</span>
-                            {COMMANDS.map((command) => (
+                ) : null}
+                <Input.TextArea
+                    value={value}
+                    onChange={(event) => onChange(event.target.value)}
+                    placeholder={t("chat.placeholder")}
+                    autoSize={{ minRows: 2, maxRows: 10 }}
+                    onKeyDown={(event) => {
+                        if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                            event.preventDefault();
+                            if (!running) onSend();
+                        }
+                    }}
+                    className="!border-0 !bg-transparent !px-1 !py-1 !text-sm !shadow-none"
+                />
+                <div className="mt-1 flex items-center justify-between gap-2 px-1">
+                    <div className="flex items-center gap-1">
+                        {onAddFiles ? (
+                            <>
+                                <input
+                                    ref={fileInputRef}
+                                    type="file"
+                                    accept="image/*"
+                                    multiple
+                                    className="hidden"
+                                    onChange={(event) => {
+                                        const files = [...(event.target.files ?? [])];
+                                        if (files.length) onAddFiles(files);
+                                        event.target.value = "";
+                                    }}
+                                />
                                 <button
-                                    key={command}
                                     type="button"
-                                    className="rounded border border-stone-200 px-1.5 py-px font-mono text-[10px] text-stone-500 transition hover:border-stone-300 hover:text-stone-700 dark:border-stone-700 dark:text-stone-400 dark:hover:border-stone-600 dark:hover:text-stone-200"
-                                    onClick={() => applyCommand(command)}
+                                    className="flex size-8 items-center justify-center rounded-full text-stone-500 transition hover:bg-black/[.05] dark:text-stone-400 dark:hover:bg-white/[.08]"
+                                    onClick={() => fileInputRef.current?.click()}
+                                    title={t("chat.actions.uploadReference")}
                                 >
-                                    {command}
+                                    <Paperclip className="size-4" />
                                 </button>
-                            ))}
-                        </div>
-                        <div className="flex shrink-0 items-center gap-1.5">
-                            <span className="hidden text-[11px] text-stone-400 sm:inline dark:text-stone-500">
-                                {quotaHint ? `${quotaHint} · ` : ""}
-                                {modelLabel ? t("chat.modelLabel", { model: modelLabel }) : ""}
-                            </span>
-                            {onAddFiles ? (
-                                <>
-                                    <input
-                                        ref={fileInputRef}
-                                        type="file"
-                                        accept="image/*"
-                                        multiple
-                                        className="hidden"
-                                        onChange={(event) => {
-                                            const files = [...(event.target.files ?? [])];
-                                            if (files.length) onAddFiles(files);
-                                            event.target.value = "";
-                                        }}
-                                    />
-                                    <Button size="small" type="text" icon={<ImagePlus className="size-3.5" />} onClick={() => fileInputRef.current?.click()} title={t("chat.actions.uploadReference")} />
-                                </>
-                            ) : null}
-                            {running ? (
-                                <Button danger size="small" icon={<Square className="size-3.5" />} onClick={onStop}>
-                                    {t("chat.stop")}
-                                </Button>
-                            ) : (
-                                <Button type="primary" size="small" icon={<Send className="size-3.5" />} disabled={!value.trim()} onClick={onSend}>
-                                    {t("chat.send")}
-                                </Button>
+                            </>
+                        ) : null}
+                        <span className="hidden pl-1 text-[11px] text-stone-400 sm:inline dark:text-stone-500">{t("chat.composerHint")}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <span className="hidden text-[11px] text-stone-400 sm:inline dark:text-stone-500">
+                            {modelLabel}
+                            {quotaHint ? ` · ${quotaHint}` : ""}
+                        </span>
+                        <button
+                            type="button"
+                            className={cn(
+                                "flex size-8 items-center justify-center rounded-full transition",
+                                running
+                                    ? "bg-stone-900 text-white hover:bg-stone-700 dark:bg-stone-100 dark:text-stone-900"
+                                    : canSend
+                                      ? "bg-stone-900 text-white hover:bg-stone-700 dark:bg-stone-100 dark:text-stone-900"
+                                      : "cursor-not-allowed bg-stone-200 text-stone-400 dark:bg-stone-800 dark:text-stone-500",
                             )}
-                        </div>
+                            disabled={!running && !canSend}
+                            onClick={() => (running ? onStop() : onSend())}
+                            title={running ? t("chat.stop") : t("chat.send")}
+                        >
+                            {running ? <Square className="size-3.5" /> : <ArrowUp className="size-4" />}
+                        </button>
                     </div>
                 </div>
             </div>

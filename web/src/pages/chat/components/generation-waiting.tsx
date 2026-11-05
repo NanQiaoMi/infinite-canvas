@@ -1,3 +1,4 @@
+import { Sparkles } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -29,37 +30,34 @@ export function GenerationWaiting({ call, startedAt }: { call: AgentToolCall; st
     const prompt = typeof call.arguments.prompt === "string" ? call.arguments.prompt : "";
     const columns = useMemo(() => (count <= 1 ? 1 : 2), [count]);
     return (
-        <div className="pl-6">
-            <div className="flex items-start gap-2 font-mono text-xs leading-5">
-                <span className="mt-px w-3 shrink-0 text-center">
-                    <span className="inline-block size-2 animate-pulse rounded-full bg-amber-500" />
-                </span>
-                <span className="shrink-0 font-medium text-stone-900 dark:text-stone-100">{isEdit ? "edit_image" : "generate_image"}</span>
-                <span className="min-w-0 flex-1 truncate text-stone-400 dark:text-stone-500">{prompt}</span>
-                <span className="shrink-0 tabular-nums text-[11px] text-stone-400 dark:text-stone-500">0:{String(elapsedSeconds).padStart(2, "0")}</span>
+        <div className="flex gap-3">
+            <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-400">
+                <Sparkles className="agent-spin size-3.5" />
             </div>
-            <div className="mt-2 grid max-w-[420px] gap-2" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
-                {Array.from({ length: count }).map((_, index) => (
-                    <div
-                        key={index}
-                        className="agent-shimmer relative overflow-hidden rounded-lg border border-stone-200 dark:border-stone-800"
-                        style={{ aspectRatio: String(aspect) }}
-                    >
-                        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
-                            <div className="size-5 animate-spin rounded-full border-2 border-stone-300 border-t-stone-500 dark:border-stone-700 dark:border-t-stone-300" />
-                            <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-stone-400 dark:text-stone-500">img {index + 1}</span>
+            <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 text-xs">
+                    <span className="font-medium text-stone-700 dark:text-stone-200">{isEdit ? t("chat.tools.names.edit_image") : t("chat.tools.names.generate_image")}</span>
+                    <span className="min-w-0 flex-1 truncate text-stone-400 dark:text-stone-500">{prompt}</span>
+                    <span className="shrink-0 tabular-nums text-[11px] text-stone-400 dark:text-stone-500">0:{String(elapsedSeconds).padStart(2, "0")}</span>
+                </div>
+                <div className="mt-2 grid max-w-[360px] gap-2" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
+                    {Array.from({ length: count }).map((_, index) => (
+                        <div key={index} className="agent-shimmer relative overflow-hidden rounded-xl border border-stone-200/80 dark:border-stone-800" style={{ aspectRatio: String(aspect) }}>
+                            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
+                                <div className="size-5 animate-spin rounded-full border-2 border-stone-300 border-t-stone-500 dark:border-stone-700 dark:border-t-stone-300" />
+                                <span className="font-mono text-[9px] uppercase tracking-[0.18em] text-stone-400 dark:text-stone-500">img {index + 1}</span>
+                            </div>
                         </div>
-                    </div>
-                ))}
-            </div>
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-stone-400 dark:text-stone-500">
-                <span className="inline-flex items-center gap-1.5">
-                    <span className="size-1.5 animate-pulse rounded-full bg-amber-500" />
-                    {isEdit ? t("chat.waiting.editing") : t("chat.waiting.generating")}
-                </span>
-                <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-stone-300 dark:text-stone-600">generating</span>
-                <span>{phase}</span>
-                <span className="ml-auto tabular-nums">{t("chat.waiting.elapsed", { seconds: elapsedSeconds })}</span>
+                    ))}
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-stone-400 dark:text-stone-500">
+                    <span className="inline-flex items-center gap-1.5">
+                        <span className="size-1.5 animate-pulse rounded-full bg-amber-500" />
+                        {isEdit ? t("chat.waiting.editing") : t("chat.waiting.generating")}
+                    </span>
+                    <span>{phase}</span>
+                    <span className="ml-auto tabular-nums">{t("chat.waiting.elapsed", { seconds: elapsedSeconds })}</span>
+                </div>
             </div>
         </div>
     );
@@ -75,17 +73,19 @@ export function ThinkingLine({ startedAt }: { startedAt: number }) {
     }, [startedAt]);
     const elapsedSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
     return (
-        <div className="flex items-center gap-2 pl-6 text-xs text-stone-400 dark:text-stone-500">
-            <span className="flex size-2 items-center justify-center">
-                <span className="size-2 animate-pulse rounded-full bg-emerald-500" />
-            </span>
-            <span className="font-mono text-[11px]">{t("chat.thinking")}</span>
-            <span className="flex items-center gap-0.5 text-stone-300 dark:text-stone-600">
-                <span className="agent-dot" />
-                <span className="agent-dot" />
-                <span className="agent-dot" />
-            </span>
-            <span className="ml-auto tabular-nums text-[11px]">{t("chat.waiting.elapsed", { seconds: elapsedSeconds })}</span>
+        <div className="flex gap-3">
+            <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-400">
+                <Sparkles className="agent-spin size-3.5" />
+            </div>
+            <div className="flex flex-1 items-center gap-2 text-sm text-stone-500 dark:text-stone-400">
+                <span className="agent-shimmer-text">{t("chat.thinking")}</span>
+                <span className="flex items-center gap-0.5 text-stone-300 dark:text-stone-600">
+                    <span className="agent-dot" />
+                    <span className="agent-dot" />
+                    <span className="agent-dot" />
+                </span>
+                <span className="ml-auto text-[11px] tabular-nums text-stone-400 dark:text-stone-500">{t("chat.waiting.elapsed", { seconds: elapsedSeconds })}</span>
+            </div>
         </div>
     );
 }

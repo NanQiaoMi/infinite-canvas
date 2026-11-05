@@ -1,5 +1,5 @@
 import { App, Button, Drawer, Spin } from "antd";
-import { Menu, Sparkles } from "lucide-react";
+import { ImageIcon, Menu, PenLine, Sparkles, WandSparkles } from "lucide-react";
 import { nanoid } from "nanoid";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -239,6 +239,8 @@ export default function ChatPage() {
         <ChatSessionList
             sessions={sessions}
             activeSessionId={activeSessionId}
+            modelLabel={textModel ? modelLabelOf(textModel) : ""}
+            quotaHint={quotaHint}
             onSelect={(id) => {
                 setActiveSession(id);
                 setListOpen(false);
@@ -258,32 +260,26 @@ export default function ChatPage() {
     }
 
     const welcome = (
-        <div className="flex flex-1 flex-col items-center justify-center gap-6 py-12 text-center">
-            <div className="flex size-14 items-center justify-center rounded-2xl border border-stone-200 bg-gradient-to-br from-white to-stone-100 shadow-sm dark:border-stone-800 dark:from-stone-900 dark:to-stone-950">
-                <Sparkles className="size-6 text-stone-600 dark:text-stone-300" />
+        <div className="flex flex-1 flex-col items-center justify-center px-2 py-16 text-center">
+            <div className="mb-6 flex size-11 items-center justify-center rounded-full bg-black/[.05] dark:bg-white/[.07]">
+                <Sparkles className="size-5 text-stone-600 dark:text-stone-300" />
             </div>
-            <div className="space-y-2">
-                <h2 className="text-lg font-semibold text-stone-950 dark:text-stone-100">{t("chat.welcome.title")}</h2>
-                <p className="mx-auto max-w-md text-sm leading-6 text-stone-500 dark:text-stone-400">{t("chat.welcome.description")}</p>
-            </div>
-            <div className="flex flex-wrap justify-center gap-1.5">
-                {[t("chat.welcome.capabilities.prompts"), t("chat.welcome.capabilities.images"), t("chat.welcome.capabilities.edit"), t("chat.welcome.capabilities.workbench")].map((capability) => (
-                    <span key={capability} className="rounded-full border border-stone-200 px-2.5 py-1 text-[11px] text-stone-500 dark:border-stone-700 dark:text-stone-400">
-                        {capability}
-                    </span>
-                ))}
-            </div>
-            <div className="w-full max-w-md space-y-1 text-left font-mono text-xs">
-                {[t("chat.welcome.examples.prompt"), t("chat.welcome.examples.image"), t("chat.welcome.examples.edit")].map((command) => (
+            <h1 className="font-serif text-[30px] font-normal leading-tight tracking-tight text-stone-900 dark:text-stone-100">{t("chat.welcome.title")}</h1>
+            <p className="mt-3 max-w-md text-sm leading-6 text-stone-500 dark:text-stone-400">{t("chat.welcome.description")}</p>
+            <div className="mt-10 grid w-full max-w-md gap-2">
+                {[
+                    { command: t("chat.welcome.examples.prompt"), icon: PenLine },
+                    { command: t("chat.welcome.examples.image"), icon: ImageIcon },
+                    { command: t("chat.welcome.examples.edit"), icon: WandSparkles },
+                ].map(({ command, icon: Icon }) => (
                     <button
                         key={command}
                         type="button"
-                        className="group flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-stone-500 transition hover:bg-black/[.03] hover:text-stone-800 dark:text-stone-400 dark:hover:bg-white/[.05] dark:hover:text-stone-100"
+                        className="flex items-center gap-3 rounded-xl border border-stone-200/90 bg-white/70 px-3.5 py-2.5 text-left text-[13px] text-stone-600 transition hover:border-stone-300 hover:bg-white dark:border-stone-800 dark:bg-white/[.03] dark:text-stone-300 dark:hover:border-stone-700 dark:hover:bg-white/[.06]"
                         onClick={() => setInput(command)}
                     >
-                        <span className="text-emerald-600 dark:text-emerald-400">❯</span>
+                        <Icon className="size-3.5 shrink-0 text-stone-400 dark:text-stone-500" />
                         <span className="truncate">{command}</span>
-                        <span className="ml-auto text-[10px] text-stone-300 opacity-0 transition group-hover:opacity-100 dark:text-stone-600">↵</span>
                     </button>
                 ))}
             </div>
@@ -291,75 +287,66 @@ export default function ChatPage() {
     );
 
     return (
-        <div className="flex h-full flex-col overflow-hidden bg-stone-50 text-stone-900 dark:bg-stone-950 dark:text-stone-100">
-            <main className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-hidden p-3 lg:grid-cols-[240px_minmax(0,1fr)]">
-                <aside className="thin-scrollbar hidden min-h-0 flex-col overflow-hidden rounded-lg border border-stone-200 bg-card shadow-sm lg:flex dark:border-stone-800">{sessionList}</aside>
-                <section className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-stone-200 bg-card shadow-sm dark:border-stone-800">
-                    <div className="flex shrink-0 items-center gap-2.5 border-b border-stone-200 px-4 py-2.5 dark:border-stone-800">
-                        <Button className="lg:!hidden" size="small" type="text" icon={<Menu className="size-4" />} onClick={() => setListOpen(true)} />
-                        <span className="relative flex size-2">
-                            <span className={cn("absolute inline-flex size-full rounded-full bg-emerald-400 opacity-60", running && "animate-ping")} />
-                            <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
-                        </span>
-                        <span className="min-w-0 truncate text-sm font-medium text-stone-900 dark:text-stone-100">{activeSession?.title || t("chat.welcome.title")}</span>
-                        <span className="hidden items-center gap-1 rounded border border-stone-200 px-1.5 py-px font-mono text-[10px] text-stone-400 sm:inline-flex dark:border-stone-700 dark:text-stone-500">
-                            agent · {textModel ? modelLabelOf(textModel) : "-"}
-                        </span>
-                        <div className="ml-auto flex shrink-0 items-center gap-1.5">
-                            <span className="hidden text-[11px] text-stone-400 md:inline dark:text-stone-500">{quotaHint}</span>
-                            <Button size="small" icon={<Sparkles className="size-3.5" />} onClick={createAndClose}>
-                                {t("chat.newSession")}
-                            </Button>
-                        </div>
-                    </div>
-                    <div ref={scrollRef} className="hover-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
-                        <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col gap-5">
-                            {!activeSession || activeSession.messages.length === 0
-                                ? welcome
-                                : activeSession.messages.map((item, index) => (
-                                      <ChatMessage key={item.id} message={item} onRetry={item.role === "error" ? () => retryMessage(index) : undefined} onUseReference={useReference} />
-                                  ))}
-                            {running && streamingText ? (
-                                <div className="relative pl-6">
-                                    <span className="absolute left-0 top-[7px] flex size-4 items-center justify-center">
-                                        <span className="size-[7px] animate-pulse rounded-full bg-emerald-500" />
-                                    </span>
-                                    <div className="mb-1 flex items-center gap-2 text-[11px] text-stone-400 dark:text-stone-500">
-                                        <span className="font-medium text-stone-500 dark:text-stone-400">Agent</span>
-                                        <span>{t("chat.streaming")}</span>
-                                    </div>
+        <div className="flex h-full min-h-0 bg-[#faf9f5] text-stone-900 dark:bg-[#1c1b19] dark:text-stone-100">
+            <aside className="hidden w-[252px] shrink-0 border-r border-stone-200/70 bg-[#f2efe8] lg:block dark:border-stone-800 dark:bg-[#171614]">{sessionList}</aside>
+            <main className="flex min-w-0 flex-1 flex-col">
+                <div className="flex h-12 shrink-0 items-center gap-2 px-3 lg:hidden">
+                    <Button size="small" type="text" icon={<Menu className="size-4" />} onClick={() => setListOpen(true)} />
+                    <span className="text-sm font-semibold">{t("meta.title")}</span>
+                </div>
+                <div ref={scrollRef} className="hover-scrollbar min-h-0 flex-1 overflow-y-auto">
+                    <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col gap-6 px-4 pb-10 pt-10 sm:px-6">
+                        {!activeSession || activeSession.messages.length === 0
+                            ? welcome
+                            : activeSession.messages.map((item, index) => (
+                                  <ChatMessage key={item.id} message={item} onRetry={item.role === "error" ? () => retryMessage(index) : undefined} onUseReference={useReference} />
+                              ))}
+                        {running && streamingText ? (
+                            <div className="flex gap-3">
+                                <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-400">
+                                    <Sparkles className="size-3.5" />
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                    <div className="mb-1 text-[11px] font-medium text-stone-400 dark:text-stone-500">{t("chat.streaming")}</div>
                                     <div className="agent-cursor">
                                         <Streamdown className="agent-streamdown text-sm leading-7 text-stone-800 dark:text-stone-200">{streamingText}</Streamdown>
                                     </div>
                                 </div>
-                            ) : null}
-                            {runningTool && (runningTool.tool === "generate_image" || runningTool.tool === "edit_image") ? (
-                                <GenerationWaiting call={runningTool} startedAt={turnStartedAt || Date.now()} />
-                            ) : null}
-                            {runningTool && runningTool.tool === "apply_prompt" ? (
-                                <div className="flex items-center gap-2 pl-6 font-mono text-xs text-stone-400 dark:text-stone-500">
+                            </div>
+                        ) : null}
+                        {runningTool && (runningTool.tool === "generate_image" || runningTool.tool === "edit_image") ? (
+                            <GenerationWaiting call={runningTool} startedAt={turnStartedAt || Date.now()} />
+                        ) : null}
+                        {runningTool && runningTool.tool === "apply_prompt" ? (
+                            <div className="flex gap-3">
+                                <div className="w-7 shrink-0" />
+                                <div className="flex items-center gap-2 text-xs text-stone-400 dark:text-stone-500">
                                     <span className="inline-block size-2 animate-pulse rounded-full bg-amber-500" />
                                     apply_prompt · {t("chat.tools.names.apply_prompt")}
                                 </div>
-                            ) : null}
-                            {running && !streamingText && !runningTool ? <ThinkingLine startedAt={turnStartedAt || Date.now()} /> : null}
-                        </div>
+                            </div>
+                        ) : null}
+                        {running && !streamingText && !runningTool ? <ThinkingLine startedAt={turnStartedAt || Date.now()} /> : null}
                     </div>
-                    <ChatComposer
-                        value={input}
-                        onChange={setInput}
-                        onSend={() => void send()}
-                        onStop={stop}
-                        running={running}
-                        modelLabel={textModel ? modelLabelOf(textModel) : ""}
-                        references={references}
-                        onAddFiles={(files) => void addReferenceFiles(files)}
-                        onRemoveReference={(id) => setReferences((current) => current.filter((item) => item.id !== id))}
-                        quotaHint={quotaHint}
-                    />
-                </section>
+                </div>
+                <div className="shrink-0 px-3 pb-4 sm:px-6">
+                    <div className="mx-auto w-full max-w-3xl">
+                        <ChatComposer
+                            value={input}
+                            onChange={setInput}
+                            onSend={() => void send()}
+                            onStop={stop}
+                            running={running}
+                            modelLabel={textModel ? modelLabelOf(textModel) : ""}
+                            references={references}
+                            onAddFiles={(files) => void addReferenceFiles(files)}
+                            onRemoveReference={(id) => setReferences((current) => current.filter((item) => item.id !== id))}
+                            quotaHint={quotaHint}
+                        />
+                    </div>
+                </div>
             </main>
-            <Drawer open={listOpen} placement="left" width={280} onClose={() => setListOpen(false)} styles={{ body: { padding: 0 } }} title={t("chat.sessionList")}>
+            <Drawer open={listOpen} placement="left" width={272} onClose={() => setListOpen(false)} styles={{ body: { padding: 0, background: "var(--color-card)" } }}>
                 {sessionList}
             </Drawer>
         </div>
