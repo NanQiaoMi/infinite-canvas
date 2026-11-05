@@ -824,3 +824,10 @@ POST /v1/responses (stream:false) → 200，返回 output_text "OK"（18.5s）
 - 输入框改为 Claude 式圆角大输入框：回形针附件、`输入 / 查看命令` 提示、模型/额度、圆形发送/停止；输入 `/` 弹出命令选择层。
 - 等待体验：生成中显示骨架屏（`agent-shimmer`）+ 阶段（准备提示词/模型生成中/渲染细节中）+ 计时；思考中为旋转星标 + 流光文字 + 呼吸点。
 - 验证：`tsc`、34 项前端测试、构建通过；浏览器实测 `/image` 生成（等待 19s 截图、完成后工具折叠行 + 图片卡片 + 总结），浅色/深色核对。
+
+### 17.6 动效与交互打磨（2026-11-06）
+
+- 新增动画：消息/欢迎页 `agent-message-in`/`agent-fade-in`、斜杠弹层 `agent-pop-in`、工具参数区 `agent-collapse`（grid-rows 过渡）、骨架错峰 shimmer、等待阶段淡入、思考流光辉光、发送/附件按钮 `active:scale-90`、图片卡片 hover 浮起 + 图片淡入。
+- 滚动：切换会话立即定位底部；新消息到达时若接近底部则 `scrollTo({behavior:"smooth"})`；流式输出时保持贴底跟随。
+- 无障碍：`prefers-reduced-motion` 下关闭所有对话相关动画与过渡。
+- 验证：`tsc` 通过、34 项测试、构建通过；浏览器检查斜杠弹层动画名 `agent-pop-in`、消息包装动画名 `agent-message-in`、reduced-motion 规则存在；部署后页面正常。
