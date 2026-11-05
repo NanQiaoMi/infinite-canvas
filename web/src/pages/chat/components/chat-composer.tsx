@@ -124,7 +124,10 @@ export function ChatComposer({ value, onChange, onSend, onStop, running, modelLa
                                 </button>
                             </>
                         ) : null}
-                        <span className="hidden pl-1 text-[11px] text-stone-400 sm:inline dark:text-stone-500">{t("chat.composerHint")}</span>
+                        <span className="hidden items-center gap-1.5 pl-1 text-[11px] text-stone-400 sm:inline-flex dark:text-stone-500">
+                            {t("chat.composerHint")}
+                            <kbd className="rounded border border-stone-200 px-1 font-mono text-[9px] text-stone-400 dark:border-stone-700 dark:text-stone-500">⌘K</kbd>
+                        </span>
                     </div>
                     <div className="flex items-center gap-2">
                         <span className="hidden text-[11px] text-stone-400 sm:inline dark:text-stone-500">

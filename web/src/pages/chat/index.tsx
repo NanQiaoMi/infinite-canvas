@@ -10,7 +10,7 @@ import { nativeToolCallsToAgent } from "@/lib/conversation-agent/protocol";
 import { runAgentTurn } from "@/lib/conversation-agent/runtime";
 import { agentLocaleOf } from "@/lib/conversation-agent/system-prompt";
 import { AGENT_TOOLS, executeAgentTool } from "@/lib/conversation-agent/tools";
-import type { AgentContextInput, AgentEvent, AgentImageRef, AgentMessage, AgentModelCall } from "@/lib/conversation-agent/types";
+import type { AgentContextInput, AgentEvent, AgentImageRef, AgentMessage, AgentModelCall, AgentToolCall } from "@/lib/conversation-agent/types";
 import { requestConversationTurn } from "@/services/api/image";
 import { uploadImage } from "@/services/image-storage";
 import { selectableModelsByCapability, useConfigStore } from "@/stores/use-config-store";
@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils";
 import { ChatComposer } from "./components/chat-composer";
 import { ChatMessage } from "./components/chat-message";
 import { ChatSessionList } from "./components/chat-session-list";
+import { CommandPalette } from "./components/command-palette";
 import { GenerationWaiting, ThinkingLine } from "./components/generation-waiting";
 
 const modelLabelOf = (option: string) => option.split("::").pop() || option;
@@ -54,6 +55,9 @@ export default function ChatPage() {
     const [input, setInput] = useState("");
     const [references, setReferences] = useState<AgentImageRef[]>([]);
     const [turnStartedAt, setTurnStartedAt] = useState(0);
+    const [paletteOpen, setPaletteOpen] = useState(false);
+    const [exitingTool, setExitingTool] = useState<AgentToolCall | null>(null);
+    const exitTimerRef = useRef<number | null>(null);
     const [pageContext, setPageContext] = useState<string | undefined>(undefined);
     const [listOpen, setListOpen] = useState(false);
     const controllerRef = useRef<AbortController | null>(null);
@@ -72,6 +76,17 @@ export default function ChatPage() {
         setPageContext(prompt ? t("chat.context.pageWithPrompt", { page: pageName, prompt: prompt.slice(0, 300) }) : pageName);
         setLaunchContext(null);
     }, [launchContext, setLaunchContext, t]);
+
+    useEffect(() => {
+        const handler = (event: KeyboardEvent) => {
+            if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+                event.preventDefault();
+                setPaletteOpen((value) => !value);
+            }
+        };
+        window.addEventListener("keydown", handler);
+        return () => window.removeEventListener("keydown", handler);
+    }, []);
 
     const lastSessionRef = useRef<string | null | undefined>(undefined);
     useLayoutEffect(() => {
@@ -192,9 +207,17 @@ export default function ChatPage() {
                         if (event.type === "assistant-stream") setStreamingText(event.text);
                         else if (event.type === "tool-start") {
                             setStreamingText("");
+                            if (exitTimerRef.current) window.clearTimeout(exitTimerRef.current);
+                            setExitingTool(null);
                             setRunningTool(event.call);
+                        } else if (event.type === "tool-end") {
+                            setRunningTool(null);
+                            if (event.call.tool === "generate_image" || event.call.tool === "edit_image") {
+                                setExitingTool(event.call);
+                                if (exitTimerRef.current) window.clearTimeout(exitTimerRef.current);
+                                exitTimerRef.current = window.setTimeout(() => setExitingTool(null), 260);
+                            }
                         }
-                        else if (event.type === "tool-end") setRunningTool(null);
                     },
                     signal: controller.signal,
                     references: attachments,
@@ -303,7 +326,7 @@ export default function ChatPage() {
     );
 
     return (
-        <div className="flex h-full min-h-0 bg-[#faf9f5] text-stone-900 dark:bg-[#1c1b19] dark:text-stone-100">
+        <div className="agent-page-in flex h-full min-h-0 bg-[#faf9f5] text-stone-900 dark:bg-[#1c1b19] dark:text-stone-100">
             <aside className="hidden w-[252px] shrink-0 border-r border-stone-200/70 bg-[#f2efe8] lg:block dark:border-stone-800 dark:bg-[#171614]">{sessionList}</aside>
             <main className="flex min-w-0 flex-1 flex-col">
                 <div className="flex h-12 shrink-0 items-center gap-2 px-3 lg:hidden">
@@ -325,13 +348,20 @@ export default function ChatPage() {
                                 <div className="min-w-0 flex-1">
                                     <div className="mb-1 text-[11px] font-medium text-stone-400 dark:text-stone-500">{t("chat.streaming")}</div>
                                     <div className="agent-cursor">
-                                        <Streamdown className="agent-streamdown text-sm leading-7 text-stone-800 dark:text-stone-200">{streamingText}</Streamdown>
+                                        <Streamdown className="agent-streamdown text-sm leading-7 text-stone-800 dark:text-stone-200" animated={{ duration: 18, stagger: 0, sep: "word" }} isAnimating>
+                                            {streamingText}
+                                        </Streamdown>
                                     </div>
                                 </div>
                             </div>
                         ) : null}
                         {runningTool && (runningTool.tool === "generate_image" || runningTool.tool === "edit_image") ? (
                             <GenerationWaiting call={runningTool} startedAt={turnStartedAt || Date.now()} />
+                        ) : null}
+                        {!runningTool && exitingTool ? (
+                            <div className="agent-fade-out">
+                                <GenerationWaiting call={exitingTool} startedAt={turnStartedAt || Date.now()} />
+                            </div>
                         ) : null}
                         {runningTool && runningTool.tool === "apply_prompt" ? (
                             <div className="agent-fade-in flex gap-3">
@@ -365,6 +395,17 @@ export default function ChatPage() {
             <Drawer open={listOpen} placement="left" width={272} onClose={() => setListOpen(false)} styles={{ body: { padding: 0, background: "var(--color-card)" } }}>
                 {sessionList}
             </Drawer>
+            <CommandPalette
+                open={paletteOpen}
+                onClose={() => setPaletteOpen(false)}
+                sessions={sessions}
+                activeSessionId={activeSessionId}
+                onSelectSession={(id) => setActiveSession(id)}
+                onNewChat={createAndClose}
+                onCommand={(command) => {
+                    setInput(`${command} `);
+                }}
+            />
         </div>
     );
 }

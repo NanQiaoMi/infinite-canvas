@@ -758,7 +758,7 @@
 .agent-collapse {
     display: grid;
     grid-template-rows: 0fr;
-    transition: grid-template-rows 0.22s ease;
+    transition: grid-template-rows 0.26s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .agent-collapse.is-open {
@@ -792,5 +792,58 @@
 
     .agent-collapse {
         transition: none !important;
+    }
+}
+
+
+@keyframes agent-fade-out {
+    from {
+        opacity: 1;
+        transform: none;
+    }
+    to {
+        opacity: 0;
+        transform: translateY(-2px) scale(0.995);
+    }
+}
+
+.agent-fade-out {
+    animation: agent-fade-out 0.24s ease-in forwards;
+    pointer-events: none;
+}
+
+@keyframes agent-page-in {
+    from {
+        opacity: 0;
+        transform: translateY(3px);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+.agent-page-in {
+    animation: agent-page-in 0.3s ease-out both;
+}
+
+@keyframes agent-overlay-in {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+.agent-overlay-in {
+    animation: agent-overlay-in 0.16s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .agent-fade-out,
+    .agent-page-in,
+    .agent-overlay-in {
+        animation: none !important;
     }
 }
