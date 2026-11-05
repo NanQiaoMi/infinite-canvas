@@ -1,6 +1,6 @@
 # 无限画布 · 内置对话 Agent 改造方案
 
-> 状态：待确认
+> 状态：已实施（v1，2026-11-06）
 > 性质：本地改造，本地分支提交，不推送、不建 PR
 > 基线：`feat/server-quota-admin` @ `ac8b417`（服务端模式已上线）
 > 日期：2026-11-06
@@ -742,3 +742,37 @@ text: "I can't execute the `generate_image` tool in this temporary chat..."
 POST /v1/responses (stream:false) → 200，返回 output_text "OK"（18.5s）
 # 说明：文本回合可用，只是工具调用要靠提示词协议驱动。
 ```
+
+---
+
+## 17. 实施记录（v1）
+
+已实现内容：
+
+| 模块 | 文件 | 说明 |
+| --- | --- | --- |
+| 协议与类型 | `web/src/lib/conversation-agent/{types,protocol}.ts` | 文本 `tool` 块、`prompt` 卡片块、原生 function call 转换、参数校验、流式屏蔽 |
+| 系统提示词 | `web/src/lib/conversation-agent/system-prompt.ts` | 中英双语完整提示词 + 运行上下文注入（模型/默认参数/额度/页面/通道） |
+| 工具 | `web/src/lib/conversation-agent/tools.ts` | `generate_image`、`apply_prompt`，含模型校验、额度刷新、工作台命令 |
+| 运行时 | `web/src/lib/conversation-agent/runtime.ts` | 调模型 → 解析 → 执行 → 回填循环（最多 8 轮），依赖注入便于单测 |
+| 模型接入 | `web/src/services/api/image.ts` | 新增 `requestConversationTurn`，复用 Responses/Gemini 流式与工具声明 |
+| 状态 | `web/src/stores/use-conversation-agent-store.ts` | 会话/消息/流式状态 + localforage 持久化（最多 50 会话、200 条消息） |
+| 页面 | `web/src/pages/chat/*` | 会话列表、消息/工具/提示词/图片卡片、输入框、快捷指令、移动端抽屉 |
+| 入口 | `router.tsx`、`navigation-tools.ts`、生图/视频工作台 | 顶部「AI 对话」；两个工作台「AI 帮我写提示词」按钮 |
+| 测试 | `web/tests/conversation-{protocol,runtime}.test.ts` | 协议解析/流式屏蔽/参数校验/工具结果序列化/循环与轮次上限（12 项） |
+
+验证结果：
+
+- `tsc --noEmit` 通过；`bun test` 31 项通过；`bun run build` 通过。
+- 部署后浏览器实测（服务端模式 + chatgpt2api）：
+  - 纯文本：「帮我写赛博朋克城市夜景提示词」→ 返回 Markdown + 231 字提示词卡片（复制/填入工作台）。
+  - 图片生成：「生成一张 1024x1024 苹果产品海报」→ 文本工具协议触发 `generate_image`，31.6s 返回真实图片（实际 1254×1254），工具卡片显示成功、图片卡片可下载/加资产/填工作台。
+  - 工作台联动：提示词卡片「填入生图工作台」后切到 `/image`，草稿提示词为完整 231 字；「把刚才的提示词填入生图工作台」→ `apply_prompt` 工具成功，模型总结参数。
+  - 入口联动：生图工作台输入「一只橘猫坐在窗台上」→ 点「AI 帮我写提示词」→ 跳转 `/chat` 且输入框已带入草稿。
+  - 持久化：刷新后会话、提示词卡片与生成的图片均恢复。
+- 备注：浏览器当前登录了管理员会话（adminExempt），因此实测期间图片生成未计入额度；普通访客经同一中转链路会正常计额（此前非管理员 curl 验证过 image/text 事件计入）。
+
+未覆盖：
+
+- 原生 function calling（当前 chatgpt2api 不支持，代码已支持原生路径但未在真实原生通道验证）。
+- 图生图/参考图编辑（P1）、提示词库搜索与保存（P1）、画布插入（P2）。
