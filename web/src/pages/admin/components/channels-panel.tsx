@@ -10,6 +10,7 @@ import { guessCapability } from "@/stores/use-config-store";
 import type { AdminChannel, AdminChannelInput, ServerApiFormat, ServerCapability } from "@/types/server";
 
 import { ADMIN_CAPABILITIES, capabilityLabelKey } from "../format";
+import { ModelImportModal, type ImportedModel } from "./model-import-modal";
 
 type DraftModel = { name: string; capability: ServerCapability; script?: string };
 
@@ -42,6 +43,8 @@ export function ChannelsPanel() {
     const [saving, setSaving] = useState(false);
     const [draft, setDraft] = useState<DraftChannel | null>(null);
     const [fetchingModels, setFetchingModels] = useState(false);
+    const [fetchedModels, setFetchedModels] = useState<string[]>([]);
+    const [importOpen, setImportOpen] = useState(false);
     const [scriptTarget, setScriptTarget] = useState<{ index: number } | null>(null);
 
     const load = useCallback(async () => {
@@ -149,10 +152,13 @@ export function ChannelsPanel() {
                 return;
             }
             const existing = new Set(draft.models.map((model) => model.name));
-            const additions = data.models.filter((name) => !existing.has(name)).map((name) => ({ name, capability: guessCapability(name) as ServerCapability }));
-            patchDraft({ models: [...draft.models, ...additions] });
-            if (additions.length) message.success(t("server.admin.channels.fetched", { count: additions.length }));
-            else message.info(t("server.admin.channels.fetchedAll"));
+            const candidates = data.models.filter((name) => !existing.has(name));
+            if (!candidates.length) {
+                message.info(t("server.admin.channels.fetchedAll"));
+                return;
+            }
+            setFetchedModels(candidates);
+            setImportOpen(true);
         } catch (error) {
             message.error(error instanceof Error ? error.message : t("server.admin.common.failed"));
         } finally {
@@ -187,7 +193,21 @@ export function ChannelsPanel() {
             ),
         },
         { title: t("server.admin.channels.protocol"), dataIndex: "apiFormat", width: 100, render: (value: ServerApiFormat) => <Tag>{value === "gemini" ? "Gemini" : "OpenAI"}</Tag> },
-        { title: t("server.admin.channels.models"), dataIndex: "models", width: 90, render: (models: AdminChannel["models"]) => models.length },
+        {
+            title: t("server.admin.channels.models"),
+            dataIndex: "models",
+            width: 150,
+            render: (models: AdminChannel["models"]) => {
+                const counts = { image: 0, video: 0, text: 0, audio: 0 } as Record<ServerCapability, number>;
+                for (const model of models) counts[model.capability] += 1;
+                return (
+                    <div className="text-xs">
+                        <div>{models.length}</div>
+                        <div className="text-stone-400">{ADMIN_CAPABILITIES.filter((capability) => counts[capability] > 0).map((capability) => `${t(capabilityLabelKey(capability))} ${counts[capability]}`).join(" · ") || "-"}</div>
+                    </div>
+                );
+            },
+        },
         {
             title: "API Key",
             dataIndex: "apiKeyMasked",
@@ -292,6 +312,16 @@ export function ChannelsPanel() {
                                 <Button size="small" icon={<CloudDownload className="size-3.5" />} loading={fetchingModels} onClick={() => void fetchModels()}>
                                     {t("server.admin.channels.fetchModels")}
                                 </Button>
+                                <Popconfirm
+                                    title={t("server.admin.channels.redetectConfirm")}
+                                    onConfirm={() => {
+                                        if (!draft) return;
+                                        patchDraft({ models: draft.models.map((model) => ({ ...model, capability: guessCapability(model.name) as ServerCapability })) });
+                                        message.success(t("server.admin.channels.redetected"));
+                                    }}
+                                >
+                                    <Button size="small">{t("server.admin.channels.redetect")}</Button>
+                                </Popconfirm>
                                 <Button size="small" icon={<Plus className="size-3.5" />} onClick={addDraftModel}>
                                     {t("server.admin.channels.addModel")}
                                 </Button>
@@ -318,6 +348,19 @@ export function ChannelsPanel() {
                     </div>
                 ) : null}
             </Drawer>
+
+            <ModelImportModal
+                open={importOpen}
+                models={fetchedModels}
+                existingNames={draft ? draft.models.map((model) => model.name) : []}
+                onClose={() => setImportOpen(false)}
+                onConfirm={(imported: ImportedModel[]) => {
+                    if (!draft) return;
+                    patchDraft({ models: [...draft.models, ...imported] });
+                    setImportOpen(false);
+                    message.success(t("server.admin.channels.imported", { count: imported.length }));
+                }}
+            />
 
             <ModelScriptEditor
                 open={Boolean(scriptTarget)}

@@ -1013,3 +1013,12 @@ cd web && bun run build   # 构建产物在无 /api 的静态服务器下打开�
 - 模型拉取失败（非 JSON、缺少 data/models、空列表）不再静默返回空数组，而是返回带排查提示的 400 错误。
 - 管理后台渠道编辑增加 Base URL 提示（宿主机服务用 `http://host.docker.internal:<端口>`），拉取 0 个模型时给出明确警告；README 同步说明。
 - 验证：`http://localhost:3000` 作为 Base URL 拉取到 22 个模型；经中转真实出图（gpt-image-2，57s，b64 1.38MB）与文本生成（`/v1/responses`，model auto，18.5s 返回 OK）均成功。
+
+### 16.2 模型导入与能力识别优化（2026-11-05）
+
+实际接入 chatgpt2api 的 22 个模型后，管理员反馈「拉取模型后图片/文本识别不好」。原因为：拉取即全量塞入列表、能力靠少量关键词粗略推断、缺少批量确认步骤。已改进：
+
+- 「拉取模型」改为**勾选确认弹窗**：模型名搜索、全选/清空、批量把选中项设为图片/视频/文本/音频、逐项覆盖、显示各能力数量与已选数量，确认后才写入渠道。
+- 能力推断规则抽到 `web/src/lib/model-capability.ts` 并扩充：先视频（sora/veo/kling/seedance/wan2.x/i2v 等）→ 音频（tts/audio/whisper/transcribe 等）→ 图片（gpt-image/dall-e/flux/imagen/seedream/nano-banana/grok-imagine 等）→ 文本；补充单元测试覆盖 chatgpt2api 与常见厂商模型名。
+- 渠道列表展示能力分布（如「图片 4 · 文本 18」），编辑抽屉新增「重新识别能力」按钮。
+- 验证：chatgpt2api 真实拉取 22 个模型，自动识别为图片 4 + 文本 18；删除 1 个模型后重新拉取会弹出「共 1 个可导入模型 · 文本 1」确认框，批量设置/添加/保存均正常。
