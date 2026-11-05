@@ -831,3 +831,11 @@ POST /v1/responses (stream:false) → 200，返回 output_text "OK"（18.5s）
 - 滚动：切换会话立即定位底部；新消息到达时若接近底部则 `scrollTo({behavior:"smooth"})`；流式输出时保持贴底跟随。
 - 无障碍：`prefers-reduced-motion` 下关闭所有对话相关动画与过渡。
 - 验证：`tsc` 通过、34 项测试、构建通过；浏览器检查斜杠弹层动画名 `agent-pop-in`、消息包装动画名 `agent-message-in`、reduced-motion 规则存在；部署后页面正常。
+
+### 17.7 动效二期与命令面板（2026-11-06）
+
+- 流式逐词渐显：流式消息使用 Streamdown 的 `animated`（word 级）动画，结束后保留 Markdown 渲染。
+- 骨架到结果的交叉过渡：图片生成结束时保留 260ms 的 `agent-fade-out` 骨架，同时结果卡片以 `agent-fade-in` 进入；工具行用 `agent-collapse`（cubic-bezier 缓动）展开。
+- 页面与会话切换：对话页根节点 `agent-page-in` 淡入，会话消息列表按 session id 重新挂载并淡入。
+- `⌘K / Ctrl+K` 命令面板：`CommandPalette` 组件，搜索 + 方向键/回车 + Esc/遮罩关闭；条目包含新建对话、斜杠命令与最近对话；输入框底部增加 ⌘K 提示。
+- 验证：`tsc` 通过、34 项测试、构建通过；浏览器实测命令面板可打开并列出操作/命令/最近对话，Esc 关闭；部署后正常。
