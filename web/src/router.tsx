@@ -6,6 +6,7 @@ import AdminPage from "@/pages/admin";
 import AssetsPage from "@/pages/assets";
 import CanvasPage from "@/pages/canvas";
 import CanvasProjectPage from "@/pages/canvas/project";
+import ChatPage from "@/pages/chat";
 import ConfigPage from "@/pages/config";
 import HomePage from "@/pages/home";
 import ImagePage from "@/pages/image";
@@ -24,6 +25,7 @@ export const router = createBrowserRouter([
         ),
         children: [
             { path: "/", element: <HomePage /> },
+            { path: "/chat", element: <ChatPage /> },
             { path: "/image", element: <ImagePage /> },
             { path: "/video", element: <VideoPage /> },
             { path: "/assets", element: <AssetsPage /> },

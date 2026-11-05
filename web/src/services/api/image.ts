@@ -894,3 +894,68 @@ const defaultGeminiConfig: Pick<AiConfig, "baseUrl" | "apiKey" | "apiFormat" | "
     model: "",
     systemPrompt: "",
 };
+
+export type ConversationTool = {
+    name: string;
+    description?: string;
+    parameters: Record<string, unknown>;
+    strict?: boolean;
+};
+
+export type ConversationToolCall = { id?: string; name: string; arguments: string };
+
+export type ConversationTurnResult = {
+    content: string;
+    toolCalls: ConversationToolCall[];
+};
+
+/** 对话 Agent 的文本回合：支持系统提示词、工具声明与流式输出；不依赖 UI。 */
+export async function requestConversationTurn(
+    config: AiConfig,
+    messages: AiTextMessage[],
+    options: { systemPrompt?: string; tools?: ConversationTool[]; onDelta?: (text: string) => void; signal?: AbortSignal } = {},
+): Promise<ConversationTurnResult> {
+    const requestConfig = resolveModelRequestConfig(config, config.model || config.textModel);
+    const systemPrompt = (options.systemPrompt ?? requestConfig.systemPrompt).trim();
+    const script = resolveModelScript(config, config.model || config.textModel);
+    if (script) {
+        try {
+            const answer = await runModelPlugin<string>({
+                capability: "text",
+                script,
+                config: requestConfig,
+                messages: withSystemMessage({ ...requestConfig, systemPrompt }, messages),
+                signal: options.signal,
+                onDelta: options.onDelta,
+            });
+            return { content: String(answer ?? "").trim(), toolCalls: [] };
+        } catch (error) {
+            throw new Error(readAxiosError(error, apiText("requestFailed")));
+        }
+    }
+    const tools: ResponseFunctionTool[] = (options.tools ?? []).map((tool) => ({
+        type: "function",
+        function: { name: tool.name, description: tool.description, parameters: tool.parameters, strict: tool.strict },
+    }));
+    try {
+        if (requestConfig.apiFormat === "gemini") {
+            const extra = tools.length ? toGeminiToolOptions(tools, "auto") : {};
+            const result = await requestGeminiStreamingResponse({ ...requestConfig, systemPrompt }, toGeminiBody({ ...requestConfig, systemPrompt }, messages, extra), options.onDelta, { signal: options.signal });
+            return { content: result.content, toolCalls: result.toolCalls.map((call) => ({ id: call.id, name: call.function.name, arguments: call.function.arguments })) };
+        }
+        const result = await requestStreamingResponse(
+            requestConfig,
+            {
+                model: requestConfig.model,
+                input: toResponseInput(withSystemMessage({ ...requestConfig, systemPrompt }, messages)),
+                ...(requestConfig.reasoningEffort === "auto" ? {} : { reasoning: { effort: requestConfig.reasoningEffort } }),
+                ...(tools.length ? { tools: tools.map(toResponseTool), tool_choice: "auto" } : {}),
+            },
+            options.onDelta,
+            { signal: options.signal },
+        );
+        return { content: result.content, toolCalls: result.toolCalls.map((call) => ({ id: call.id, name: call.function.name, arguments: call.function.arguments })) };
+    } catch (error) {
+        throw new Error(readAxiosError(error, apiText("requestFailed")));
+    }
+}

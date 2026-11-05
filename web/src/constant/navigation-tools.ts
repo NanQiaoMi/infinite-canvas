@@ -1,6 +1,10 @@
-import { FileText, ImagePlus, Images, Maximize2, Settings2, Video } from "lucide-react";
+import { FileText, ImagePlus, Images, Maximize2, MessagesSquare, Settings2, Video } from "lucide-react";
 
 export const navigationTools = [
+    {
+        slug: "chat",
+        icon: MessagesSquare,
+    },
     {
         slug: "canvas",
         icon: Maximize2,

@@ -4,6 +4,7 @@ import { App, Button, Checkbox, Drawer, Empty, Image, Input, Modal, Tag, Tooltip
 import localforage from "localforage";
 import { saveAs } from "file-saver";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { ModelPicker } from "@/components/model-picker";
@@ -19,6 +20,7 @@ import { requestEdit, requestGeneration } from "@/services/api/image";
 import { deleteStoredImages, ensureImagePreview, getImagePreviewRevision, previewUrlFor, resolveImageUrl, subscribeImagePreviews, uploadImage } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
+import { useConversationAgentStore } from "@/stores/use-conversation-agent-store";
 import type { ReferenceImage } from "@/types/image";
 import i18n from "@/i18n";
 
@@ -98,6 +100,8 @@ export default function ImagePage() {
     const imageCommand = useWorkbenchAgentStore((state) => state.imageCommand);
     const clearImageCommand = useWorkbenchAgentStore((state) => state.clearImageCommand);
     const updateAgentTask = useWorkbenchAgentStore((state) => state.updateTask);
+    const navigate = useNavigate();
+    const setLaunchContext = useConversationAgentStore((state) => state.setLaunchContext);
     const processedCommandRef = useRef(0);
     const agentTaskIdRef = useRef<string | undefined>(undefined);
 
@@ -399,6 +403,16 @@ export default function ImagePage() {
                                 <div className="mb-2 flex items-center justify-between gap-3">
                                     <span className="text-base font-semibold">{t("workbench.prompt")}</span>
                                     <div className="flex gap-2">
+                                        <Button
+                                            size="small"
+                                            icon={<Sparkles className="size-3.5" />}
+                                            onClick={() => {
+                                                setLaunchContext({ page: "image", prompt, model, size: config.size, quality: config.quality, count: String(generationCount) });
+                                                navigate("/chat");
+                                            }}
+                                        >
+                                            {t("chat.workbenchEntry")}
+                                        </Button>
                                         <Button size="small" icon={<BookOpen className="size-3.5" />} onClick={() => setPromptDialogOpen(true)}>
                                             {t("workbench.viewPrompts")}
                                         </Button>
