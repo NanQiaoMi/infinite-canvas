@@ -1,6 +1,6 @@
 # 无限画布 · 服务端额度与管理员改造方案
 
-> 状态：待确认
+> 状态：已实施（本地分支 `feat/server-quota-admin`，未推送）
 > 性质：**本地改造，仅本地分支提交，不推送、不建 PR、不触发远端 CI**
 > 基线：`main` @ `9cd3dea`（v0.20.0 + 2 个文档提交）
 > 日期：2026-11-05
@@ -972,3 +972,35 @@ cd web && bun run build   # 构建产物在无 /api 的静态服务器下打开�
 7. `build(deploy): server docker image and local compose`
 8. `docs: server mode deployment, quota and admin documentation`
 9. `test: server and integration coverage`
+
+---
+
+## 16. 实施记录（2026-11-05，本地）
+
+已完成 P0–P5 的代码、测试与本机 Docker 验证；分支 `feat/server-quota-admin`，本地提交 3 个，**未推送**。
+
+已交付：
+
+- 服务端 `server/`：Bun + `bun:sqlite`，含身份（IP + 内置浏览器指纹 + 签名 Cookie）、按能力日/周额度（图片默认 100/日、700/周，文本/视频/音频默认不限额）、重置标记式手动刷新、`/api/relay` 中转（渠道白名单、Key 注入、模型校验、流式透传、媒体 SSRF 防护）、管理员鉴权（argon2id、会话、登录限流、审计）、渠道/额度/统计/访客管理接口。
+- 前端：启动探测服务端模式、内置指纹采集、额度指示器与生成前预检、配置弹窗适配、`/admin` 管理后台（渠道、额度策略、使用统计、用户与 IP、系统设置）、中英文案；静态模式完全保留。
+- 部署：`Dockerfile.server`、服务端 compose（3002 端口 + `./data` 数据卷 + `.env`）、README/文档/CHANGELOG/待验收清单更新。
+
+验证结果：
+
+- 服务端：`bun test server/tests` 25 项通过（额度窗口/预占结算/手动重置/跨天恢复/白名单/Key 注入/401/429）。
+- 前端：`tsc --noEmit` 通过；`bun test` 15 项通过；`bun run build` 通过。
+- Docker：`Dockerfile.server` 构建成功；容器 `infinite-canvas` 运行于 3002，健康检查通过，数据卷持久化。
+- 浏览器端到端（本机 3998 测试实例 + mock 上游）：服务端模式自动生效、匿名生成成功、额度 1/1 后第二次被拦截并提示重置时间、管理员登录、访客 IP/指纹列表、手动重置后恢复生成；中转请求为同源 `/api/relay`，浏览器内无真实 Key。
+- 容器实例：静态页面、bootstrap、管理员登录、渠道配置与从容器到宿主 mock 上游的中转均验证通过。
+
+已知限制：
+
+- Docker Desktop（macOS）端口映射下容器看到的客户端 IP 为网关地址（实测 `192.168.65.1`）；指纹为主要身份，IP 记录为容器视角。需要真实 IP 时可改用宿主进程运行、Docker host network 或部署到 Linux 服务器并配置 `TRUST_PROXY=1`。
+- 单实例部署（SQLite），不支持多实例水平扩展。
+- 自定义脚本按管理员编写的内容执行；脚本内若使用绝对 URL 直连则不会携带服务端 Key（服务端只对渠道白名单请求注入凭据）。
+
+上线后待办：
+
+1. 管理员登录 `/admin`，在「渠道管理」新增真实上游（容器访问宿主机服务用 `http://host.docker.internal:<port>`），拉取模型并设置默认模型。
+2. 如需调整额度，在「额度策略」修改图片日/周额度或为视频/音频设置额度。
+3. 如需真实客户端 IP，评估 host network / 反向代理方案后再设置 `TRUST_PROXY`。
