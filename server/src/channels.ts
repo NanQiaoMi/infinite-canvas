@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 
 import { nowMs } from "./clock";
 import { getJsonSetting, setJsonSetting, transaction } from "./db";
-import { decryptSecret, encryptSecret, maskSecret, normalizeBaseUrl } from "./security";
+import { decryptSecret, encryptSecret, maskSecret, normalizeBaseUrl, rewriteHostForDocker } from "./security";
 import type { ApiFormat, Capability, ChannelModelRecord, ChannelRecord, PublicChannel } from "./types";
 import { CAPABILITIES } from "./types";
 
@@ -98,13 +98,13 @@ export function maskedChannels(channels: InternalChannel[]) {
     }));
 }
 
-export function saveChannels(db: Database, secret: string, inputs: ChannelInput[]): void {
+export function saveChannels(db: Database, secret: string, inputs: ChannelInput[], options: { runningInDocker?: boolean } = {}): void {
     if (!Array.isArray(inputs)) throw new Error("channels_must_be_array");
     const existing = new Map(listChannels(db, secret, { includeDisabled: true }).map((channel) => [channel.id, channel]));
     transaction(db, () => {
         db.query("DELETE FROM channels").run();
         inputs.forEach((input, index) => {
-            const baseUrl = normalizeBaseUrl(stringValue(input.baseUrl));
+            const baseUrl = normalizeBaseUrl(rewriteHostForDocker(stringValue(input.baseUrl), Boolean(options.runningInDocker)));
             const apiFormat = mapApiFormat(input.apiFormat);
             const id = stringValue(input.id) || randomUUID();
             const keyInput = typeof input.apiKey === "string" ? input.apiKey.trim() : "";

@@ -1004,3 +1004,12 @@ cd web && bun run build   # 构建产物在无 /api 的静态服务器下打开�
 1. 管理员登录 `/admin`，在「渠道管理」新增真实上游（容器访问宿主机服务用 `http://host.docker.internal:<port>`），拉取模型并设置默认模型。
 2. 如需调整额度，在「额度策略」修改图片日/周额度或为视频/音频设置额度。
 3. 如需真实客户端 IP，评估 host network / 反向代理方案后再设置 `TRUST_PROXY`。
+
+### 16.1 后续修正：Docker 内访问宿主机服务（2026-11-05）
+
+实际接入本机 `chatgpt2api` 时发现典型问题：容器内 `localhost:3000` / `127.0.0.1:3000` 指向容器自身而不是宿主机，导致「拉取模型」返回空列表（请求返回的是无限画布自己的 HTML），看起来像“导入成功但没有模型”。已修正：
+
+- 服务端检测到运行在 Docker 内（`/.dockerenv`）时，保存渠道、测试渠道、中转请求都会把 `localhost` / `127.0.0.1` / `::1` 自动改写为 `host.docker.internal`；旧配置里的 localhost 也能直接工作。
+- 模型拉取失败（非 JSON、缺少 data/models、空列表）不再静默返回空数组，而是返回带排查提示的 400 错误。
+- 管理后台渠道编辑增加 Base URL 提示（宿主机服务用 `http://host.docker.internal:<端口>`），拉取 0 个模型时给出明确警告；README 同步说明。
+- 验证：`http://localhost:3000` 作为 Base URL 拉取到 22 个模型；经中转真实出图（gpt-image-2，57s，b64 1.38MB）与文本生成（`/v1/responses`，model auto，18.5s 返回 OK）均成功。

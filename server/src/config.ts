@@ -77,6 +77,8 @@ export function defaultQuotaPolicy(env: Record<string, string | undefined> = pro
 
 export type ServerConfig = {
     port: number;
+    /** 是否运行在 Docker 容器内（用于 localhost → host.docker.internal 改写）。 */
+    runningInDocker: boolean;
     dataDir: string;
     dbPath: string;
     schemaPath: string;
@@ -101,8 +103,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     mkdirSync(dataDir, { recursive: true });
     const schemaPath = join(import.meta.dir, "schema.sql");
     const webDistDir = resolve(env.WEB_DIST_DIR || join(projectRoot, "web", "dist"));
+    const runningInDocker = existsSync("/.dockerenv") || Boolean(env.DOCKER_CONTAINER);
     return {
         port: intEnv(env.PORT, 3000),
+        runningInDocker,
         dataDir,
         dbPath: join(dataDir, "app.db"),
         schemaPath,

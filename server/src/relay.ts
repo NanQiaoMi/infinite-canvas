@@ -6,7 +6,7 @@ import { HttpError, errorResponse, readBody, type RequestContext } from "./http"
 import { getClientFromRequest } from "./identity";
 import { log } from "./logger";
 import { quotaStatusFor, reserveQuota, settleQuota, type ReserveFailure } from "./quota";
-import { assertPublicHost, isUrlUnderBase, type RateLimiter } from "./security";
+import { assertPublicHost, isUrlUnderBase, rewriteUrlForDocker, type RateLimiter } from "./security";
 import type { Capability, ClientRecord, QuotaPolicy, QuotaStatus } from "./types";
 
 const CAPABILITY_LABELS: Record<Capability, string> = {
@@ -73,6 +73,8 @@ export function createRelayHandler(deps: RelayDeps) {
         }
         if (target.protocol !== "http:" && target.protocol !== "https:") throw new HttpError(400, "relay_invalid_protocol", "仅支持 http(s) 目标地址");
         if (target.username || target.password) throw new HttpError(400, "relay_invalid_url", "目标地址不合法");
+        // Docker 内 localhost/127.0.0.1 指向容器自身；统一改写为 host.docker.internal，兼容旧配置。
+        target = rewriteUrlForDocker(target, deps.config.runningInDocker);
 
         const method = req.method.toUpperCase();
         if (method === "CONNECT" || method === "TRACE") throw new HttpError(405, "method_not_allowed", "不支持的请求方法");

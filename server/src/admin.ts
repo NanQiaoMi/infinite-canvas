@@ -9,7 +9,7 @@ import { HttpError, assertSameOrigin, isSecureRequest, jsonResponse, parseCookie
 import { findClientById, listClientIps, setClientBlocked, type ClientRow } from "./identity";
 import { log } from "./logger";
 import { cleanupUsageEvents, isoWithOffset, quotaStatusFor, resetUsage, saveQuotaPolicy, startOfDay, startOfWeek, usageSince, usageTotals } from "./quota";
-import { hashPassword, normalizeBaseUrl, randomToken, RateLimiter, sha256, signValue, verifyPassword, verifySignedValue } from "./security";
+import { hashPassword, normalizeBaseUrl, randomToken, RateLimiter, rewriteHostForDocker, sha256, signValue, verifyPassword, verifySignedValue } from "./security";
 import type { Capability, CapabilityLimits, QuotaPolicy } from "./types";
 import { CAPABILITIES } from "./types";
 
@@ -133,8 +133,8 @@ function clampInt(value: string | null, fallback: number, min: number, max: numb
     return Math.min(max, Math.max(min, Math.floor(parsed)));
 }
 
-async function fetchChannelModels(baseUrl: string, apiKey: string, apiFormat: string): Promise<string[]> {
-    const base = normalizeBaseUrl(baseUrl);
+async function fetchChannelModels(baseUrl: string, apiKey: string, apiFormat: string, runningInDocker: boolean): Promise<string[]> {
+    const base = normalizeBaseUrl(rewriteHostForDocker(baseUrl, runningInDocker));
     const headers = new Headers();
     let url: string;
     if (apiFormat === "gemini") {
@@ -145,12 +145,30 @@ async function fetchChannelModels(baseUrl: string, apiKey: string, apiFormat: st
         headers.set("authorization", `Bearer ${apiKey}`);
     }
     const response = await fetch(url, { headers, signal: AbortSignal.timeout(15_000) });
-    if (!response.ok) throw new HttpError(400, "channel_test_failed", `上游返回 ${response.status}`);
-    const data = (await response.json().catch(() => null)) as Record<string, unknown> | null;
-    const rows = Array.isArray(data?.data) ? (data?.data as Array<Record<string, unknown>>) : Array.isArray(data?.models) ? (data?.models as Array<Record<string, unknown>>) : [];
-    return rows
+    const text = await response.text();
+    if (!response.ok) throw new HttpError(400, "channel_test_failed", `上游返回 ${response.status}：${text.slice(0, 200)}`);
+    let data: Record<string, unknown> | null = null;
+    try {
+        data = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+        data = null;
+    }
+    if (!data || typeof data !== "object") {
+        throw new HttpError(
+            400,
+            "channel_test_failed",
+            `上游返回的不是 JSON 模型列表（HTTP ${response.status}）。若服务端运行在 Docker 内，Base URL 中的 localhost/127.0.0.1 指向容器自身，访问宿主机服务请使用 http://host.docker.internal:<端口>（新版服务端会自动改写）。`,
+        );
+    }
+    const rows = Array.isArray(data.data) ? (data.data as Array<Record<string, unknown>>) : Array.isArray(data.models) ? (data.models as Array<Record<string, unknown>>) : null;
+    if (!rows) throw new HttpError(400, "channel_test_failed", `上游响应缺少 data/models 数组：${text.slice(0, 200)}`);
+    const models = rows
         .map((row) => (typeof row.id === "string" ? row.id : typeof row.name === "string" ? row.name.replace(/^models\//, "") : ""))
         .filter((name) => Boolean(name));
+    if (!models.length) {
+        throw new HttpError(400, "channel_test_failed", "上游返回空模型列表，请检查 Base URL 与 API Key；Docker 内访问宿主机服务请使用 host.docker.internal。");
+    }
+    return models;
 }
 
 export function registerAdminRoutes(router: Router, deps: AdminDeps) {
@@ -259,7 +277,7 @@ export function registerAdminRoutes(router: Router, deps: AdminDeps) {
         const body = await readJsonBody<{ channels?: ChannelInput[]; defaultModels?: Partial<Record<Capability, string>> }>(req, 4 * 1024 * 1024);
         if (!Array.isArray(body.channels)) throw new HttpError(400, "invalid_channels", "channels 必须是数组");
         try {
-            saveChannels(deps.db, deps.config.secret, body.channels);
+            saveChannels(deps.db, deps.config.secret, body.channels, { runningInDocker: deps.config.runningInDocker });
         } catch (error) {
             const message = error instanceof Error ? error.message : "保存渠道失败";
             throw new HttpError(400, "invalid_channels", message);
@@ -283,7 +301,7 @@ export function registerAdminRoutes(router: Router, deps: AdminDeps) {
             }
         }
         if (!baseUrl || !apiKey) throw new HttpError(400, "channel_test_missing", "缺少 Base URL 或 API Key");
-        const models = await fetchChannelModels(baseUrl, apiKey, apiFormat || "openai");
+        const models = await fetchChannelModels(baseUrl, apiKey, apiFormat || "openai", deps.config.runningInDocker);
         return jsonResponse({ ok: true, models });
     });
 

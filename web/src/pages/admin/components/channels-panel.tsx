@@ -144,10 +144,15 @@ export function ChannelsPanel() {
                 apiFormat: draft.apiFormat,
                 channelId: draft.id && !draft.id.startsWith("pending-") ? draft.id : undefined,
             });
+            if (!data.models.length) {
+                message.warning(t("server.admin.channels.fetchedEmpty"));
+                return;
+            }
             const existing = new Set(draft.models.map((model) => model.name));
             const additions = data.models.filter((name) => !existing.has(name)).map((name) => ({ name, capability: guessCapability(name) as ServerCapability }));
             patchDraft({ models: [...draft.models, ...additions] });
-            message.success(t("server.admin.channels.fetched", { count: additions.length }));
+            if (additions.length) message.success(t("server.admin.channels.fetched", { count: additions.length }));
+            else message.info(t("server.admin.channels.fetchedAll"));
         } catch (error) {
             message.error(error instanceof Error ? error.message : t("server.admin.common.failed"));
         } finally {
@@ -270,7 +275,8 @@ export function ChannelsPanel() {
                             </label>
                             <label className="block md:col-span-2">
                                 <span className="mb-1 block text-sm font-medium">{t("server.admin.channels.baseUrl")}</span>
-                                <Input value={draft.baseUrl} placeholder="https://api.example.com" onChange={(event) => patchDraft({ baseUrl: event.target.value })} />
+                                <Input value={draft.baseUrl} placeholder="http://host.docker.internal:3000" onChange={(event) => patchDraft({ baseUrl: event.target.value })} />
+                                <span className="mt-1 block text-[11px] text-stone-400">{t("server.admin.channels.baseUrlHint")}</span>
                             </label>
                             <label className="block md:col-span-2">
                                 <span className="mb-1 block text-sm font-medium">{t("server.admin.channels.apiKey")}</span>

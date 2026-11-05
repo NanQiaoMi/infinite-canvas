@@ -193,3 +193,31 @@ export function isUrlUnderBase(target: string, base: string): boolean {
     if (target === normalizedBase) return true;
     return target.startsWith(`${normalizedBase}/`);
 }
+
+
+// ---------- Docker 内访问宿主机 ----------
+
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+
+/**
+ * 服务端运行在 Docker 内时，localhost/127.0.0.1 指向容器自身；
+ * 管理员填写的本机服务地址统一改写为 host.docker.internal，避免「模型拉取为空/请求失败」。
+ */
+export function rewriteHostForDocker(value: string, runningInDocker: boolean): string {
+    if (!runningInDocker || !value) return value;
+    try {
+        const url = new URL(value);
+        if (!LOOPBACK_HOSTS.has(url.hostname)) return value;
+        url.hostname = "host.docker.internal";
+        return url.toString().replace(/\/+$/, "");
+    } catch {
+        return value;
+    }
+}
+
+export function rewriteUrlForDocker(target: URL, runningInDocker: boolean): URL {
+    if (!runningInDocker || !LOOPBACK_HOSTS.has(target.hostname)) return target;
+    const clone = new URL(target.toString());
+    clone.hostname = "host.docker.internal";
+    return clone;
+}

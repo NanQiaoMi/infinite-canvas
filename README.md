@@ -170,6 +170,8 @@ docker compose -f docker-compose.local.yml up -d --build
 - 普通用户入口：`http://localhost:3002`
 - 管理后台：`http://localhost:3002/admin`
 
+> 容器内访问宿主机上的服务（例如本机 `chatgpt2api`）时，渠道 Base URL 请填 `http://host.docker.internal:<端口>`；新版服务端会自动把 `localhost` / `127.0.0.1` 改写为 `host.docker.internal`。
+
 数据保存在 `./data`（SQLite 与签名密钥），升级或重启不会丢失。
 
 ## 效果展示

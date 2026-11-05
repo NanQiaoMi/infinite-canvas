@@ -24,6 +24,7 @@ beforeAll(() => {
         fetch(req) {
             const url = new URL(req.url);
             upstreamCalls.push({ path: url.pathname, authorization: req.headers.get("authorization") });
+            if (url.pathname.endsWith("/models")) return Response.json({ object: "list", data: [{ id: "img-1" }, { id: "txt-1" }] });
             return Response.json({ created: 1, data: [{ b64_json: "QUJD" }] });
         },
     });
