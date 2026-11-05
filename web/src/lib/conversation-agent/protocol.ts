@@ -156,7 +156,7 @@ export function serializeToolResult(call: AgentToolCall, result: AgentToolResult
     if (!result.ok) {
         return `<tool_result name="${call.tool}" status="error" code="${result.code}">${JSON.stringify({ error: result.error })}</tool_result>`;
     }
-    if (result.tool === "generate_image") {
+    if (result.tool === "generate_image" || result.tool === "edit_image") {
         const payload = {
             images: result.images.map((image) => ({ id: image.id, width: image.width, height: image.height })),
             model: result.model,
@@ -164,7 +164,7 @@ export function serializeToolResult(call: AgentToolCall, result: AgentToolResult
             count: result.count,
             ...(result.quota ? { quota: result.quota } : {}),
         };
-        return `<tool_result name="generate_image" status="ok">${JSON.stringify(payload)}</tool_result>`;
+        return `<tool_result name="${call.tool}" status="ok">${JSON.stringify(payload)}</tool_result>`;
     }
     return `<tool_result name="apply_prompt" status="ok">${JSON.stringify({ target: result.target, filled: true })}</tool_result>`;
 }

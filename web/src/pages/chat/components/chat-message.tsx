@@ -1,11 +1,13 @@
 import { App, Button } from "antd";
 import { ArrowUpRight, Copy, RefreshCw, SlidersHorizontal, TriangleAlert, Wrench } from "lucide-react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { Streamdown } from "streamdown";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 
 import { useCopyText } from "@/hooks/use-copy-text";
-import type { AgentMessage, AgentToolResult } from "@/lib/conversation-agent/types";
+import type { AgentImageRef, AgentMessage, AgentToolResult } from "@/lib/conversation-agent/types";
+import { ensureImagePreview, getImagePreviewRevision, resolveImageUrl, subscribeImagePreviews } from "@/services/image-storage";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
 
 import { ImageResultGrid } from "./image-result-card";
@@ -39,11 +41,38 @@ function PromptCard({ text }: { text: string }) {
 
 function toolLabel(tool: string, t: (key: string) => string) {
     if (tool === "generate_image") return t("chat.tools.names.generate_image");
+    if (tool === "edit_image") return t("chat.tools.names.edit_image");
     if (tool === "apply_prompt") return t("chat.tools.names.apply_prompt");
     return tool || t("chat.tools.names.unknown");
 }
 
-function ToolResultBody({ result }: { result: AgentToolResult }) {
+function UserAttachments({ images }: { images: AgentImageRef[] }) {
+    const revision = useSyncExternalStore(subscribeImagePreviews, getImagePreviewRevision);
+    const [urls, setUrls] = useState<string[]>([]);
+    useEffect(() => {
+        let active = true;
+        void Promise.all(
+            images.map(async (image) => {
+                await ensureImagePreview(image.storageKey);
+                return resolveImageUrl(image.storageKey);
+            }),
+        ).then((list) => {
+            if (active) setUrls(list);
+        });
+        return () => {
+            active = false;
+        };
+    }, [images, revision]);
+    return (
+        <div className="mt-1 flex justify-end gap-1.5">
+            {images.map((image, index) =>
+                urls[index] ? <img key={image.id} src={urls[index]} alt="reference" className="size-16 rounded-lg border border-stone-200 object-cover dark:border-stone-700" /> : null,
+            )}
+        </div>
+    );
+}
+
+function ToolResultBody({ result, onUseReference }: { result: AgentToolResult; onUseReference?: (image: AgentImageRef) => void }) {
     const { t } = useTranslation();
     const navigate = useNavigate();
     if (!result.ok) {
@@ -54,14 +83,14 @@ function ToolResultBody({ result }: { result: AgentToolResult }) {
             </div>
         );
     }
-    if (result.tool === "generate_image") {
+    if (result.tool === "generate_image" || result.tool === "edit_image") {
         return (
             <div className="space-y-2">
                 <div className="text-xs text-stone-500 dark:text-stone-400">
                     {t("chat.tools.generated", { count: result.count, model: result.model, size: result.size })}
                     {result.quota ? ` · ${t("chat.tools.quota", { used: result.quota.dailyUsed, limit: result.quota.dailyLimit })}` : ""}
                 </div>
-                <ImageResultGrid images={result.images} />
+                <ImageResultGrid images={result.images} onUseAsReference={onUseReference} />
             </div>
         );
     }
@@ -76,12 +105,15 @@ function ToolResultBody({ result }: { result: AgentToolResult }) {
     );
 }
 
-export function ChatMessage({ message, onRetry }: { message: AgentMessage; onRetry?: () => void }) {
+export function ChatMessage({ message, onRetry, onUseReference }: { message: AgentMessage; onRetry?: () => void; onUseReference?: (image: AgentImageRef) => void }) {
     const { t } = useTranslation();
     if (message.role === "user") {
         return (
             <div className="flex justify-end">
-                <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-stone-900 px-3.5 py-2 text-sm leading-6 text-white dark:bg-stone-100 dark:text-stone-900">{message.text}</div>
+                <div className="max-w-[85%]">
+                    <div className="whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-stone-900 px-3.5 py-2 text-sm leading-6 text-white dark:bg-stone-100 dark:text-stone-900">{message.text}</div>
+                    {message.attachments?.length ? <UserAttachments images={message.attachments} /> : null}
+                </div>
             </div>
         );
     }
@@ -107,7 +139,7 @@ export function ChatMessage({ message, onRetry }: { message: AgentMessage; onRet
                         <span className={message.result.ok ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}>{message.result.ok ? t("chat.tools.success") : t("chat.tools.failed")}</span>
                     </div>
                     {typeof message.call.arguments.prompt === "string" ? <div className="truncate text-[11px] text-stone-400">{message.call.arguments.prompt}</div> : null}
-                    <ToolResultBody result={message.result} />
+                    <ToolResultBody result={message.result} onUseReference={onUseReference} />
                 </div>
             </div>
         );

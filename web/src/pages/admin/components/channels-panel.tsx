@@ -7,7 +7,7 @@ import { useTranslation } from "react-i18next";
 import { ModelScriptEditor } from "@/components/layout/model-script-editor";
 import { serverApi } from "@/services/api/server";
 import { guessCapability } from "@/stores/use-config-store";
-import type { AdminChannel, AdminChannelInput, ServerApiFormat, ServerCapability } from "@/types/server";
+import type { AdminChannel, AdminChannelInput, ServerApiFormat, ServerCapability, ServerToolProtocol } from "@/types/server";
 
 import { ADMIN_CAPABILITIES, capabilityLabelKey } from "../format";
 import { ModelImportModal, type ImportedModel } from "./model-import-modal";
@@ -20,6 +20,7 @@ type DraftChannel = {
     name: string;
     baseUrl: string;
     apiFormat: ServerApiFormat;
+    toolProtocol: ServerToolProtocol;
     enabled: boolean;
     apiKey: string;
     models: DraftModel[];
@@ -30,8 +31,14 @@ const API_FORMAT_OPTIONS: Array<{ value: ServerApiFormat; label: string }> = [
     { value: "gemini", label: "Gemini" },
 ];
 
+const TOOL_PROTOCOL_OPTIONS: Array<{ value: ServerToolProtocol; labelKey: string }> = [
+    { value: "auto", labelKey: "toolProtocolAuto" },
+    { value: "text", labelKey: "toolProtocolText" },
+    { value: "native", labelKey: "toolProtocolNative" },
+];
+
 function emptyDraft(): DraftChannel {
-    return { id: "", name: "", baseUrl: "", apiFormat: "openai", enabled: true, apiKey: "", models: [] };
+    return { id: "", name: "", baseUrl: "", apiFormat: "openai", toolProtocol: "auto", enabled: true, apiKey: "", models: [] };
 }
 
 export function ChannelsPanel() {
@@ -72,6 +79,7 @@ export function ChannelsPanel() {
             name: channel.name,
             baseUrl: channel.baseUrl,
             apiFormat: channel.apiFormat,
+            toolProtocol: channel.toolProtocol,
             enabled: channel.enabled,
             apiKey: "",
             models: channel.models.map((model) => ({ name: model.name, capability: model.capability, script: model.script })),
@@ -88,6 +96,7 @@ export function ChannelsPanel() {
                 name: channel.name,
                 baseUrl: channel.baseUrl,
                 apiFormat: channel.apiFormat,
+                toolProtocol: channel.toolProtocol,
                 enabled: channel.enabled,
                 models: channel.models.map((model) => ({ name: model.name, capability: model.capability, script: model.script })),
                 apiKey: keyOverride && channel.id === keyOverride.id ? keyOverride.apiKey : channel.id === draft?.id ? draft.apiKey : "",
@@ -120,6 +129,7 @@ export function ChannelsPanel() {
             name: draft.name.trim() || draft.baseUrl,
             baseUrl: draft.baseUrl.trim(),
             apiFormat: draft.apiFormat,
+            toolProtocol: draft.toolProtocol,
             enabled: draft.enabled,
             apiKeyMasked: "",
             hasApiKey: Boolean(draft.apiKey),
@@ -300,6 +310,7 @@ export function ChannelsPanel() {
                             <label className="block">
                                 <span className="mb-1 block text-sm font-medium">{t("server.admin.channels.protocol")}</span>
                                 <Select className="w-full" value={draft.apiFormat} options={API_FORMAT_OPTIONS} onChange={(value) => patchDraft({ apiFormat: value })} />
+                                <span className="mt-1 block text-[11px] text-stone-400">{t("server.admin.channels.toolProtocolHint")}</span>
                             </label>
                             <label className="block md:col-span-2">
                                 <span className="mb-1 block text-sm font-medium">{t("server.admin.channels.baseUrl")}</span>

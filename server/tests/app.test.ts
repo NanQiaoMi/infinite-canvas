@@ -189,6 +189,7 @@ describe("管理员鉴权与渠道配置", () => {
                         name: "mock",
                         baseUrl: upstreamBase,
                         apiFormat: "openai",
+                        toolProtocol: "native",
                         apiKey: "sk-test-key",
                         models: [
                             { name: "img-1", capability: "image" },
@@ -202,6 +203,9 @@ describe("管理员鉴权与渠道配置", () => {
         expect(response.status).toBe(200);
         const data = (await response.json()) as any;
         expect(data.defaultModels.image).toBe("ch1::img-1");
+        const bootstrap = await request(ctx, "/api/bootstrap");
+        const bootstrapData = (await bootstrap.json()) as any;
+        expect(bootstrapData.channels[0].toolProtocol).toBe("native");
         expect(data.defaultModels.text).toBe("ch1::txt-1");
         ctx.cleanup();
     });

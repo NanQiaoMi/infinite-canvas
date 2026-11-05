@@ -87,6 +87,41 @@ describe("对话运行时", () => {
         expect(result.messages[2].role === "assistant" && result.messages[2].text).toBe("抱歉，我重新说明。");
     });
 
+    test("模型声称无法执行工具时自动纠错并继续调用", async () => {
+        const modelMessages: string[][] = [];
+        const turns: AgentModelTurnResult[] = [
+            turn("当前后端暂不支持直接执行图片生成工具，无法在这里实际生成图片。"),
+            turn('```tool\n{"tool":"generate_image","arguments":{"prompt":"苹果"}}\n```'),
+            turn("已经生成完成。"),
+        ];
+        let index = 0;
+        const result = await runAgentTurn({
+            locale: "zh",
+            messages: [{ id: "u1", role: "user", text: "生成一张苹果图片", createdAt: 0 }],
+            tools: [],
+            buildContext: () => context,
+            callModel: async ({ messages }) => {
+                modelMessages.push(messages.map((message) => `${message.role}:${message.content}`));
+                const next = turns[Math.min(index, turns.length - 1)];
+                index += 1;
+                return next;
+            },
+            executeTool: async () => ({
+                tool: "generate_image",
+                ok: true,
+                model: "gpt-image-2",
+                size: "1024x1024",
+                count: 1,
+                images: [{ id: "img_1", width: 1024, height: 1024, prompt: "苹果", model: "gpt-image-2" }],
+            }),
+            signal: new AbortController().signal,
+        });
+        expect(modelMessages).toHaveLength(3);
+        expect(modelMessages[2].some((entry) => entry.includes("系统纠错"))).toBe(true);
+        expect(result.messages.map((message) => message.role)).toEqual(["assistant", "assistant", "tool", "assistant"]);
+        expect(result.messages[2].role === "tool" && result.messages[2].result.ok).toBe(true);
+    });
+
     test("工具调用轮次过多时停止", async () => {
         const options: AgentRuntimeOptions = {
             locale: "zh",

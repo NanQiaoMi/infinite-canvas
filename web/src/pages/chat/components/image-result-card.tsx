@@ -1,6 +1,6 @@
 import { App, Button, Image, Tooltip } from "antd";
 import { saveAs } from "file-saver";
-import { Download, FolderPlus, ImageIcon, LoaderCircle, SlidersHorizontal } from "lucide-react";
+import { Download, FolderPlus, ImageIcon, LoaderCircle, Pencil, SlidersHorizontal } from "lucide-react";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -9,7 +9,7 @@ import { useAssetStore } from "@/stores/use-asset-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
 import type { AgentImageRef } from "@/lib/conversation-agent/types";
 
-export function ImageResultCard({ image }: { image: AgentImageRef }) {
+export function ImageResultCard({ image, onUseAsReference }: { image: AgentImageRef; onUseAsReference?: (image: AgentImageRef) => void }) {
     const { t } = useTranslation();
     const { message } = App.useApp();
     const revision = useSyncExternalStore(subscribeImagePreviews, getImagePreviewRevision);
@@ -81,13 +81,18 @@ export function ImageResultCard({ image }: { image: AgentImageRef }) {
                     <Tooltip title={t("chat.actions.fillWorkbench")}>
                         <Button size="small" type="text" icon={<SlidersHorizontal className="size-3.5" />} onClick={fillWorkbench} />
                     </Tooltip>
+                    {onUseAsReference ? (
+                        <Tooltip title={t("chat.actions.useAsReference")}>
+                            <Button size="small" type="text" icon={<Pencil className="size-3.5" />} onClick={() => onUseAsReference(image)} />
+                        </Tooltip>
+                    ) : null}
                 </div>
             </div>
         </div>
     );
 }
 
-export function ImageResultGrid({ images }: { images: AgentImageRef[] }) {
+export function ImageResultGrid({ images, onUseAsReference }: { images: AgentImageRef[]; onUseAsReference?: (image: AgentImageRef) => void }) {
     const { t } = useTranslation();
     if (!images.length) {
         return (
@@ -100,7 +105,7 @@ export function ImageResultGrid({ images }: { images: AgentImageRef[] }) {
     return (
         <div className="grid max-w-xl grid-cols-2 gap-2 sm:grid-cols-3">
             {images.map((image) => (
-                <ImageResultCard key={image.id} image={image} />
+                <ImageResultCard key={image.id} image={image} onUseAsReference={onUseAsReference} />
             ))}
         </div>
     );

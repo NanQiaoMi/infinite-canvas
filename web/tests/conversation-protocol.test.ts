@@ -95,6 +95,22 @@ describe("对话输出协议", () => {
         expect(validateArguments(schema, { prompt: "ok", quality: "ultra" }).ok).toBe(false);
     });
 
+    test("edit_image 结果序列化使用实际工具名", () => {
+        const text = serializeToolResult(
+            { tool: "edit_image", arguments: { prompt: "改背景" } },
+            {
+                tool: "edit_image",
+                ok: true,
+                model: "gpt-image-2",
+                size: "1024x1024",
+                count: 1,
+                images: [{ id: "img_2", storageKey: "secret-key", width: 1024, height: 1024, prompt: "改背景", model: "gpt-image-2" }],
+            },
+        );
+        expect(text).toContain('<tool_result name="edit_image" status="ok">');
+        expect(text).not.toContain("secret-key");
+    });
+
     test("工具结果序列化不包含本地 storageKey", () => {
         const text = serializeToolResult(
             { tool: "generate_image", arguments: {} },

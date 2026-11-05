@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS channels (
     base_url TEXT NOT NULL,
     api_key_cipher TEXT NOT NULL DEFAULT '',
     api_format TEXT NOT NULL DEFAULT 'openai',
+    tool_protocol TEXT NOT NULL DEFAULT 'auto',
     enabled INTEGER NOT NULL DEFAULT 1,
     sort INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,

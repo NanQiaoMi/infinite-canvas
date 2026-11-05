@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { nowMs } from "./clock";
 import { getJsonSetting, setJsonSetting, transaction } from "./db";
 import { decryptSecret, encryptSecret, maskSecret, normalizeBaseUrl, rewriteHostForDocker } from "./security";
-import type { ApiFormat, Capability, ChannelModelRecord, ChannelRecord, PublicChannel } from "./types";
+import type { ApiFormat, Capability, ChannelModelRecord, ChannelRecord, PublicChannel, ToolProtocol } from "./types";
 import { CAPABILITIES } from "./types";
 
 type ChannelRow = {
@@ -13,6 +13,7 @@ type ChannelRow = {
     base_url: string;
     api_key_cipher: string;
     api_format: string;
+    tool_protocol: string;
     enabled: number;
     sort: number;
     created_at: number;
@@ -35,6 +36,7 @@ export type ChannelInput = {
     baseUrl?: string;
     apiKey?: string;
     apiFormat?: string;
+    toolProtocol?: string;
     enabled?: boolean;
     models?: Array<{ name?: string; capability?: string; script?: string }>;
 };
@@ -47,6 +49,10 @@ function mapCapability(value: string | undefined): Capability {
 
 function mapApiFormat(value: string | undefined): ApiFormat {
     return value === "gemini" ? "gemini" : "openai";
+}
+
+function mapToolProtocol(value: string | undefined): ToolProtocol {
+    return value === "native" || value === "text" ? value : "auto";
 }
 
 export function listChannels(db: Database, secret: string, options: { includeDisabled?: boolean } = {}): InternalChannel[] {
@@ -65,6 +71,7 @@ export function listChannels(db: Database, secret: string, options: { includeDis
         name: row.name,
         baseUrl: row.base_url,
         apiFormat: mapApiFormat(row.api_format),
+        toolProtocol: mapToolProtocol(row.tool_protocol),
         enabled: row.enabled === 1,
         apiKey: decryptSecret(secret, row.api_key_cipher),
         sort: row.sort,
@@ -80,6 +87,7 @@ export function publicChannels(channels: InternalChannel[]): PublicChannel[] {
             name: channel.name,
             baseUrl: channel.baseUrl,
             apiFormat: channel.apiFormat,
+            toolProtocol: channel.toolProtocol,
             models: channel.models.map((model) => ({ name: model.name, capability: model.capability, ...(model.script ? { script: model.script } : {}) })),
         }));
 }
@@ -91,6 +99,7 @@ export function maskedChannels(channels: InternalChannel[]) {
         name: channel.name,
         baseUrl: channel.baseUrl,
         apiFormat: channel.apiFormat,
+        toolProtocol: channel.toolProtocol,
         enabled: channel.enabled,
         apiKeyMasked: maskSecret(channel.apiKey),
         hasApiKey: Boolean(channel.apiKey),
@@ -106,14 +115,15 @@ export function saveChannels(db: Database, secret: string, inputs: ChannelInput[
         inputs.forEach((input, index) => {
             const baseUrl = normalizeBaseUrl(rewriteHostForDocker(stringValue(input.baseUrl), Boolean(options.runningInDocker)));
             const apiFormat = mapApiFormat(input.apiFormat);
+            const toolProtocol = mapToolProtocol(input.toolProtocol);
             const id = stringValue(input.id) || randomUUID();
             const keyInput = typeof input.apiKey === "string" ? input.apiKey.trim() : "";
             const preservedKey = existing.get(id)?.apiKey ?? "";
             const plaintextKey = keyInput || preservedKey;
             const now = nowMs();
             db.query(
-                "INSERT INTO channels (id, name, base_url, api_key_cipher, api_format, enabled, sort, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ).run(id, stringValue(input.name) || `渠道 ${index + 1}`, baseUrl, encryptSecret(secret, plaintextKey), apiFormat, input.enabled === false ? 0 : 1, index, now, now);
+                "INSERT INTO channels (id, name, base_url, api_key_cipher, api_format, tool_protocol, enabled, sort, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ).run(id, stringValue(input.name) || `渠道 ${index + 1}`, baseUrl, encryptSecret(secret, plaintextKey), apiFormat, toolProtocol, input.enabled === false ? 0 : 1, index, now, now);
             const seen = new Set<string>();
             for (const model of input.models ?? []) {
                 const name = stringValue(model.name).replace(/^models\//, "").trim();

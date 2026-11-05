@@ -4,8 +4,9 @@ import { nanoid } from "nanoid";
 import { quotaExhausted, useQuotaStore } from "@/stores/use-quota-store";
 import { selectableModelsByCapability, useConfigStore } from "@/stores/use-config-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
-import { requestGeneration } from "@/services/api/image";
-import { uploadImage } from "@/services/image-storage";
+import { requestEdit, requestGeneration } from "@/services/api/image";
+import { getImageBlob, resolveImageUrl, uploadImage } from "@/services/image-storage";
+import type { ReferenceImage } from "@/types/image";
 
 import { validateArguments } from "./protocol";
 import type { AgentImageRef, AgentQuotaSnapshot, AgentToolCall, AgentToolDefinition, AgentToolErrorCode, AgentToolResult } from "./types";
@@ -26,6 +27,22 @@ export const AGENT_TOOLS: AgentToolDefinition[] = [
                 size: { type: "string", description: "尺寸，如 1024x1024；省略时使用默认尺寸" },
                 quality: { type: "string", enum: ["low", "medium", "high", "xhigh", "max"], description: "质量，省略时使用默认质量" },
                 background: { type: "string", enum: ["transparent", "auto"], description: "背景，省略时使用默认值" },
+                model: { type: "string", description: "图片模型名；必须是当前可用图片模型之一" },
+            },
+            required: ["prompt"],
+        },
+    },
+    {
+        name: "edit_image",
+        description: "基于用户本轮提供的参考图修改图片（换风格、改背景、加元素等）。参考图由系统自动传入，arguments 只需要 prompt；没有参考图时改用 generate_image。",
+        parameters: {
+            type: "object",
+            properties: {
+                prompt: { type: "string", description: "修改要求/提示词" },
+                count: { type: "integer", minimum: 1, maximum: 4, description: "生成张数，默认 1" },
+                size: { type: "string", description: "尺寸，如 1024x1024；省略时沿用参考图或默认尺寸" },
+                quality: { type: "string", enum: ["low", "medium", "high", "xhigh", "max"] },
+                background: { type: "string", enum: ["transparent", "auto"] },
                 model: { type: "string", description: "图片模型名；必须是当前可用图片模型之一" },
             },
             required: ["prompt"],
@@ -127,6 +144,52 @@ async function executeGenerateImage(call: AgentToolCall, context: { signal: Abor
     }
 }
 
+async function executeEditImage(call: AgentToolCall, context: { signal: AbortSignal; references?: AgentImageRef[] }): Promise<AgentToolResult> {
+    const args = call.arguments;
+    const prompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
+    if (!prompt) return failure("edit_image", "invalid_args", t("toolErrors.promptRequired") as string);
+    const candidates = (context.references ?? []).filter((reference) => reference.storageKey);
+    if (!candidates.length) return failure("edit_image", "invalid_args", t("toolErrors.referenceRequired") as string);
+    const resolved = resolveImageModelOption(typeof args.model === "string" ? args.model : "");
+    if ("error" in resolved) return failure("edit_image", "invalid_args", resolved.error);
+    const config = useConfigStore.getState().config;
+    const count = Math.max(1, Math.min(4, typeof args.count === "number" ? args.count : 1));
+    const modelOption = resolved.option;
+    const generationConfig = {
+        ...config,
+        model: modelOption,
+        count: String(count),
+        ...(typeof args.size === "string" && args.size.trim() ? { size: args.size.trim() } : {}),
+        ...(typeof args.quality === "string" ? { quality: args.quality } : {}),
+        ...(typeof args.background === "string" ? { background: args.background } : {}),
+    };
+    try {
+        const references: ReferenceImage[] = await Promise.all(
+            candidates.map(async (reference) => {
+                const url = await resolveImageUrl(reference.storageKey);
+                const blob = reference.storageKey ? await getImageBlob(reference.storageKey) : null;
+                return { id: reference.id, name: `${reference.id}.png`, type: blob?.type || "image/png", dataUrl: url, storageKey: reference.storageKey };
+            }),
+        );
+        const generated = await requestEdit(generationConfig, prompt, references, { signal: context.signal });
+        if (!generated.length) return failure("edit_image", "execution_failed", t("toolErrors.noImageReturned") as string);
+        const stored = await Promise.all(generated.map((image) => uploadImage(image.dataUrl)));
+        await useQuotaStore.getState().refresh().catch(() => undefined);
+        const images: AgentImageRef[] = stored.map((image) => ({
+            id: `img_${nanoid(6)}`,
+            storageKey: image.storageKey,
+            width: image.width,
+            height: image.height,
+            prompt,
+            model: IMAGE_MODEL_LABEL(modelOption),
+        }));
+        return { tool: "edit_image", ok: true, images, model: IMAGE_MODEL_LABEL(modelOption), size: generationConfig.size, count: images.length, quota: imageQuotaSnapshot() };
+    } catch (error) {
+        if (context.signal.aborted) return cancelFailure("edit_image");
+        return quotaFailureIfExhausted("edit_image", error);
+    }
+}
+
 async function executeApplyPrompt(call: AgentToolCall, context: { signal: AbortSignal }): Promise<AgentToolResult> {
     const args = call.arguments;
     if (context.signal.aborted) return cancelFailure("apply_prompt");
@@ -155,13 +218,14 @@ async function executeApplyPrompt(call: AgentToolCall, context: { signal: AbortS
     return { tool: "apply_prompt", ok: true, target, prompt };
 }
 
-export async function executeAgentTool(call: AgentToolCall, context: { signal: AbortSignal }): Promise<AgentToolResult> {
+export async function executeAgentTool(call: AgentToolCall, context: { signal: AbortSignal; references?: AgentImageRef[] }): Promise<AgentToolResult> {
     const definition = AGENT_TOOLS.find((tool) => tool.name === call.tool);
     if (!definition) return failure(call.tool || "unknown", "unsupported", t("toolErrors.unknownTool", { name: call.tool || "?" }) as string);
     const validation = validateArguments(definition.parameters, call.arguments);
     if (!validation.ok) return failure(call.tool, "invalid_args", validation.error);
     try {
         if (call.tool === "generate_image") return await executeGenerateImage({ ...call, arguments: validation.value }, context);
+        if (call.tool === "edit_image") return await executeEditImage({ ...call, arguments: validation.value }, context);
         return await executeApplyPrompt({ ...call, arguments: validation.value }, context);
     } catch (error) {
         if (context.signal.aborted) return cancelFailure(call.tool);

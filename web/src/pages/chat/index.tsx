@@ -10,8 +10,9 @@ import { nativeToolCallsToAgent } from "@/lib/conversation-agent/protocol";
 import { runAgentTurn } from "@/lib/conversation-agent/runtime";
 import { agentLocaleOf } from "@/lib/conversation-agent/system-prompt";
 import { AGENT_TOOLS, executeAgentTool } from "@/lib/conversation-agent/tools";
-import type { AgentContextInput, AgentEvent, AgentMessage, AgentModelCall, AgentToolCall } from "@/lib/conversation-agent/types";
+import type { AgentContextInput, AgentEvent, AgentImageRef, AgentMessage, AgentModelCall } from "@/lib/conversation-agent/types";
 import { requestConversationTurn } from "@/services/api/image";
+import { uploadImage } from "@/services/image-storage";
 import { selectableModelsByCapability, useConfigStore } from "@/stores/use-config-store";
 import { useConversationAgentStore } from "@/stores/use-conversation-agent-store";
 import { useQuotaStore } from "@/stores/use-quota-store";
@@ -45,7 +46,11 @@ export default function ChatPage() {
     const setRunningTool = useConversationAgentStore((state) => state.setRunningTool);
     const setLaunchContext = useConversationAgentStore((state) => state.setLaunchContext);
     const textModel = useConfigStore((state) => state.config.textModel);
+    const quotaStatus = useQuotaStore((state) => state.status);
+    const imageUsage = quotaStatus?.capabilities?.image;
+    const quotaHint = imageUsage && imageUsage.dailyLimit > 0 ? t("chat.quotaHint", { used: imageUsage.dailyUsed, limit: imageUsage.dailyLimit }) : "";
     const [input, setInput] = useState("");
+    const [references, setReferences] = useState<AgentImageRef[]>([]);
     const [pageContext, setPageContext] = useState<string | undefined>(undefined);
     const [listOpen, setListOpen] = useState(false);
     const controllerRef = useRef<AbortController | null>(null);
@@ -87,16 +92,18 @@ export default function ChatPage() {
     }, [pageContext]);
 
     const callModel: AgentModelCall = useCallback(
-        async ({ systemPrompt, messages, signal, onDelta }) => {
+        async ({ systemPrompt, messages, tools, signal, onDelta }) => {
             const config = useConfigStore.getState().config;
             if (!config.textModel) throw new Error(t("chat.errors.noTextModel"));
-            // 当前部署的 chatgpt2api 不支持原生 function calling：声明 tools 会让模型声称「后端不支持」，
-            // 因此这里只走系统提示词约定的文本工具协议，不发送原生工具声明。
+            // chatgpt2api 不支持原生 function calling：声明 tools 会让模型声称「后端不支持」，
+            // 因此只有管理员把渠道工具协议设为 native 时才发送原生 tools，其余走系统提示词的文本协议。
+            const textChannel = config.channels.find((channel) => channel.id === (config.textModel.split("::")[0] || ""));
+            const nativeTools = textChannel?.toolProtocol === "native";
             const run = () =>
                 requestConversationTurn(
                     { ...config, model: config.textModel },
                     messages.map((item) => ({ role: item.role, content: item.content })),
-                    { systemPrompt, tools: [], onDelta, signal },
+                    { systemPrompt, tools: nativeTools ? tools.map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters })) : [], onDelta, signal },
                 );
             let turn;
             try {
@@ -119,7 +126,9 @@ export default function ChatPage() {
             if (useConversationAgentStore.getState().running) return;
             let sessionId = useConversationAgentStore.getState().activeSessionId;
             if (!sessionId) sessionId = createSession();
-            appendMessages(sessionId, [{ id: nanoid(), role: "user", text, createdAt: Date.now() }]);
+            const attachments = references.length ? references : undefined;
+            appendMessages(sessionId, [{ id: nanoid(), role: "user", text, attachments, createdAt: Date.now() }]);
+            setReferences([]);
             setInput("");
             setStreamingText("");
             setRunning(true);
@@ -140,6 +149,7 @@ export default function ChatPage() {
                         else if (event.type === "tool-end") setRunningTool(null);
                     },
                     signal: controller.signal,
+                    references: attachments,
                 });
                 appendMessages(sessionId, result.messages);
                 if (result.roundLimitReached) appendMessages(sessionId, [{ id: nanoid(), role: "error", text: t("chat.errors.tooManyRounds"), createdAt: Date.now() }]);
@@ -160,11 +170,25 @@ export default function ChatPage() {
                 useQuotaStore.getState().scheduleRefresh();
             }
         },
-        [appendMessages, buildContext, callModel, createSession, input, setRunning, setRunningTool, setStreamingText, t],
+        [appendMessages, buildContext, callModel, createSession, input, references, setRunning, setRunningTool, setStreamingText, t],
     );
 
     const stop = () => {
         controllerRef.current?.abort();
+    };
+
+    const addReferenceFiles = async (files: File[]) => {
+        const added = await Promise.all(
+            files.map(async (file) => {
+                const image = await uploadImage(file);
+                return { id: nanoid(), storageKey: image.storageKey, width: image.width, height: image.height, prompt: "", model: "" } satisfies AgentImageRef;
+            }),
+        );
+        setReferences((current) => [...current, ...added]);
+    };
+
+    const useReference = (image: AgentImageRef) => {
+        setReferences((current) => (current.some((item) => item.storageKey === image.storageKey) ? current : [...current, { ...image, id: nanoid() }]));
     };
 
     const retryMessage = (index: number) => {
@@ -244,7 +268,7 @@ export default function ChatPage() {
                             </div>
                         ) : (
                             activeSession.messages.map((item, index) => (
-                                <ChatMessage key={item.id} message={item} onRetry={item.role === "error" ? () => retryMessage(index) : undefined} />
+                                <ChatMessage key={item.id} message={item} onRetry={item.role === "error" ? () => retryMessage(index) : undefined} onUseReference={useReference} />
                             ))
                         )}
                         {running && streamingText ? (
@@ -269,7 +293,18 @@ export default function ChatPage() {
                         ) : null}
                     </div>
                 </div>
-                <ChatComposer value={input} onChange={setInput} onSend={() => void send()} onStop={stop} running={running} modelLabel={textModel ? modelLabelOf(textModel) : ""} />
+                <ChatComposer
+                    value={input}
+                    onChange={setInput}
+                    onSend={() => void send()}
+                    onStop={stop}
+                    running={running}
+                    modelLabel={textModel ? modelLabelOf(textModel) : ""}
+                    references={references}
+                    onAddFiles={(files) => void addReferenceFiles(files)}
+                    onRemoveReference={(id) => setReferences((current) => current.filter((item) => item.id !== id))}
+                    quotaHint={quotaHint}
+                />
             </div>
         </div>
     );

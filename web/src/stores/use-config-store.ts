@@ -23,6 +23,8 @@ export type ModelChannel = {
     baseUrl: string;
     apiKey: string;
     apiFormat: ApiCallFormat;
+    /** 文本工具调用协议；服务端渠道由管理员配置，静态模式默认 auto。 */
+    toolProtocol?: "auto" | "text" | "native";
     models: ChannelModel[];
 };
 
@@ -242,6 +244,7 @@ export const useConfigStore = create<ConfigStore>()(
                     baseUrl: channel.baseUrl,
                     apiKey: SERVER_MANAGED_KEY,
                     apiFormat: channel.apiFormat,
+                    toolProtocol: channel.toolProtocol,
                     models: channel.models.map((model) => ({ name: model.name, capability: model.capability, script: model.script })),
                 }));
                 const current = get().config;

@@ -20,13 +20,14 @@ export type AgentQuotaSnapshot = {
 
 export type AgentToolResult =
     | { tool: "generate_image"; ok: true; images: AgentImageRef[]; model: string; size: string; count: number; quota?: AgentQuotaSnapshot }
+    | { tool: "edit_image"; ok: true; images: AgentImageRef[]; model: string; size: string; count: number; quota?: AgentQuotaSnapshot }
     | { tool: "apply_prompt"; ok: true; target: "image" | "video"; prompt: string }
     | { tool: string; ok: false; code: AgentToolErrorCode; error: string };
 
 export type AgentToolCall = { tool: string; arguments: Record<string, unknown> };
 
 export type AgentMessage =
-    | { id: string; role: "user"; text: string; createdAt: number }
+    | { id: string; role: "user"; text: string; attachments?: AgentImageRef[]; createdAt: number }
     | { id: string; role: "assistant"; text: string; raw?: string; promptBlocks: string[]; createdAt: number }
     | { id: string; role: "tool"; call: AgentToolCall; result: AgentToolResult; text: string; createdAt: number }
     | { id: string; role: "error"; text: string; createdAt: number };
@@ -74,7 +75,7 @@ export type AgentModelCall = (request: {
     onDelta: (text: string) => void;
 }) => Promise<AgentModelTurnResult>;
 
-export type AgentToolExecutor = (call: AgentToolCall, context: { signal: AbortSignal }) => Promise<AgentToolResult>;
+export type AgentToolExecutor = (call: AgentToolCall, context: { signal: AbortSignal; references?: AgentImageRef[] }) => Promise<AgentToolResult>;
 
 export type AgentEvent =
     | { type: "assistant-stream"; text: string }

@@ -2,6 +2,9 @@ export type ServerCapability = "image" | "video" | "text" | "audio";
 
 export type ServerApiFormat = "openai" | "gemini";
 
+/** 文本工具调用协议：auto 默认文本协议，native 使用原生 tools，text 强制文本协议。 */
+export type ServerToolProtocol = "auto" | "text" | "native";
+
 export type ServerChannelModel = {
     name: string;
     capability: ServerCapability;
@@ -13,6 +16,7 @@ export type ServerChannel = {
     name: string;
     baseUrl: string;
     apiFormat: ServerApiFormat;
+    toolProtocol: ServerToolProtocol;
     models: ServerChannelModel[];
 };
 
@@ -77,6 +81,7 @@ export type AdminChannel = {
     name: string;
     baseUrl: string;
     apiFormat: ServerApiFormat;
+    toolProtocol: ServerToolProtocol;
     enabled: boolean;
     apiKeyMasked: string;
     hasApiKey: boolean;
@@ -88,6 +93,7 @@ export type AdminChannelInput = {
     name?: string;
     baseUrl?: string;
     apiKey?: string;
+    toolProtocol?: ServerToolProtocol;
     apiFormat?: ServerApiFormat;
     enabled?: boolean;
     models?: Array<{ name?: string; capability?: ServerCapability; script?: string }>;

@@ -33,12 +33,16 @@ export type ChannelModelRecord = {
     script?: string;
 };
 
+export type ToolProtocol = "auto" | "text" | "native";
+
 export type ChannelRecord = {
     id: string;
     name: string;
     baseUrl: string;
     apiFormat: ApiFormat;
     enabled: boolean;
+    /** 文本工具调用协议：auto 按文本协议，native 发送原生 tools 声明，text 强制文本协议。 */
+    toolProtocol: ToolProtocol;
     models: ChannelModelRecord[];
 };
 
@@ -47,6 +51,7 @@ export type PublicChannel = {
     name: string;
     baseUrl: string;
     apiFormat: ApiFormat;
+    toolProtocol: ToolProtocol;
     models: ChannelModelRecord[];
 };
 

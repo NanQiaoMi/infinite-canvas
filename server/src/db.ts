@@ -14,9 +14,18 @@ export function openStore(dbPath: string, schemaPath: string): Store {
     db.exec("PRAGMA foreign_keys = ON;");
     db.exec("PRAGMA busy_timeout = 5000;");
     db.exec(readFileSync(schemaPath, "utf8"));
-    setSetting(db, "schema_version", "1");
+    migrate(db);
+    setSetting(db, "schema_version", "2");
     log.info("database ready", { path: dbPath });
     return { db };
+}
+
+/** 轻量迁移：仅追加对旧库缺失的列，不改动已有数据。 */
+function migrate(db: Database) {
+    const columns = db.query("PRAGMA table_info(channels)").all() as Array<{ name: string }>;
+    if (!columns.some((column) => column.name === "tool_protocol")) {
+        db.exec("ALTER TABLE channels ADD COLUMN tool_protocol TEXT NOT NULL DEFAULT 'auto'");
+    }
 }
 
 export function getSetting(db: Database, key: string): string | null {
