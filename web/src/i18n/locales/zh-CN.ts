@@ -885,6 +885,7 @@ export default {
         },
         errors: {
             noTextModel: "请先配置文本模型（管理员可在渠道管理中设置）",
+            network: "模型服务连接失败，请重试",
             tooManyRounds: "工具调用轮次过多，已停止。可以简化需求后重试。",
         },
         toolErrors: {

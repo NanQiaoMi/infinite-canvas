@@ -885,6 +885,7 @@ export default {
         },
         errors: {
             noTextModel: "Configure a text model first (admins can set it in channel management)",
+            network: "Could not reach the model service. Please retry.",
             tooManyRounds: "Too many tool rounds, stopped. Try a simpler request.",
         },
         toolErrors: {

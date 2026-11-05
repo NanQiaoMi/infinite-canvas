@@ -8,6 +8,7 @@ export type ParsedAgentOutput = {
 };
 
 const BLOCK_PATTERN = "```(tool|prompt)[ \\t]*\\r?\\n([\\s\\S]*?)```";
+const FENCED_BLOCK_RE = /(```[\s\S]*?```)/g;
 const COMPLETE_BLOCK_RE = new RegExp(BLOCK_PATTERN, "gi");
 const OPEN_BLOCK_RE = /```(?:tool|prompt)/gi;
 
@@ -31,6 +32,27 @@ function parseToolBlock(body: string): { ok: true; call: AgentToolCall } | { ok:
     return { ok: true, call: { tool, arguments: (rawArgs as Record<string, unknown> | undefined) ?? {} } };
 }
 
+/**
+ * ChatGPT 网页端模型会输出自己的富文本组件标签（如 <AsyncImageGroup .../>、<text color="...">），
+ * 这些标签在本项目里无法渲染，显示前统一剔除；代码块内容保持原样。
+ */
+export function sanitizeAssistantText(text: string) {
+    if (!text.includes("<")) return text;
+    return text
+        .split(FENCED_BLOCK_RE)
+        .map((part, index) => {
+            if (index % 2 === 1) return part;
+            return part
+                .replace(/<(?!https?:\/\/)[A-Za-z][^<>]*\/>/g, "")
+                .replace(/<\/(?!https?:\/\/)[A-Za-z][^<>]*>/g, "")
+                .replace(/<(?!https?:\/\/)[A-Za-z][^<>]*>/g, "")
+                .replace(/[ \t]+\n/g, "\n")
+                .replace(/\n{3,}/g, "\n\n");
+        })
+        .join("")
+        .trim();
+}
+
 export function parseAgentOutput(raw: string): ParsedAgentOutput {
     const toolCalls: AgentToolCall[] = [];
     const promptBlocks: string[] = [];
@@ -49,7 +71,7 @@ export function parseAgentOutput(raw: string): ParsedAgentOutput {
         })
         .replace(/\n{3,}/g, "\n\n")
         .trim();
-    return { displayText, toolCalls, promptBlocks, invalidCalls };
+    return { displayText: sanitizeAssistantText(displayText), toolCalls, promptBlocks, invalidCalls };
 }
 
 /** 流式显示时屏蔽工具/提示词块，并隐藏尚未闭合的代码块内容。 */
@@ -61,7 +83,7 @@ export function stripForStreaming(text: string) {
         const rest = output.slice(last.index + last[0].length);
         if (!rest.includes("```")) output = output.slice(0, last.index);
     }
-    return output.replace(/\n{3,}/g, "\n\n").trimEnd();
+    return sanitizeAssistantText(output.replace(/\n{3,}/g, "\n\n").trimEnd());
 }
 
 export function nativeToolCallsToAgent(calls: Array<{ name: string; arguments: string }>) {

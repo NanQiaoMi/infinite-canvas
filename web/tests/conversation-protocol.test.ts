@@ -50,6 +50,24 @@ describe("对话输出协议", () => {
         expect(stripForStreaming("正常 ```代码``` 不受影响")).toBe("正常 ```代码``` 不受影响");
     });
 
+    test("剔除 ChatGPT 富文本组件标签，保留代码块内容", () => {
+        const raw = [
+            '看图：<AsyncImageGroup query={["cyberpunk city"]} aspectRatio="16:9" layout="bento"/>',
+            '',
+            '<text color="secondary" size="xs">蓝紫色调</text>',
+            '',
+            '```js',
+            'const tag = "<text>";',
+            '```',
+        ].join("\n");
+        const parsed = parseAgentOutput(raw);
+        expect(parsed.displayText).not.toContain("<AsyncImageGroup");
+        expect(parsed.displayText).not.toContain('<text color=');
+        expect(parsed.displayText).toContain("蓝紫色调");
+        expect(parsed.displayText).toContain('<text>');
+        expect(stripForStreaming('<text color="secondary">冷色调</text>正文')).toBe("冷色调正文");
+    });
+
     test("原生工具调用转换", () => {
         const converted = nativeToolCallsToAgent([
             { name: "generate_image", arguments: '{"prompt":"猫"}' },

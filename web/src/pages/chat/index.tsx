@@ -21,6 +21,8 @@ import { ChatMessage } from "./components/chat-message";
 import { ChatSessionList } from "./components/chat-session-list";
 
 const modelLabelOf = (option: string) => option.split("::").pop() || option;
+const NETWORK_ERROR_PATTERN = /network error|failed to fetch|load failed|networkerror|econnreset|socket hang up|fetch failed/i;
+const isNetworkError = (error: unknown) => NETWORK_ERROR_PATTERN.test(error instanceof Error ? error.message : String(error));
 
 export default function ChatPage() {
     const { t } = useTranslation();
@@ -84,17 +86,31 @@ export default function ChatPage() {
         };
     }, [pageContext]);
 
-    const callModel: AgentModelCall = useCallback(async ({ systemPrompt, messages, tools, signal, onDelta }) => {
-        const config = useConfigStore.getState().config;
-        if (!config.textModel) throw new Error(t("chat.errors.noTextModel"));
-        const turn = await requestConversationTurn(
-            { ...config, model: config.textModel },
-            messages.map((item) => ({ role: item.role, content: item.content })),
-            { systemPrompt, tools: tools.map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters })), onDelta, signal },
-        );
-        const native = nativeToolCallsToAgent(turn.toolCalls.map((call) => ({ name: call.name, arguments: call.arguments })));
-        return { content: turn.content, toolCalls: native.calls, toolCallErrors: native.errors };
-    }, [t]);
+    const callModel: AgentModelCall = useCallback(
+        async ({ systemPrompt, messages, signal, onDelta }) => {
+            const config = useConfigStore.getState().config;
+            if (!config.textModel) throw new Error(t("chat.errors.noTextModel"));
+            // 当前部署的 chatgpt2api 不支持原生 function calling：声明 tools 会让模型声称「后端不支持」，
+            // 因此这里只走系统提示词约定的文本工具协议，不发送原生工具声明。
+            const run = () =>
+                requestConversationTurn(
+                    { ...config, model: config.textModel },
+                    messages.map((item) => ({ role: item.role, content: item.content })),
+                    { systemPrompt, tools: [], onDelta, signal },
+                );
+            let turn;
+            try {
+                turn = await run();
+            } catch (error) {
+                if (signal.aborted || !isNetworkError(error)) throw error;
+                await new Promise((resolve) => setTimeout(resolve, 900));
+                turn = await run();
+            }
+            const native = nativeToolCallsToAgent(turn.toolCalls.map((call) => ({ name: call.name, arguments: call.arguments })));
+            return { content: turn.content, toolCalls: native.calls, toolCallErrors: native.errors };
+        },
+        [t],
+    );
 
     const send = useCallback(
         async (rawText?: string) => {
@@ -133,7 +149,8 @@ export default function ChatPage() {
                 if (aborted) {
                     if (partial.trim()) appendMessages(sessionId, [{ id: nanoid(), role: "assistant", text: partial, promptBlocks: [], createdAt: Date.now() }]);
                 } else {
-                    appendMessages(sessionId, [{ id: nanoid(), role: "error", text: error instanceof Error ? error.message : String(error), createdAt: Date.now() }]);
+                    const raw = error instanceof Error ? error.message : String(error);
+                    appendMessages(sessionId, [{ id: nanoid(), role: "error", text: isNetworkError(error) ? t("chat.errors.network") : raw, createdAt: Date.now() }]);
                 }
             } finally {
                 controllerRef.current = null;
