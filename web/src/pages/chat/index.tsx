@@ -41,6 +41,8 @@ export default function ChatPage() {
     const launchContext = useConversationAgentStore((state) => state.launchContext);
     const pendingReference = useConversationAgentStore((state) => state.pendingReference);
     const consumeReference = useConversationAgentStore((state) => state.consumeReference);
+    const composerDraft = useConversationAgentStore((state) => state.composerDraft);
+    const consumeComposerDraft = useConversationAgentStore((state) => state.consumeComposerDraft);
     const hydrate = useConversationAgentStore((state) => state.hydrate);
     const createSession = useConversationAgentStore((state) => state.createSession);
     const deleteSession = useConversationAgentStore((state) => state.deleteSession);
@@ -288,6 +290,12 @@ export default function ChatPage() {
         setReferences((current) => (current.some((item) => item.storageKey === pendingReference.storageKey) ? current : [...current, { ...pendingReference, id: nanoid() }]));
         consumeReference();
     }, [pendingReference, consumeReference]);
+
+    useEffect(() => {
+        if (composerDraft === null) return;
+        setInput(composerDraft);
+        consumeComposerDraft();
+    }, [composerDraft, consumeComposerDraft]);
 
     const retryMessage = (index: number) => {
         const messages = activeSession?.messages ?? [];

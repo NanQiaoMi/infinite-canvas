@@ -892,6 +892,11 @@ export default {
             size: "Size",
             ratio: "Ratio",
             open: "Open generated image",
+            continueTitle: "Keep editing",
+            continuePlaceholder: "Describe the change, Enter to continue in chat…",
+            continueAction: "Continue",
+            continueDraft: "Edit this reference image: {{text}}",
+            continueDefault: "Keep refining this reference image.",
         },
         composerHint: "Type / for commands",
         commands: {

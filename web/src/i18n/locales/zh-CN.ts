@@ -892,6 +892,11 @@ export default {
             size: "尺寸",
             ratio: "比例",
             open: "查看生成结果",
+            continueTitle: "继续修改",
+            continuePlaceholder: "描述想改的地方，回车回到对话…",
+            continueAction: "在对话中继续",
+            continueDraft: "基于这张参考图修改：{{text}}",
+            continueDefault: "基于这张参考图继续优化。",
         },
         composerHint: "输入 / 查看命令",
         commands: {

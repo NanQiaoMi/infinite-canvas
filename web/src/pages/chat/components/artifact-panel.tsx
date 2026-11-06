@@ -16,9 +16,11 @@ export function ArtifactPanel() {
     const artifact = useConversationAgentStore((state) => state.artifact);
     const closeArtifact = useConversationAgentStore((state) => state.closeArtifact);
     const requestReference = useConversationAgentStore((state) => state.requestReference);
+    const setComposerDraft = useConversationAgentStore((state) => state.setComposerDraft);
     const addAsset = useAssetStore((state) => state.addAsset);
     const [url, setUrl] = useState("");
     const [prompt, setPrompt] = useState("");
+    const [instruction, setInstruction] = useState("");
 
     useEffect(() => {
         if (!artifact) return;
@@ -76,6 +78,14 @@ export function ArtifactPanel() {
         message.success(t("chat.actions.filledWorkbench"));
     };
 
+    const continueInChat = () => {
+        const text = instruction.trim();
+        requestReference(artifact);
+        setComposerDraft(text ? t("chat.artifact.continueDraft", { text }) : t("chat.artifact.continueDefault"));
+        setInstruction("");
+        closeArtifact();
+    };
+
     return (
         <>
             <div className="agent-overlay-in fixed inset-0 z-40 bg-black/15 backdrop-blur-[1px]" onClick={closeArtifact} />
@@ -100,6 +110,27 @@ export function ArtifactPanel() {
                         </div>
                         <Input.TextArea value={prompt} onChange={(event) => setPrompt(event.target.value)} autoSize={{ minRows: 5, maxRows: 12 }} className="!rounded-xl !text-[13px] !leading-6" />
                     </div>
+                    <div>
+                        <div className="mb-1.5 text-[11px] font-medium uppercase tracking-[0.14em] text-stone-400 dark:text-stone-500">{t("chat.artifact.continueTitle")}</div>
+                        <div className="flex items-end gap-2">
+                            <Input.TextArea
+                                value={instruction}
+                                onChange={(event) => setInstruction(event.target.value)}
+                                placeholder={t("chat.artifact.continuePlaceholder")}
+                                autoSize={{ minRows: 1, maxRows: 4 }}
+                                className="!rounded-xl !text-[13px]"
+                                onKeyDown={(event) => {
+                                    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                                        event.preventDefault();
+                                        continueInChat();
+                                    }
+                                }}
+                            />
+                            <Button type="primary" onClick={continueInChat} className="!h-9 shrink-0">
+                                {t("chat.artifact.continueAction")}
+                            </Button>
+                        </div>
+                    </div>
                     <div className="grid grid-cols-3 gap-2 text-center">
                         <div className="rounded-xl border border-stone-200/80 bg-white/60 px-2 py-2 dark:border-stone-800 dark:bg-white/[.03]">
                             <div className="text-[10px] text-stone-400 dark:text-stone-500">{t("chat.artifact.model")}</div>
@@ -118,21 +149,9 @@ export function ArtifactPanel() {
                     </div>
                 </div>
                 <div className="shrink-0 space-y-2 border-t border-stone-200/80 px-4 py-3 dark:border-stone-800">
-                    <div className="flex gap-2">
-                        <Button
-                            type="primary"
-                            block
-                            onClick={() => {
-                                requestReference(artifact);
-                                closeArtifact();
-                            }}
-                        >
-                            {t("chat.actions.useAsReference")}
-                        </Button>
-                        <Button block icon={<SlidersHorizontal className="size-3.5" />} onClick={fillWorkbench}>
-                            {t("chat.actions.fillWorkbench")}
-                        </Button>
-                    </div>
+                    <Button block icon={<SlidersHorizontal className="size-3.5" />} onClick={fillWorkbench}>
+                        {t("chat.actions.fillWorkbench")}
+                    </Button>
                     <div className="flex justify-between gap-1">
                         <Button size="small" type="text" icon={<Download className="size-3.5" />} onClick={() => void download()}>
                             {t("chat.actions.download")}

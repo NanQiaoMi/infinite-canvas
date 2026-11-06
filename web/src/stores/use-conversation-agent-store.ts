@@ -21,11 +21,14 @@ type ConversationAgentStore = {
     launchContext: AgentLaunchContext | null;
     artifact: AgentImageRef | null;
     pendingReference: AgentImageRef | null;
+    composerDraft: string | null;
     hydrate: () => Promise<void>;
     openArtifact: (image: AgentImageRef) => void;
     closeArtifact: () => void;
     requestReference: (image: AgentImageRef) => void;
     consumeReference: () => AgentImageRef | null;
+    setComposerDraft: (text: string) => void;
+    consumeComposerDraft: () => string | null;
     createSession: () => string;
     deleteSession: (id: string) => void;
     renameSession: (id: string, title: string) => void;
@@ -91,6 +94,7 @@ export const useConversationAgentStore = create<ConversationAgentStore>()((set, 
         launchContext: null,
         artifact: null,
         pendingReference: null,
+        composerDraft: null,
         openArtifact: (image) => set({ artifact: image }),
         closeArtifact: () => set({ artifact: null }),
         requestReference: (image) => set({ pendingReference: image }),
@@ -98,6 +102,12 @@ export const useConversationAgentStore = create<ConversationAgentStore>()((set, 
             const reference = get().pendingReference;
             if (reference) set({ pendingReference: null });
             return reference;
+        },
+        setComposerDraft: (text) => set({ composerDraft: text }),
+        consumeComposerDraft: () => {
+            const draft = get().composerDraft;
+            if (draft !== null) set({ composerDraft: null });
+            return draft;
         },
         hydrate: async () => {
             if (get().hydrated) return;
