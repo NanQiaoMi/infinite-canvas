@@ -1,8 +1,9 @@
-import { Dropdown, Input } from "antd";
-import { ArrowUp, ChevronDown, Paperclip, Square, X } from "lucide-react";
+import { Dropdown, Input, type GetRef } from "antd";
+import { ArrowUp, BookOpen, ChevronDown, Paperclip, Square, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import type { AgentImageRef } from "@/lib/conversation-agent/types";
 import { ensureImagePreview, resolveImageUrl } from "@/services/image-storage";
 import { cn } from "@/lib/utils";
@@ -70,11 +71,19 @@ export function ChatComposer({ value, onChange, onSend, onStop, running, modelLa
         onClick: ({ key }: { key: string }) => updateConfig("textModel", key),
     };
     const fileInputRef = useRef<HTMLInputElement | null>(null);
+    const textAreaRef = useRef<GetRef<typeof Input.TextArea>>(null);
+    const [promptDialogOpen, setPromptDialogOpen] = useState(false);
     const query = value.trimStart().startsWith("/") ? value.trimStart().split(/\s/)[0].toLowerCase() : "";
     const slashOpen = Boolean(query) && !running && COMMANDS.some((command) => command.command.startsWith(query) && command.command !== query);
     const matches = COMMANDS.filter((command) => command.command.startsWith(query));
     const applyCommand = (command: string) => {
         onChange(`${command} `);
+    };
+    const applyPrompt = (prompt: string) => {
+        const draft = value.trimEnd();
+        onChange(draft ? `${draft}\n\n${prompt}` : prompt);
+        // antd Modal 关闭动画结束后会把焦点还给触发按钮，这里等动画结束后再把焦点交给输入框。
+        window.setTimeout(() => textAreaRef.current?.focus(), 400);
     };
     const canSend = Boolean(value.trim()) && !running;
     return (
@@ -103,6 +112,7 @@ export function ChatComposer({ value, onChange, onSend, onStop, running, modelLa
                     </div>
                 ) : null}
                 <Input.TextArea
+                    ref={textAreaRef}
                     value={value}
                     onChange={(event) => onChange(event.target.value)}
                     placeholder={t("chat.placeholder")}
@@ -141,6 +151,15 @@ export function ChatComposer({ value, onChange, onSend, onStop, running, modelLa
                                 </button>
                             </>
                         ) : null}
+                        <button
+                            type="button"
+                            className="flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2 text-[11px] text-stone-500 transition-all duration-150 hover:bg-black/[.05] active:scale-90 dark:text-stone-400 dark:hover:bg-white/[.08]"
+                            onClick={() => setPromptDialogOpen(true)}
+                            title={t("workbench.viewPrompts")}
+                        >
+                            <BookOpen className="size-4" />
+                            <span className="whitespace-nowrap">{t("prompts.library")}</span>
+                        </button>
                         <span className="hidden items-center gap-1.5 pl-1 text-[11px] text-stone-400 sm:inline-flex dark:text-stone-500">
                             {t("chat.composerHint")}
                             <kbd className="rounded border border-stone-200 px-1 font-mono text-[9px] text-stone-400 dark:border-stone-700 dark:text-stone-500">⌘K</kbd>
@@ -179,6 +198,7 @@ export function ChatComposer({ value, onChange, onSend, onStop, running, modelLa
                     </div>
                 </div>
             </div>
+            <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={applyPrompt} />
         </div>
     );
 }
