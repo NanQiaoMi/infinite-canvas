@@ -6,11 +6,11 @@ type ChatGptDotMatrixProps = {
 };
 
 /**
- * ChatGPT DALL-E 3 标志性点阵动画（Dot Matrix Canvas）：
- * - 在画布上生成规则点阵网格（根据宽高比自适应行数与列数）；
- * - 纯净微粒子点阵沿对角线以平滑正弦驻波律动起伏（双向波动叠加）；
- * - 波峰粒子膨胀变亮（纯净高饱和蓝），波谷粒子收缩变淡（半透明天蓝）；
- * - 针对 Retina 屏幕适配 devicePixelRatio，完全还原 ChatGPT 官方生图动画质感。
+ * ChatGPT DALL-E 3 真实物理波浪点阵引擎（Waveform Dot Matrix）：
+ * - 波点具备真正的物理空间位移（dy 纵向起伏波与 dx 轴向推移波），呈现如海浪/绸缎般起伏的生动波浪效果；
+ * - 波峰粒子物理抬升、向外膨胀变大、呈现高饱和电光蓝（#2563eb / #38bdf8）；
+ * - 波谷粒子物理下沉、收缩变小、呈现柔和半透明浅天蓝（rgba(147, 197, 253, 0.3)）；
+ * - 背景保持纯净通透（绝无任何多余的浑浊彩斑杂色），纯正还原 ChatGPT 科技艺术美感。
  */
 export function ChatGptDotMatrix({ aspect = 1, className }: ChatGptDotMatrixProps) {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -53,54 +53,75 @@ export function ChatGptDotMatrix({ aspect = 1, className }: ChatGptDotMatrixProp
             const isDark = document.documentElement.classList.contains("dark");
             const time = (now - startTime) / 1000;
 
-            // 根据长宽比计算行列数
-            const baseCount = 18;
-            const cols = aspect >= 1 ? Math.round(baseCount * Math.min(1.4, Math.sqrt(aspect))) : Math.max(12, Math.round(baseCount * aspect));
-            const rows = aspect <= 1 ? Math.round(baseCount / Math.min(1.4, Math.sqrt(aspect))) : Math.max(12, Math.round(baseCount / aspect));
+            // 根据宽高比自适应行列数（密度均匀适中，完全符合截图视觉密度）
+            const baseCount = 19;
+            const cols = aspect >= 1 ? Math.round(baseCount * Math.min(1.4, Math.sqrt(aspect))) : Math.max(13, Math.round(baseCount * aspect));
+            const rows = aspect <= 1 ? Math.round(baseCount / Math.min(1.4, Math.sqrt(aspect))) : Math.max(13, Math.round(baseCount / aspect));
 
-            const padX = width * 0.08;
-            const padY = height * 0.08;
+            const padX = width * 0.07;
+            const padY = height * 0.07;
             const stepX = (width - padX * 2) / (cols - 1);
             const stepY = (height - padY * 2) / (rows - 1);
 
-            // 纯净蓝色调（ChatGPT 官方蓝调色板）
-            const activeColor = isDark ? "rgb(56, 189, 248)" : "rgb(37, 99, 235)"; // sky-400 / blue-600
-            const midColor = isDark ? "rgba(96, 165, 250, 0.65)" : "rgba(59, 130, 246, 0.6)"; // blue-400 / blue-500
-            const faintColor = isDark ? "rgba(56, 189, 248, 0.16)" : "rgba(147, 197, 253, 0.28)"; // sky-400 / blue-200
-
             for (let r = 0; r < rows; r++) {
                 for (let c = 0; c < cols; c++) {
-                    const x = padX + c * stepX;
-                    const y = padY + r * stepY;
+                    const baseX = padX + c * stepX;
+                    const baseY = padY + r * stepY;
 
-                    // 双正弦波叠加营造 ChatGPT 的对角平滑波浪
                     const normCol = c / (cols - 1);
                     const normRow = r / (rows - 1);
 
-                    // 主波（左上向右下扩散）
-                    const wave1 = Math.sin((normCol * 2.8 + normRow * 2.8) * Math.PI - time * 3.4);
-                    // 辅助波（局部微扰动）
-                    const wave2 = Math.cos((normCol * 2.0 - normRow * 1.6) * Math.PI + time * 1.8);
+                    // ===== 物理波浪流体动力学计算 =====
+                    // 主前进波：自左上方朝右下方翻涌的宽幅波浪
+                    const phaseMain = (normCol * 2.5 + normRow * 2.5) * Math.PI - time * 3.4;
+                    // 次谐波：横向起伏调谐，产生水波自然涟漪
+                    const phaseCross = (normCol * 1.8 - normRow * 1.5) * Math.PI + time * 1.6;
 
-                    const rawVal = (wave1 * 0.65 + wave2 * 0.35 + 1) / 2; // 0 ~ 1
-                    const intensity = Math.pow(Math.max(0, Math.min(1, rawVal)), 2.2); // 锐化波峰
+                    // 复合波高（-1.0 ~ +1.0）
+                    const waveHeight = Math.sin(phaseMain) * 0.72 + Math.sin(phaseCross) * 0.28;
 
-                    // 边缘衰减，让点阵边缘柔和隐入留白
+                    // 1. 物理位置空间位移（真正像波浪一样翻涌波动！）
+                    // 纵向上下起伏（波浪振幅达 6.5px）
+                    const dy = waveHeight * 6.5;
+                    // 轴向微缩放推移（模拟流体纵波挤压效应）
+                    const dx = Math.cos(phaseMain) * 2.2;
+
+                    const drawX = baseX + dx;
+                    const drawY = baseY + dy;
+
+                    // 2. 波峰系数归一化（0.0 ~ 1.0），经指数锐化让波峰如浪尖般鲜明
+                    const rawCrest = (waveHeight + 1) / 2;
+                    const crest = Math.pow(Math.max(0, Math.min(1, rawCrest)), 1.9);
+
+                    // 3. 四周留白边缘平滑衰减，防止碰到边界突兀
                     const edgeFade = Math.sin(normCol * Math.PI) * Math.sin(normRow * Math.PI);
-                    const finalIntensity = intensity * Math.pow(edgeFade, 0.25);
+                    const finalCrest = crest * Math.pow(edgeFade, 0.22);
 
-                    // 动态半径与透明度
-                    const radius = 1.6 + finalIntensity * 1.8; // 1.6px ~ 3.4px
+                    // 4. 波点大小随波浪起伏剧烈呼吸：波谷收缩为 1.5px，浪尖膨胀至 3.6px
+                    const radius = 1.5 + finalCrest * 2.1;
 
+                    // 5. 纯正极简科技蓝调色板（无任何杂色）
                     ctx.beginPath();
-                    ctx.arc(x, y, radius, 0, Math.PI * 2);
+                    ctx.arc(drawX, drawY, radius, 0, Math.PI * 2);
 
-                    if (finalIntensity > 0.55) {
-                        ctx.fillStyle = activeColor;
-                    } else if (finalIntensity > 0.25) {
-                        ctx.fillStyle = midColor;
+                    if (isDark) {
+                        // 暗色模式：从微弱天蓝过渡到明亮电光青蓝
+                        if (finalCrest > 0.6) {
+                            ctx.fillStyle = `rgba(56, 189, 248, ${0.85 + finalCrest * 0.15})`; // sky-400
+                        } else if (finalCrest > 0.25) {
+                            ctx.fillStyle = `rgba(96, 165, 250, ${0.45 + finalCrest * 0.35})`; // blue-400
+                        } else {
+                            ctx.fillStyle = "rgba(56, 189, 248, 0.2)"; // 柔和暗天蓝基底
+                        }
                     } else {
-                        ctx.fillStyle = faintColor;
+                        // 亮色模式：从浅淡透明冰蓝过渡到高饱和皇家宝蓝（#2563eb）
+                        if (finalCrest > 0.6) {
+                            ctx.fillStyle = `rgba(37, 99, 235, ${0.88 + finalCrest * 0.12})`; // 纯正电光蓝 #2563eb
+                        } else if (finalCrest > 0.25) {
+                            ctx.fillStyle = `rgba(59, 130, 246, ${0.5 + finalCrest * 0.35})`; // blue-500
+                        } else {
+                            ctx.fillStyle = "rgba(147, 197, 253, 0.32)"; // 浅冰蓝基底
+                        }
                     }
 
                     ctx.fill();

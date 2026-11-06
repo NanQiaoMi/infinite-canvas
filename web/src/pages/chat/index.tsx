@@ -503,8 +503,8 @@ export default function ChatPage() {
                             {steps.length ? <StepTrail steps={steps} running={running} /> : null}
                             {running && streamingText ? (
                                 <div className="agent-message-in flex gap-3">
-                                    <div className="mt-0.5 flex size-7.5 shrink-0 items-center justify-center rounded-full border border-stone-200/90 bg-gradient-to-b from-stone-50 to-stone-100 text-stone-600 shadow-xs dark:border-stone-700/80 dark:from-stone-800 dark:to-stone-900 dark:text-stone-300">
-                                        <Sparkles className="size-3.5 text-amber-500/90 dark:text-amber-400" />
+                                    <div className="mt-0.5 flex size-7.5 shrink-0 items-center justify-center rounded-full border border-stone-200/90 bg-stone-100/90 text-stone-600 shadow-xs dark:border-stone-800 dark:bg-stone-800/90 dark:text-stone-300">
+                                        <Sparkles className="size-3.5 text-stone-500 dark:text-stone-400" />
                                     </div>
                                     <div className="min-w-0 flex-1">
                                         <div className="mb-1 text-[11px] font-medium text-stone-400 dark:text-stone-500">{t("chat.streaming")}</div>
