@@ -1,6 +1,6 @@
-import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, ImagePlus, LoaderCircle, PenLine, Plus, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, Clapperboard, ClipboardPaste, Download, FolderPlus, History, ImagePlus, LoaderCircle, PenLine, Plus, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { App, Button, Checkbox, Drawer, Empty, Image, Input, Modal, Tag, Tooltip, Typography } from "antd";
+import { App, Button, Checkbox, Drawer, Empty, Image, Input, InputNumber, Modal, Switch, Tag, Tooltip, Typography } from "antd";
 import localforage from "localforage";
 import { saveAs } from "file-saver";
 import { useTranslation } from "react-i18next";
@@ -234,12 +234,13 @@ export default function ImagePage() {
     }, [autoRunToken]);
 
     const downloadImage = (image: GeneratedImage, index: number) => {
-        saveAs(image.dataUrl, `image-${index + 1}.png`);
+        const extension = image.mimeType === "image/gif" ? "gif" : image.mimeType === "image/webp" ? "webp" : "png";
+        saveAs(image.dataUrl, `image-${index + 1}.${extension}`);
     };
 
     const addResultToReferences = async (image: GeneratedImage, index: number) => {
         const stored = await uploadImage(image.dataUrl);
-        setReferences((value) => [...value, { id: nanoid(), name: `result-${index + 1}.png`, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }]);
+        setReferences((value) => [...value, { id: nanoid(), name: `result-${index + 1}.${stored.mimeType === "image/gif" ? "gif" : "png"}`, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }]);
         message.success(t("imageWorkbench.addedReference"));
     };
 
@@ -325,7 +326,10 @@ export default function ImagePage() {
     const runGenerationSlot = async (index: number, snapshot: { text: string; config: AiConfig; references: ReferenceImage[] }) => {
         const itemStartedAt = performance.now();
         try {
-            const result = snapshot.references.length ? await requestEdit(snapshot.config, snapshot.text, snapshot.references) : await requestGeneration(snapshot.config, snapshot.text);
+            const gifWanted = snapshot.config.imageFormat === "gif" && /gpt-image-2\.6/i.test(snapshot.config.model || snapshot.config.imageModel) && !snapshot.references.length;
+            const result = snapshot.references.length
+                ? await requestEdit(snapshot.config, snapshot.text, snapshot.references)
+                : await requestGeneration(snapshot.config, snapshot.text, gifWanted ? { outputFormat: "gif", frameCount: Number(snapshot.config.gifFrames) || 8, frameDurationMs: Number(snapshot.config.gifFrameDuration) || 120 } : undefined);
             const image = result[0];
             if (!image) throw new Error(t("imageWorkbench.missingResult"));
             const stored = await uploadImage(image.dataUrl);
@@ -580,6 +584,7 @@ export default function ImagePage() {
 function GenerationSettings({ config, model, updateConfig, openConfigDialog }: { config: AiConfig; model: string; updateConfig: UpdateAiConfig; openConfigDialog: (shouldPromptContinue?: boolean) => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
+    const gifSupported = /gpt-image-2\.6/i.test(model);
 
     return (
         <>
@@ -587,6 +592,50 @@ function GenerationSettings({ config, model, updateConfig, openConfigDialog }: {
                 <span className="mb-1.5 block text-sm font-semibold sm:mb-2 sm:text-base">{t("workbench.model")}</span>
                 <ModelPicker config={config} value={model} onChange={(value) => updateConfig("imageModel", value)} capability="image" fullWidth onMissingConfig={() => openConfigDialog(false)} />
             </label>
+            <div className="col-span-2 space-y-2">
+                <div className="flex items-center justify-between gap-3 rounded-2xl border border-stone-200/70 bg-white/40 px-3 py-2.5 dark:border-stone-800 dark:bg-white/[.02]">
+                    <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 text-sm font-semibold">
+                            <Clapperboard className="size-3.5 text-stone-400" />
+                            {t("imageWorkbench.gifTitle")}
+                        </div>
+                        <div className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{gifSupported ? t("imageWorkbench.gifHint") : t("imageWorkbench.gifUnsupported")}</div>
+                    </div>
+                    <Switch
+                        size="small"
+                        checked={gifSupported && config.imageFormat === "gif"}
+                        disabled={!gifSupported}
+                        onChange={(checked) => updateConfig("imageFormat", checked ? "gif" : "png")}
+                    />
+                </div>
+                {gifSupported && config.imageFormat === "gif" ? (
+                    <div className="grid grid-cols-2 gap-3">
+                        <label className="min-w-0 space-y-1">
+                            <span className="block text-[11px] text-stone-400 dark:text-stone-500">{t("imageWorkbench.gifFrames")}</span>
+                            <InputNumber
+                                min={2}
+                                max={16}
+                                step={1}
+                                value={Math.min(16, Math.max(2, Math.round(Number(config.gifFrames) || 8)))}
+                                onChange={(value) => updateConfig("gifFrames", String(value ?? 8))}
+                                className="!w-full"
+                            />
+                        </label>
+                        <label className="min-w-0 space-y-1">
+                            <span className="block text-[11px] text-stone-400 dark:text-stone-500">{t("imageWorkbench.gifFrameDuration")}</span>
+                            <InputNumber
+                                min={20}
+                                max={2000}
+                                step={10}
+                                value={Math.min(2000, Math.max(20, Math.round((Number(config.gifFrameDuration) || 120) / 10) * 10))}
+                                onChange={(value) => updateConfig("gifFrameDuration", String(value ?? 120))}
+                                addonAfter="ms"
+                                className="!w-full"
+                            />
+                        </label>
+                    </div>
+                ) : null}
+            </div>
             <div className="col-span-2">
                 <ImageSettingsPanel config={config} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" maxCount={10} />
             </div>
@@ -611,7 +660,10 @@ function ResultImageCard({
     useSyncExternalStore(subscribeImagePreviews, getImagePreviewRevision);
     return (
         <div className="group overflow-hidden rounded-xl border border-stone-200/90 bg-white transition-all duration-200 hover:-translate-y-0.5 hover:border-stone-300 hover:shadow-md dark:border-stone-800 dark:bg-stone-900 dark:hover:border-stone-700">
-            <Image src={previewUrlFor(image.storageKey) || image.dataUrl} preview={{ src: image.dataUrl }} alt={t("imageWorkbench.resultAlt", { count: index + 1 })} className="agent-fade-in aspect-square object-cover transition-transform duration-300 group-hover:scale-[1.01]" />
+            <div className="relative">
+                <Image src={previewUrlFor(image.storageKey) || image.dataUrl} preview={{ src: image.dataUrl }} alt={t("imageWorkbench.resultAlt", { count: index + 1 })} className="agent-fade-in aspect-square object-cover transition-transform duration-300 group-hover:scale-[1.01]" />
+                {image.mimeType === "image/gif" ? <span className="pointer-events-none absolute left-2 top-2 rounded-md bg-black/55 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-white backdrop-blur-sm">GIF</span> : null}
+            </div>
             <div className="flex items-center justify-between gap-2 border-t border-stone-200/70 px-3 py-2 dark:border-stone-800">
                 <div className="flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-[11px] text-stone-400 dark:text-stone-500">
                     <span className="tabular-nums">

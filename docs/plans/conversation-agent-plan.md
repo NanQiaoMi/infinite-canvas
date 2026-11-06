@@ -895,3 +895,11 @@ POST /v1/responses (stream:false) → 200，返回 output_text "OK"（18.5s）
   - `docker run --rm -v "$PWD/web:/app/web" -v "$PWD:/app" -w /app/web infinite-canvas:server bun test` → 72 pass / 0 fail（含仓库内并发会话新增的测试文件），退出码 0；本轮新增 `conversation-intent.test.ts` 17 例，`conversation-runtime.test.ts` 共 17 例（既有 5 + W1 新增 8 + S1 新增 4）。
   - 隔离快照复核：`git archive HEAD web | tar -x -C /tmp/s1-verify` 后仅覆盖本轮改动文件，`bun test` 63 pass / 0 fail（exit 0）、`bun run typecheck` exit 0。
   - 说明：整棵工作区 `bun run typecheck` 当前因外部并发会话新建的未跟踪文件 `web/src/pages/chat/components/image-compare-modal.tsx`（antd Modal `styles.content` 类型）报 exit 2，唯一错误不在本轮改动文件内，本轮文件零类型错误。浏览器人工验收见 `pending-test` 清单（本次未部署、未操作用户浏览器页面）。
+
+### 17.13 生图工作台 GIF 接入（2026-11-07）
+
+- 能力接入：`requestGeneration` 新增 GIF 选项（`output_format=gif`、`frame_count`、`frame_duration_ms`、`size=auto`），校验模型必须匹配 `gpt-image-2.6` 系列、帧数 2–16、时长 20–2000ms，并禁止脚本/Gemini 渠道；响应 Base64 按 `image/gif` 解析，其余链路保持 PNG。
+- 配置：`AiConfig` 增加 `imageFormat` / `gifFrames` / `gifFrameDuration`，带默认值与持久化兼容。
+- UI：生图工作台参数区新增「动图 GIF」分组（模型支持时才可开启），展示帧数与每帧时长；结果卡片显示 GIF 标记，下载按 MIME 使用 `.gif` 后缀；参考图场景自动回退静态图。
+- 渠道：通过管理端接口为 chatgpt2api 渠道补充 `gpt-image-2.6`、`gpt-image-2.6-flare`、`gpt-image-2.6-sunburst` 图片模型（保留原 API Key）。
+- 验证：按文档实测 `gpt-image-2.6` GIF 生成（8 帧 / 120ms），确认返回 `GIF89a` 动画并以 `image/gif` 渲染；构建与测试通过。

@@ -96,7 +96,14 @@ type GeminiPayload = {
     promptFeedback?: { blockReason?: string };
 };
 type GeminiStreamState = { buffer: string; text: string; toolCalls: ResponseToolCall[]; error?: string };
-type RequestOptions = { signal?: AbortSignal };
+type ImageOutputFormat = "png" | "gif";
+type RequestOptions = {
+    signal?: AbortSignal;
+    /** 仅图片工作台使用：生成 GIF 动图（需 gpt-image-2.6 系列）。 */
+    outputFormat?: ImageOutputFormat;
+    frameCount?: number;
+    frameDurationMs?: number;
+};
 
 const IMAGE_QUALITY_VALUES = ["low", "medium", "high", "xhigh", "max"];
 const DEFAULT_IMAGE_SHORT_SIDE = 1024;
@@ -211,9 +218,9 @@ function resolveGeminiImageSize(dimensions: { width: number; height: number } | 
     return "4K";
 }
 
-function resolveImageSource(item: Record<string, unknown>) {
+function resolveImageSource(item: Record<string, unknown>, mime = "image/png") {
     if (typeof item.b64_json === "string" && item.b64_json) {
-        return `data:image/png;base64,${item.b64_json}`;
+        return `data:${mime};base64,${item.b64_json}`;
     }
     if (typeof item.url === "string" && item.url) {
         return item.url;
@@ -221,7 +228,7 @@ function resolveImageSource(item: Record<string, unknown>) {
     return null;
 }
 
-function parseImagePayload(payload: ImageApiResponse) {
+function parseImagePayload(payload: ImageApiResponse, mime = "image/png") {
     if (typeof payload.code === "number" && payload.code !== 0) {
         throw new Error(payload.msg || apiText("requestFailed"));
     }
@@ -231,7 +238,7 @@ function parseImagePayload(payload: ImageApiResponse) {
         || (payload as Record<string, unknown>).results as Array<Record<string, unknown>> | undefined
         || [];
     const images = imageList
-        .map(resolveImageSource)
+        .map((item) => resolveImageSource(item, mime))
         .filter((value): value is string => Boolean(value))
         .map((dataUrl) => ({ id: nanoid(), dataUrl }));
 
@@ -692,11 +699,26 @@ function parseGeminiImagePayload(payload: GeminiPayload) {
     return images;
 }
 
+const GIF_MODEL_PATTERN = /gpt-image-2\.6/i;
+
+function resolveGifOptions(config: AiConfig, options?: RequestOptions) {
+    if (options?.outputFormat !== "gif") return null;
+    const model = config.model || config.imageModel;
+    if (!GIF_MODEL_PATTERN.test(model)) throw new Error(apiText("gifModelUnsupported"));
+    const frames = Math.round(Number(options.frameCount ?? 8));
+    if (!Number.isFinite(frames) || frames < 2 || frames > 16) throw new Error(apiText("gifFramesRange"));
+    const duration = Math.round(Number(options.frameDurationMs ?? 120) / 10) * 10;
+    if (!Number.isFinite(duration) || duration < 20 || duration > 2000) throw new Error(apiText("gifDurationRange"));
+    return { frames, duration };
+}
+
 export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
     assertQuotaAvailable("image");
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
+    const gif = resolveGifOptions(config, options);
     const script = resolveModelScript(config, config.model || config.imageModel);
+    if (gif && (script || requestConfig.apiFormat === "gemini")) throw new Error(apiText("gifChannelUnsupported"));
     if (script) {
         const quality = normalizeQuality(config.quality);
         const requestSize = resolveRequestSize(config.size);
@@ -734,11 +756,15 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
                 prompt: withSystemPrompt(requestConfig, prompt),
                 n,
                 ...(quality ? { quality } : {}),
-                ...(requestSize ? { size: requestSize } : {}),
-                ...(background ? { background } : {}),
-                // gpt-image models reject response_format; they always return b64.
-                ...(/gpt-image/.test(requestConfig.model) ? {} : { response_format: "b64_json" }),
-                output_format: IMAGE_OUTPUT_FORMAT,
+                ...(gif
+                    ? { size: "auto", output_format: "gif", frame_count: gif.frames, frame_duration_ms: gif.duration }
+                    : {
+                          ...(requestSize ? { size: requestSize } : {}),
+                          ...(background ? { background } : {}),
+                          // gpt-image models reject response_format; they always return b64.
+                          ...(/gpt-image/.test(requestConfig.model) ? {} : { response_format: "b64_json" }),
+                          output_format: IMAGE_OUTPUT_FORMAT,
+                      }),
             },
             {
                 headers: aiHeaders(requestConfig, "application/json"),
@@ -746,7 +772,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
                 timeout: IMAGE_REQUEST_TIMEOUT_MS,
             },
         );
-        const images = await parseImagePayload(response.data);
+        const images = await parseImagePayload(response.data, gif ? "image/gif" : "image/png");
         return images;
     } catch (error) {
         throw new Error(readAxiosError(error, apiText("requestFailed")));
