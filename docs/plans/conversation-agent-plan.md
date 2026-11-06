@@ -873,3 +873,11 @@ POST /v1/responses (stream:false) → 200，返回 output_text "OK"（18.5s）
 - 结果卡片：底部操作改为图标按钮（加入资产 / 加入参考图 / 下载）并保留 Tooltip，元信息改为 11px 灰字；视频卡片同样处理。
 - 移动端：顶栏在窄屏隐藏文档/后台/版本/GitHub 图标并收紧间距；参数抽屉与生成记录抽屉可用；结果单列展示；真实生成 2 张图验证网格排版。
 - 验证：`tsc` 通过、web 55 项测试、server 26 项测试、构建通过；Docker 重新部署，浅色/移动端截图核对。
+
+### 17.13 对话输入区提示词库入口（2026-11-07）
+
+- 入口：`ChatComposer` 底部左侧（回形针附件之后）新增扁平透明按钮：`BookOpen` 图标 + `t("prompts.library")` 文案，`title` 使用 `t("workbench.viewPrompts")`，悬停为 `bg-black/[.05]` / `dark:hover:bg-white/[.08]` 轻微反馈；按钮 `shrink-0`、文案 `whitespace-nowrap`，不挤压右侧模型/额度与发送区。
+- 弹窗：直接复用 `@/components/prompts/prompt-select-dialog` 的 `PromptSelectDialog`（与生图、视频工作台同一组件），包含分类/标签筛选、标题搜索、提示词卡片列表与滚动分页；弹窗打开后才拉取提示词来源。
+- 填入：新增 `promptDialogOpen` 状态与 `Input.TextArea` ref；`applyPrompt` 在草稿为空时直接填入，已有草稿时 `trimEnd()` 后用两个换行（空行）追加，不覆盖原内容；弹窗关闭动画结束（约 400ms）后再聚焦输入框，避开 antd Modal 把焦点还给触发按钮。
+- 范围：只改 `web/src/pages/chat/components/chat-composer.tsx`（+22/−2），不修改 `ChatComposerProps`，未新增 i18n 键与依赖；发送/停止、附件上传、斜杠命令弹层、⌘K 命令面板逻辑未变。
+- 验证：`bun test` 全部通过（59 pass / 0 fail，含工作区并发测试改动）；`bun run typecheck` 在整棵工作区因范围外并发未跟踪文件 `image-compare-modal.tsx` 报 exit 2（唯一错误，HEAD 基线同样失败，非本次改动引入，已升级处理），隔离验证（HEAD + 本次改动）exit 0，`chat-composer.tsx` 无类型错误；另用隔离构建（HEAD + 本次改动，未部署到用户容器）起独立服务，在独立浏览器页面实测：按钮打开工作台同款提示词库（分类/标签/搜索/20 张卡片）、选中后面板关闭并填入输入框、再次选择以空行追加且不覆盖、约 400ms 后焦点落在输入框；浅色与深色截图核对样式正常。部署环境的人工验收仍见 `pending-test` 清单。
