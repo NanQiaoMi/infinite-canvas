@@ -1,6 +1,6 @@
 import { App, Button, Tooltip } from "antd";
 import { saveAs } from "file-saver";
-import { Check, Columns2, Download, FolderPlus, ImageIcon, Layers, LoaderCircle, Maximize2, SlidersHorizontal } from "lucide-react";
+import { Check, Columns2, Download, FolderPlus, ImageIcon, Layers, Maximize2, SlidersHorizontal, Sparkles } from "lucide-react";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -77,7 +77,7 @@ export function ImageResultCard({
     return (
         <div
             className={cn(
-                "group relative cursor-pointer overflow-hidden rounded-xl border transition-all duration-300",
+                "group relative cursor-pointer overflow-hidden rounded-2xl border transition-all duration-300",
                 selected
                     ? "border-stone-800 ring-2 ring-stone-800/80 shadow-md dark:border-stone-200 dark:ring-stone-200/80"
                     : "border-stone-200/90 bg-white/70 shadow-xs hover:-translate-y-0.5 hover:border-stone-300 hover:shadow-md dark:border-stone-800 dark:bg-stone-900/50 dark:hover:border-stone-700",
@@ -96,7 +96,7 @@ export function ImageResultCard({
                 <button
                     type="button"
                     className={cn(
-                        "absolute left-2 top-2 z-10 flex size-5.5 items-center justify-center rounded-full transition-transform shadow-xs",
+                        "absolute left-2.5 top-2.5 z-10 flex size-5.5 items-center justify-center rounded-full transition-transform shadow-xs",
                         selected
                             ? "bg-stone-900 text-white shadow dark:bg-white dark:text-stone-900"
                             : "border border-black/30 bg-white/80 text-transparent backdrop-blur-sm hover:border-black/60 dark:border-white/40 dark:bg-black/60",
@@ -111,7 +111,7 @@ export function ImageResultCard({
             ) : (
                 <button
                     type="button"
-                    className="absolute left-2 top-2 z-10 hidden size-5.5 items-center justify-center rounded-full border border-black/30 bg-white/80 text-transparent opacity-0 backdrop-blur-sm transition hover:border-black/60 group-hover:flex group-hover:opacity-100 dark:border-white/40 dark:bg-black/60"
+                    className="absolute left-2.5 top-2.5 z-10 hidden size-5.5 items-center justify-center rounded-full border border-black/30 bg-white/80 text-transparent opacity-0 backdrop-blur-sm transition hover:border-black/60 group-hover:flex group-hover:opacity-100 dark:border-white/40 dark:bg-black/60"
                     onClick={(event) => {
                         event.stopPropagation();
                         onToggleSelect?.();
@@ -128,14 +128,32 @@ export function ImageResultCard({
                         alt={image.prompt.slice(0, 40)}
                         onLoad={() => setLoaded(true)}
                         className={cn(
-                            "h-full w-full object-cover transition-all duration-500 ease-out group-hover:scale-[1.03]",
-                            loaded ? "opacity-100 scale-100 blur-0" : "opacity-0 scale-[0.97] blur-[3px]",
+                            "h-full w-full object-cover transition-transform duration-500 ease-out group-hover:scale-[1.03]",
+                            loaded ? "agent-developing" : "opacity-0 scale-[0.97] blur-lg",
                         )}
                     />
                 ) : null}
+
+                {/* 显现瞬间的掠影高光（ChatGPT DALL-E 标志性光泽扫掠动效） */}
+                {loaded ? (
+                    <div className="agent-shine-sweep pointer-events-none absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent dark:via-white/20" />
+                ) : null}
+
                 {!loaded ? (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-stone-100/60 dark:bg-stone-900/60">
-                        <LoaderCircle className="size-5 animate-spin text-stone-400" />
+                    <div className="absolute inset-0 flex flex-col items-center justify-center overflow-hidden bg-gradient-to-br from-stone-100/90 via-[#f7f5f0] to-stone-100/70 dark:from-stone-900/90 dark:via-[#191816] dark:to-stone-950">
+                        {/* 背景流体微光 */}
+                        <div className="agent-ambient-float-1 absolute -left-8 -top-8 size-32 rounded-full bg-amber-300/30 blur-2xl dark:bg-amber-500/15" />
+                        <div className="agent-ambient-float-2 absolute -bottom-8 -right-8 size-36 rounded-full bg-indigo-300/25 blur-2xl dark:bg-indigo-600/15" />
+                        <div
+                            className="pointer-events-none absolute inset-0 opacity-[0.14] dark:opacity-[0.18]"
+                            style={{
+                                backgroundImage: "radial-gradient(circle, currentColor 1px, transparent 1px)",
+                                backgroundSize: "16px 16px",
+                            }}
+                        />
+                        <div className="relative flex size-8 items-center justify-center rounded-full bg-white/70 shadow-xs backdrop-blur-md dark:bg-stone-800/80">
+                            <Sparkles className="size-4 animate-pulse text-amber-500" />
+                        </div>
                     </div>
                 ) : null}
                 <span className="absolute right-2 top-2 flex size-6.5 items-center justify-center rounded-full bg-black/45 text-white opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100 shadow-xs">
