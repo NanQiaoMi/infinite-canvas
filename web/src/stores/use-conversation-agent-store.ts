@@ -2,7 +2,7 @@ import localforage from "localforage";
 import { nanoid } from "nanoid";
 import { create } from "zustand";
 
-import type { AgentLaunchContext, AgentMessage, AgentSession, AgentToolCall } from "@/lib/conversation-agent/types";
+import type { AgentImageRef, AgentLaunchContext, AgentMessage, AgentSession, AgentToolCall } from "@/lib/conversation-agent/types";
 
 const storage = localforage.createInstance({ name: "infinite-canvas", storeName: "agent_conversations" });
 const MAX_SESSIONS = 50;
@@ -19,7 +19,13 @@ type ConversationAgentStore = {
     running: boolean;
     runningTool: AgentToolCall | null;
     launchContext: AgentLaunchContext | null;
+    artifact: AgentImageRef | null;
+    pendingReference: AgentImageRef | null;
     hydrate: () => Promise<void>;
+    openArtifact: (image: AgentImageRef) => void;
+    closeArtifact: () => void;
+    requestReference: (image: AgentImageRef) => void;
+    consumeReference: () => AgentImageRef | null;
     createSession: () => string;
     deleteSession: (id: string) => void;
     renameSession: (id: string, title: string) => void;
@@ -83,6 +89,16 @@ export const useConversationAgentStore = create<ConversationAgentStore>()((set, 
         running: false,
         runningTool: null,
         launchContext: null,
+        artifact: null,
+        pendingReference: null,
+        openArtifact: (image) => set({ artifact: image }),
+        closeArtifact: () => set({ artifact: null }),
+        requestReference: (image) => set({ pendingReference: image }),
+        consumeReference: () => {
+            const reference = get().pendingReference;
+            if (reference) set({ pendingReference: null });
+            return reference;
+        },
         hydrate: async () => {
             if (get().hydrated) return;
             try {

@@ -30,6 +30,7 @@ export function CommandPalette({ open, onClose, sessions, activeSessionId, onSel
             { command: "/prompt", labelKey: "chat.commands.items.prompt" },
             { command: "/image", labelKey: "chat.commands.items.image" },
             { command: "/edit", labelKey: "chat.commands.items.edit" },
+            { command: "/model", labelKey: "chat.commands.items.model" },
             { command: "/new", labelKey: "chat.commands.items.new" },
             { command: "/help", labelKey: "chat.commands.items.help" },
         ].map<PaletteItem>((item) => ({ id: `cmd:${item.command}`, group: t("chat.palette.commands"), label: item.command, hint: t(item.labelKey), run: () => onCommand(item.command) }));

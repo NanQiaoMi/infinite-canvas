@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils";
 import { ChatComposer } from "./components/chat-composer";
 import { ChatMessage } from "./components/chat-message";
 import { ChatSessionList } from "./components/chat-session-list";
+import { ArtifactPanel } from "./components/artifact-panel";
 import { CommandPalette } from "./components/command-palette";
 import { GenerationWaiting, ThinkingLine } from "./components/generation-waiting";
 
@@ -38,6 +39,8 @@ export default function ChatPage() {
     const running = useConversationAgentStore((state) => state.running);
     const runningTool = useConversationAgentStore((state) => state.runningTool);
     const launchContext = useConversationAgentStore((state) => state.launchContext);
+    const pendingReference = useConversationAgentStore((state) => state.pendingReference);
+    const consumeReference = useConversationAgentStore((state) => state.consumeReference);
     const hydrate = useConversationAgentStore((state) => state.hydrate);
     const createSession = useConversationAgentStore((state) => state.createSession);
     const deleteSession = useConversationAgentStore((state) => state.deleteSession);
@@ -173,6 +176,27 @@ export default function ChatPage() {
                     setInput("");
                     return;
                 }
+                if (command === "/model") {
+                    const config = useConfigStore.getState().config;
+                    const options = selectableModelsByCapability(config, "text");
+                    if (!payload) {
+                        let sessionId = useConversationAgentStore.getState().activeSessionId;
+                        if (!sessionId) sessionId = createSession();
+                        const models = options.map((option) => option.split("::").pop()).join("、");
+                        appendMessages(sessionId, [{ id: nanoid(), role: "assistant", text: t("chat.commands.modelList", { current: modelLabelOf(config.textModel), models }), promptBlocks: [], createdAt: Date.now() }]);
+                        setInput("");
+                        return;
+                    }
+                    const match = options.find((option) => option === payload || option.split("::").pop() === payload || option.split("::").pop()?.toLowerCase() === payload.toLowerCase());
+                    if (!match) {
+                        message.warning(t("chat.commands.unknownModel", { name: payload }));
+                        return;
+                    }
+                    useConfigStore.getState().updateConfig("textModel", match);
+                    message.success(t("chat.commands.modelSwitched", { model: modelLabelOf(match) }));
+                    setInput("");
+                    return;
+                }
                 if (command === "/prompt" && payload) text = t("chat.commands.promptPrefix", { text: payload });
                 else if (command === "/image" && payload) text = t("chat.commands.imagePrefix", { text: payload });
                 else if (command === "/edit") {
@@ -259,9 +283,11 @@ export default function ChatPage() {
         setReferences((current) => [...current, ...added]);
     };
 
-    const useReference = (image: AgentImageRef) => {
-        setReferences((current) => (current.some((item) => item.storageKey === image.storageKey) ? current : [...current, { ...image, id: nanoid() }]));
-    };
+    useEffect(() => {
+        if (!pendingReference) return;
+        setReferences((current) => (current.some((item) => item.storageKey === pendingReference.storageKey) ? current : [...current, { ...pendingReference, id: nanoid() }]));
+        consumeReference();
+    }, [pendingReference, consumeReference]);
 
     const retryMessage = (index: number) => {
         const messages = activeSession?.messages ?? [];
@@ -338,7 +364,7 @@ export default function ChatPage() {
                         {!activeSession || activeSession.messages.length === 0
                             ? welcome
                             : activeSession.messages.map((item, index) => (
-                                  <ChatMessage key={item.id} message={item} onRetry={item.role === "error" ? () => retryMessage(index) : undefined} onUseReference={useReference} />
+                                  <ChatMessage key={item.id} message={item} onRetry={item.role === "error" ? () => retryMessage(index) : undefined} />
                               ))}
                         {running && streamingText ? (
                             <div className="flex gap-3">
@@ -395,6 +421,7 @@ export default function ChatPage() {
             <Drawer open={listOpen} placement="left" width={272} onClose={() => setListOpen(false)} styles={{ body: { padding: 0, background: "var(--color-card)" } }}>
                 {sessionList}
             </Drawer>
+            <ArtifactPanel />
             <CommandPalette
                 open={paletteOpen}
                 onClose={() => setPaletteOpen(false)}

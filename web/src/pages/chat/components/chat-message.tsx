@@ -84,7 +84,7 @@ function UserAttachments({ images }: { images: AgentImageRef[] }) {
     );
 }
 
-function ToolResultBody({ result, onUseReference }: { result: AgentToolResult; onUseReference?: (image: AgentImageRef) => void }) {
+function ToolResultBody({ result }: { result: AgentToolResult }) {
     const { t } = useTranslation();
     const navigate = useNavigate();
     if (!result.ok) {
@@ -98,7 +98,7 @@ function ToolResultBody({ result, onUseReference }: { result: AgentToolResult; o
     if (result.tool === "generate_image" || result.tool === "edit_image") {
         return (
             <div className="mt-2">
-                <ImageResultGrid images={result.images} onUseAsReference={onUseReference} />
+                <ImageResultGrid images={result.images} />
             </div>
         );
     }
@@ -113,7 +113,7 @@ function ToolResultBody({ result, onUseReference }: { result: AgentToolResult; o
     );
 }
 
-function ToolMessage({ message, onUseReference }: { message: Extract<AgentMessage, { role: "tool" }>; onUseReference?: (image: AgentImageRef) => void }) {
+function ToolMessage({ message }: { message: Extract<AgentMessage, { role: "tool" }> }) {
     const { t } = useTranslation();
     const [expanded, setExpanded] = useState(false);
     return (
@@ -138,13 +138,13 @@ function ToolMessage({ message, onUseReference }: { message: Extract<AgentMessag
                         </pre>
                     </div>
                 </div>
-                <ToolResultBody result={message.result} onUseReference={onUseReference} />
+                <ToolResultBody result={message.result} />
             </div>
         </div>
     );
 }
 
-export function ChatMessage({ message, onRetry, onUseReference }: { message: AgentMessage; onRetry?: () => void; onUseReference?: (image: AgentImageRef) => void }) {
+export function ChatMessage({ message, onRetry }: { message: AgentMessage; onRetry?: () => void }) {
     const { t } = useTranslation();
     if (message.role === "user") {
         return (
@@ -173,7 +173,7 @@ export function ChatMessage({ message, onRetry, onUseReference }: { message: Age
             </div>
         );
     }
-    if (message.role === "tool") return <ToolMessage message={message} onUseReference={onUseReference} />;
+    if (message.role === "tool") return <ToolMessage message={message} />;
     return (
         <div className="agent-message-in flex gap-3">
             <div className="w-7 shrink-0" />

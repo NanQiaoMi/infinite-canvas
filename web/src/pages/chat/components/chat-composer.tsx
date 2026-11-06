@@ -1,11 +1,12 @@
-import { Input } from "antd";
-import { ArrowUp, Paperclip, Square, X } from "lucide-react";
+import { Dropdown, Input } from "antd";
+import { ArrowUp, ChevronDown, Paperclip, Square, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { AgentImageRef } from "@/lib/conversation-agent/types";
 import { ensureImagePreview, resolveImageUrl } from "@/services/image-storage";
 import { cn } from "@/lib/utils";
+import { selectableModelsByCapability, useConfigStore } from "@/stores/use-config-store";
 
 type ChatComposerProps = {
     value: string;
@@ -25,6 +26,7 @@ const COMMANDS = [
     { command: "/image", labelKey: "chat.commands.items.image" },
     { command: "/edit", labelKey: "chat.commands.items.edit" },
     { command: "/new", labelKey: "chat.commands.items.new" },
+    { command: "/model", labelKey: "chat.commands.items.model" },
     { command: "/help", labelKey: "chat.commands.items.help" },
 ];
 
@@ -52,6 +54,21 @@ function ReferenceThumb({ image, onRemove }: { image: AgentImageRef; onRemove: (
 
 export function ChatComposer({ value, onChange, onSend, onStop, running, modelLabel, references = [], onAddFiles, onRemoveReference, quotaHint }: ChatComposerProps) {
     const { t } = useTranslation();
+    const config = useConfigStore((state) => state.config);
+    const allowModelSelection = useConfigStore((state) => state.publicSettings.allowModelSelection);
+    const updateConfig = useConfigStore((state) => state.updateConfig);
+    const textOptions = selectableModelsByCapability(config, "text");
+    const currentModelLabel = modelLabel || (config.textModel ? config.textModel.split("::").pop() : "") || "";
+    const modelMenu = {
+        items: textOptions.map((option) => {
+            const [channelId, name] = option.split("::");
+            const channelName = config.channels.find((channel) => channel.id === channelId)?.name;
+            return { key: option, label: channelName ? `${name} · ${channelName}` : name };
+        }),
+        selectable: true,
+        selectedKeys: [config.textModel],
+        onClick: ({ key }: { key: string }) => updateConfig("textModel", key),
+    };
     const fileInputRef = useRef<HTMLInputElement | null>(null);
     const query = value.trimStart().startsWith("/") ? value.trimStart().split(/\s/)[0].toLowerCase() : "";
     const slashOpen = Boolean(query) && !running && COMMANDS.some((command) => command.command.startsWith(query) && command.command !== query);
@@ -130,9 +147,18 @@ export function ChatComposer({ value, onChange, onSend, onStop, running, modelLa
                         </span>
                     </div>
                     <div className="flex items-center gap-2">
-                        <span className="hidden text-[11px] text-stone-400 sm:inline dark:text-stone-500">
-                            {modelLabel}
-                            {quotaHint ? ` · ${quotaHint}` : ""}
+                        <span className="hidden items-center gap-1 sm:flex">
+                            {allowModelSelection ? (
+                                <Dropdown menu={modelMenu} trigger={["click"]} placement="topRight" disabled={!textOptions.length}>
+                                    <button type="button" className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-stone-500 transition hover:bg-black/[.05] hover:text-stone-700 dark:text-stone-400 dark:hover:bg-white/[.08] dark:hover:text-stone-200">
+                                        <span className="max-w-32 truncate font-mono">{currentModelLabel}</span>
+                                        <ChevronDown className="size-3" />
+                                    </button>
+                                </Dropdown>
+                            ) : (
+                                <span className="font-mono text-[11px] text-stone-400 dark:text-stone-500">{currentModelLabel}</span>
+                            )}
+                            {quotaHint ? <span className="text-[11px] text-stone-400 dark:text-stone-500">{quotaHint}</span> : null}
                         </span>
                         <button
                             type="button"
