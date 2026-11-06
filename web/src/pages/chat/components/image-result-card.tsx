@@ -28,6 +28,7 @@ export function ImageResultCard({
     const { message } = App.useApp();
     const revision = useSyncExternalStore(subscribeImagePreviews, getImagePreviewRevision);
     const [preview, setPreview] = useState("");
+    const [loaded, setLoaded] = useState(false);
     const addAsset = useAssetStore((state) => state.addAsset);
     const openArtifact = useConversationAgentStore((state) => state.openArtifact);
 
@@ -76,10 +77,10 @@ export function ImageResultCard({
     return (
         <div
             className={cn(
-                "group relative cursor-pointer overflow-hidden rounded-lg border transition-all duration-200",
+                "group relative cursor-pointer overflow-hidden rounded-xl border transition-all duration-300",
                 selected
-                    ? "border-stone-800 ring-2 ring-stone-800/80 dark:border-stone-200 dark:ring-stone-200/80"
-                    : "border-stone-200 bg-card hover:-translate-y-0.5 hover:border-stone-300 hover:shadow-md dark:border-stone-800 dark:hover:border-stone-700",
+                    ? "border-stone-800 ring-2 ring-stone-800/80 shadow-md dark:border-stone-200 dark:ring-stone-200/80"
+                    : "border-stone-200/90 bg-white/70 shadow-xs hover:-translate-y-0.5 hover:border-stone-300 hover:shadow-md dark:border-stone-800 dark:bg-stone-900/50 dark:hover:border-stone-700",
             )}
             onClick={() => {
                 if (selectable) {
@@ -95,54 +96,65 @@ export function ImageResultCard({
                 <button
                     type="button"
                     className={cn(
-                        "absolute left-1.5 top-1.5 z-10 flex size-5 items-center justify-center rounded-full transition-transform",
+                        "absolute left-2 top-2 z-10 flex size-5.5 items-center justify-center rounded-full transition-transform shadow-xs",
                         selected
                             ? "bg-stone-900 text-white shadow dark:bg-white dark:text-stone-900"
-                            : "border border-black/30 bg-white/70 text-transparent backdrop-blur-sm hover:border-black/60 dark:border-white/40 dark:bg-black/60",
+                            : "border border-black/30 bg-white/80 text-transparent backdrop-blur-sm hover:border-black/60 dark:border-white/40 dark:bg-black/60",
                     )}
                     onClick={(event) => {
                         event.stopPropagation();
                         onToggleSelect?.();
                     }}
                 >
-                    <Check className="size-3 stroke-[3]" />
+                    <Check className="size-3.5 stroke-[3]" />
                 </button>
             ) : (
                 <button
                     type="button"
-                    className="absolute left-1.5 top-1.5 z-10 hidden size-5 items-center justify-center rounded-full border border-black/30 bg-white/70 text-transparent opacity-0 backdrop-blur-sm transition hover:border-black/60 group-hover:flex group-hover:opacity-100 dark:border-white/40 dark:bg-black/60"
+                    className="absolute left-2 top-2 z-10 hidden size-5.5 items-center justify-center rounded-full border border-black/30 bg-white/80 text-transparent opacity-0 backdrop-blur-sm transition hover:border-black/60 group-hover:flex group-hover:opacity-100 dark:border-white/40 dark:bg-black/60"
                     onClick={(event) => {
                         event.stopPropagation();
                         onToggleSelect?.();
                     }}
                 >
-                    <Check className="size-3 stroke-[3]" />
+                    <Check className="size-3.5 stroke-[3]" />
                 </button>
             )}
 
-            <div className="relative flex aspect-square items-center justify-center overflow-hidden bg-stone-100 dark:bg-stone-800">
+            <div className="relative flex aspect-square items-center justify-center overflow-hidden bg-stone-100/80 dark:bg-stone-950/40">
                 {thumb ? (
-                    <img src={thumb} alt={image.prompt.slice(0, 40)} className="agent-fade-in h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]" />
-                ) : (
-                    <LoaderCircle className="size-5 animate-spin text-stone-400" />
-                )}
-                <span className="absolute right-1.5 top-1.5 flex size-6 items-center justify-center rounded-full bg-black/45 text-white opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100">
+                    <img
+                        src={thumb}
+                        alt={image.prompt.slice(0, 40)}
+                        onLoad={() => setLoaded(true)}
+                        className={cn(
+                            "h-full w-full object-cover transition-all duration-500 ease-out group-hover:scale-[1.03]",
+                            loaded ? "opacity-100 scale-100 blur-0" : "opacity-0 scale-[0.97] blur-[3px]",
+                        )}
+                    />
+                ) : null}
+                {!loaded ? (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-stone-100/60 dark:bg-stone-900/60">
+                        <LoaderCircle className="size-5 animate-spin text-stone-400" />
+                    </div>
+                ) : null}
+                <span className="absolute right-2 top-2 flex size-6.5 items-center justify-center rounded-full bg-black/45 text-white opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100 shadow-xs">
                     <Maximize2 className="size-3" />
                 </span>
             </div>
-            <div className="flex items-center justify-between gap-1 px-2 py-1.5">
-                <span className="min-w-0 truncate text-[10px] tabular-nums text-stone-400 dark:text-stone-500">
+            <div className="flex items-center justify-between gap-1 px-2.5 py-1.5 border-t border-stone-100 dark:border-stone-800/60">
+                <span className="min-w-0 truncate font-mono text-[10px] tabular-nums text-stone-400 dark:text-stone-500">
                     {image.width}×{image.height}
                 </span>
                 <div className="flex shrink-0 items-center" onClick={(event) => event.stopPropagation()}>
                     <Tooltip title={t("chat.actions.download")}>
-                        <Button size="small" type="text" icon={<Download className="size-3.5" />} onClick={() => void download()} />
+                        <Button size="small" type="text" className="!size-7 !p-0" icon={<Download className="size-3.5" />} onClick={() => void download()} />
                     </Tooltip>
                     <Tooltip title={t("chat.actions.addToAssets")}>
-                        <Button size="small" type="text" icon={<FolderPlus className="size-3.5" />} onClick={() => void saveToAssets()} />
+                        <Button size="small" type="text" className="!size-7 !p-0" icon={<FolderPlus className="size-3.5" />} onClick={() => void saveToAssets()} />
                     </Tooltip>
                     <Tooltip title={t("chat.actions.fillWorkbench")}>
-                        <Button size="small" type="text" icon={<SlidersHorizontal className="size-3.5" />} onClick={fillWorkbench} />
+                        <Button size="small" type="text" className="!size-7 !p-0" icon={<SlidersHorizontal className="size-3.5" />} onClick={fillWorkbench} />
                     </Tooltip>
                 </div>
             </div>

@@ -1,9 +1,8 @@
 import { App, Button, Drawer, Spin } from "antd";
-import { ImageIcon, Menu, PenLine, Sparkles, WandSparkles } from "lucide-react";
+import { ArrowRight, ImageIcon, Menu, PenLine, Sparkles, WandSparkles } from "lucide-react";
 import { nanoid } from "nanoid";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Streamdown } from "streamdown";
 
 import i18n from "@/i18n";
 import { nativeToolCallsToAgent } from "@/lib/conversation-agent/protocol";
@@ -25,6 +24,7 @@ import { ArtifactPanel } from "./components/artifact-panel";
 import { CommandPalette } from "./components/command-palette";
 import { StepTrail, type AgentStep } from "./components/step-trail";
 import { GenerationWaiting, ThinkingLine } from "./components/generation-waiting";
+import { SmoothStreamText } from "./components/smooth-stream-text";
 
 const modelLabelOf = (option: string) => option.split("::").pop() || option;
 const NETWORK_ERROR_PATTERN = /network error|failed to fetch|load failed|networkerror|econnreset|socket hang up|fetch failed/i;
@@ -445,13 +445,23 @@ export default function ChatPage() {
     }
 
     const welcome = (
-        <div className="agent-fade-in flex flex-1 flex-col items-center justify-center px-2 py-16 text-center">
-            <div className="mb-6 flex size-11 items-center justify-center rounded-full bg-black/[.05] dark:bg-white/[.07]">
-                <Sparkles className="size-5 text-stone-600 dark:text-stone-300" />
+        <div className="agent-fade-in flex flex-1 flex-col items-center justify-center px-4 py-16 text-center">
+            {/* 灵动星芒徽章，带呼吸光晕 */}
+            <div className="relative mb-6 flex size-14 items-center justify-center">
+                <div className="absolute inset-0 animate-[pulse_3s_ease-in-out_infinite] rounded-full bg-stone-200/60 blur-md dark:bg-stone-700/40" />
+                <div className="relative flex size-12 items-center justify-center rounded-2xl border border-stone-200/90 bg-gradient-to-b from-white to-stone-100/90 shadow-xs dark:border-stone-700/80 dark:from-stone-800 dark:to-stone-900">
+                    <Sparkles className="size-6 text-stone-700 dark:text-stone-200" />
+                </div>
             </div>
-            <h1 className="font-serif text-[30px] font-normal leading-tight tracking-tight text-stone-900 dark:text-stone-100">{t("chat.welcome.title")}</h1>
-            <p className="mt-3 max-w-md text-sm leading-6 text-stone-500 dark:text-stone-400">{t("chat.welcome.description")}</p>
-            <div className="mt-10 grid w-full max-w-md gap-2">
+
+            <h1 className="font-serif text-[32px] font-normal leading-tight tracking-tight text-stone-900 dark:text-stone-100">
+                {t("chat.welcome.title")}
+            </h1>
+            <p className="mt-3.5 max-w-md text-sm leading-relaxed text-stone-500 dark:text-stone-400">
+                {t("chat.welcome.description")}
+            </p>
+
+            <div className="mt-10 grid w-full max-w-md gap-2.5">
                 {[
                     { command: t("chat.welcome.examples.prompt"), icon: PenLine },
                     { command: t("chat.welcome.examples.image"), icon: ImageIcon },
@@ -460,11 +470,14 @@ export default function ChatPage() {
                     <button
                         key={command}
                         type="button"
-                        className="flex items-center gap-3 rounded-xl border border-stone-200/90 bg-white/70 px-3.5 py-2.5 text-left text-[13px] text-stone-600 transition hover:border-stone-300 hover:bg-white dark:border-stone-800 dark:bg-white/[.03] dark:text-stone-300 dark:hover:border-stone-700 dark:hover:bg-white/[.06]"
+                        className="group flex items-center gap-3.5 rounded-2xl border border-stone-200/90 bg-white/70 px-4 py-3 text-left text-[13px] text-stone-600 shadow-xs transition-all duration-200 hover:-translate-y-0.5 hover:border-stone-300 hover:bg-white hover:shadow-sm dark:border-stone-800 dark:bg-stone-900/40 dark:text-stone-300 dark:hover:border-stone-700 dark:hover:bg-stone-900/80"
                         onClick={() => setInput(command)}
                     >
-                        <Icon className="size-3.5 shrink-0 text-stone-400 dark:text-stone-500" />
-                        <span className="truncate">{command}</span>
+                        <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-stone-100 text-stone-500 transition group-hover:bg-stone-200/70 dark:bg-stone-800 dark:text-stone-400 dark:group-hover:bg-stone-700/70">
+                            <Icon className="size-3.5" />
+                        </div>
+                        <span className="min-w-0 flex-1 truncate font-medium">{command}</span>
+                        <ArrowRight className="size-3.5 shrink-0 text-stone-400 opacity-40 transition-all duration-200 group-hover:translate-x-0.5 group-hover:opacity-90 dark:text-stone-500" />
                     </button>
                 ))}
             </div>
@@ -479,48 +492,48 @@ export default function ChatPage() {
                     <Button size="small" type="text" icon={<Menu className="size-4" />} onClick={() => setListOpen(true)} />
                     <span className="text-sm font-semibold">{t("meta.title")}</span>
                 </div>
-                <div ref={scrollRef} className="hover-scrollbar min-h-0 flex-1 overflow-y-auto">
-                    <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col gap-6 px-4 pb-10 pt-10 sm:px-6">
-                        {!activeSession || activeSession.messages.length === 0
-                            ? welcome
-                            : activeSession.messages.map((item, index) => (
-                                  <ChatMessage key={item.id} message={item} onRetry={item.role === "error" ? () => retryMessage(index) : undefined} />
-                              ))}
-                        {steps.length ? <StepTrail steps={steps} running={running} /> : null}
-                        {running && streamingText ? (
-                            <div className="flex gap-3">
-                                <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-400">
-                                    <Sparkles className="size-3.5" />
-                                </div>
-                                <div className="min-w-0 flex-1">
-                                    <div className="mb-1 text-[11px] font-medium text-stone-400 dark:text-stone-500">{t("chat.streaming")}</div>
-                                    <div className="agent-cursor">
-                                        <Streamdown className="agent-streamdown text-sm leading-7 text-stone-800 dark:text-stone-200" animated={{ duration: 18, stagger: 0, sep: "word" }} isAnimating>
-                                            {streamingText}
-                                        </Streamdown>
+                <div className="relative flex min-h-0 flex-1 flex-col">
+                    <div ref={scrollRef} className="hover-scrollbar min-h-0 flex-1 overflow-y-auto">
+                        <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col gap-6 px-4 pb-12 pt-10 sm:px-6">
+                            {!activeSession || activeSession.messages.length === 0
+                                ? welcome
+                                : activeSession.messages.map((item, index) => (
+                                      <ChatMessage key={item.id} message={item} onRetry={item.role === "error" ? () => retryMessage(index) : undefined} />
+                                  ))}
+                            {steps.length ? <StepTrail steps={steps} running={running} /> : null}
+                            {running && streamingText ? (
+                                <div className="agent-message-in flex gap-3">
+                                    <div className="mt-0.5 flex size-7.5 shrink-0 items-center justify-center rounded-full border border-stone-200/90 bg-gradient-to-b from-stone-50 to-stone-100 text-stone-600 shadow-xs dark:border-stone-700/80 dark:from-stone-800 dark:to-stone-900 dark:text-stone-300">
+                                        <Sparkles className="size-3.5 text-amber-500/90 dark:text-amber-400" />
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                        <div className="mb-1 text-[11px] font-medium text-stone-400 dark:text-stone-500">{t("chat.streaming")}</div>
+                                        <SmoothStreamText rawText={streamingText} running={running} />
                                     </div>
                                 </div>
-                            </div>
-                        ) : null}
-                        {runningTool && (runningTool.tool === "generate_image" || runningTool.tool === "edit_image") ? (
-                            <GenerationWaiting call={runningTool} startedAt={turnStartedAt || Date.now()} />
-                        ) : null}
-                        {!runningTool && exitingTool ? (
-                            <div className="agent-fade-out">
-                                <GenerationWaiting call={exitingTool} startedAt={turnStartedAt || Date.now()} />
-                            </div>
-                        ) : null}
-                        {runningTool && runningTool.tool === "apply_prompt" ? (
-                            <div className="agent-fade-in flex gap-3">
-                                <div className="w-7 shrink-0" />
-                                <div className="flex items-center gap-2 text-xs text-stone-400 dark:text-stone-500">
-                                    <span className="inline-block size-2 animate-pulse rounded-full bg-amber-500" />
-                                    apply_prompt · {t("chat.tools.names.apply_prompt")}
+                            ) : null}
+                            {runningTool && (runningTool.tool === "generate_image" || runningTool.tool === "edit_image") ? (
+                                <GenerationWaiting call={runningTool} startedAt={turnStartedAt || Date.now()} />
+                            ) : null}
+                            {!runningTool && exitingTool ? (
+                                <div className="agent-fade-out">
+                                    <GenerationWaiting call={exitingTool} startedAt={turnStartedAt || Date.now()} />
                                 </div>
-                            </div>
-                        ) : null}
-                        {running && !streamingText && !runningTool ? <ThinkingLine startedAt={turnStartedAt || Date.now()} /> : null}
+                            ) : null}
+                            {runningTool && runningTool.tool === "apply_prompt" ? (
+                                <div className="agent-fade-in flex gap-3">
+                                    <div className="w-7.5 shrink-0" />
+                                    <div className="flex items-center gap-2 rounded-xl border border-stone-200/80 bg-white/70 px-3 py-1.5 text-xs text-stone-500 shadow-xs dark:border-stone-800 dark:bg-stone-900/40 dark:text-stone-400">
+                                        <span className="inline-block size-2 animate-pulse rounded-full bg-amber-500" />
+                                        apply_prompt · {t("chat.tools.names.apply_prompt")}
+                                    </div>
+                                </div>
+                            ) : null}
+                            {running && !streamingText && !runningTool ? <ThinkingLine startedAt={turnStartedAt || Date.now()} /> : null}
+                        </div>
                     </div>
+                    {/* 底部向上渐变遮罩，使接近输入框的文字柔和淡化，不再生硬切断 */}
+                    <div className="pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-[#faf9f5] to-transparent dark:from-[#1c1b19] z-10" />
                 </div>
                 <div className="shrink-0 px-3 pb-4 sm:px-6">
                     <div className="mx-auto w-full max-w-3xl">

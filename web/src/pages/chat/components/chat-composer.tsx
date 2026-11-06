@@ -44,9 +44,21 @@ function ReferenceThumb({ image, onRemove }: { image: AgentImageRef; onRemove: (
         };
     }, [image.storageKey]);
     return (
-        <div className="relative">
-            {url ? <img src={url} alt="reference" className="size-14 rounded-lg border border-stone-200 object-cover dark:border-stone-700" /> : <div className="size-14 rounded-lg bg-black/[.04] dark:bg-white/[.06]" />}
-            <button type="button" className="absolute -right-1 -top-1 rounded-full bg-stone-900 p-0.5 text-white dark:bg-stone-100 dark:text-stone-900" onClick={onRemove}>
+        <div className="group relative">
+            {url ? (
+                <img
+                    src={url}
+                    alt="reference"
+                    className="size-14 rounded-lg border border-stone-200/80 object-cover shadow-sm transition-transform duration-200 group-hover:scale-105 dark:border-stone-700/80"
+                />
+            ) : (
+                <div className="size-14 rounded-lg bg-black/[.04] dark:bg-white/[.06]" />
+            )}
+            <button
+                type="button"
+                className="absolute -right-1 -top-1 rounded-full bg-stone-900 p-0.5 text-white shadow-sm transition hover:scale-110 dark:bg-stone-100 dark:text-stone-900"
+                onClick={onRemove}
+            >
                 <X className="size-3" />
             </button>
         </div>
@@ -103,7 +115,7 @@ export function ChatComposer({ value, onChange, onSend, onStop, running, modelLa
                     ))}
                 </div>
             ) : null}
-            <div className="rounded-2xl border border-stone-300/80 bg-white p-2.5 shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-all duration-200 focus-within:border-stone-400/80 focus-within:shadow-[0_2px_14px_rgba(0,0,0,0.06)] dark:border-stone-700 dark:bg-stone-900 dark:focus-within:border-stone-600">
+            <div className="rounded-2xl border border-stone-300/80 bg-white p-2.5 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition-all duration-200 focus-within:border-stone-400 focus-within:shadow-[0_4px_18px_rgba(0,0,0,0.06)] dark:border-stone-700/80 dark:bg-stone-900 dark:focus-within:border-stone-500 dark:focus-within:shadow-[0_4px_18px_rgba(0,0,0,0.3)]">
                 {references.length ? (
                     <div className="flex flex-wrap gap-2 px-1 pb-2">
                         {references.map((reference) => (
@@ -182,18 +194,18 @@ export function ChatComposer({ value, onChange, onSend, onStop, running, modelLa
                         <button
                             type="button"
                             className={cn(
-                                "flex size-8 items-center justify-center rounded-full transition-all duration-150 active:scale-90",
+                                "flex size-8 items-center justify-center rounded-full transition-all duration-200 active:scale-90",
                                 running
-                                    ? "bg-stone-900 text-white hover:bg-stone-700 dark:bg-stone-100 dark:text-stone-900"
+                                    ? "bg-stone-900 text-white shadow-sm ring-2 ring-stone-900/20 hover:bg-stone-800 dark:bg-stone-100 dark:text-stone-900 dark:ring-stone-100/20 dark:hover:bg-white"
                                     : canSend
-                                      ? "bg-stone-900 text-white hover:bg-stone-700 dark:bg-stone-100 dark:text-stone-900"
-                                      : "cursor-not-allowed bg-stone-200 text-stone-400 dark:bg-stone-800 dark:text-stone-500",
+                                      ? "bg-stone-900 text-white shadow-sm hover:scale-105 hover:bg-stone-800 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white"
+                                      : "cursor-not-allowed bg-stone-200/80 text-stone-400 dark:bg-stone-800/80 dark:text-stone-500",
                             )}
                             disabled={!running && !canSend}
                             onClick={() => (running ? onStop() : onSend())}
                             title={running ? t("chat.stop") : t("chat.send")}
                         >
-                            {running ? <Square className="size-3.5" /> : <ArrowUp className="size-4" />}
+                            {running ? <Square className="size-3.5 fill-current animate-pulse" /> : <ArrowUp className="size-4" />}
                         </button>
                     </div>
                 </div>

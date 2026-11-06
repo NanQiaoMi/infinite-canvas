@@ -78,8 +78,17 @@ function UserAttachments({ images }: { images: AgentImageRef[] }) {
         };
     }, [images, revision]);
     return (
-        <div className="mt-2 flex flex-wrap justify-end gap-1.5">
-            {images.map((image, index) => (urls[index] ? <img key={image.id} src={urls[index]} alt="reference" className="size-16 rounded-xl border border-stone-200 object-cover dark:border-stone-700" /> : null))}
+        <div className="mt-2 flex flex-wrap justify-end gap-2">
+            {images.map((image, index) =>
+                urls[index] ? (
+                    <img
+                        key={image.id}
+                        src={urls[index]}
+                        alt="reference"
+                        className="size-16 rounded-xl border border-stone-200/90 object-cover shadow-xs transition-transform duration-200 hover:scale-105 hover:shadow-md dark:border-stone-700/80"
+                    />
+                ) : null,
+            )}
         </div>
     );
 }
@@ -89,7 +98,7 @@ function ToolResultBody({ result }: { result: AgentToolResult }) {
     const navigate = useNavigate();
     if (!result.ok) {
         return (
-            <div className="mt-2 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50/70 px-3 py-2 text-xs leading-5 text-red-600 dark:border-red-950 dark:bg-red-950/20 dark:text-red-300">
+            <div className="mt-2 flex items-start gap-2 rounded-xl border border-red-200/80 bg-red-50/70 px-3.5 py-2.5 text-xs leading-5 text-red-600 shadow-xs dark:border-red-950 dark:bg-red-950/20 dark:text-red-300">
                 <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
                 <span className="break-words">{result.error}</span>
             </div>
@@ -97,16 +106,16 @@ function ToolResultBody({ result }: { result: AgentToolResult }) {
     }
     if (result.tool === "generate_image" || result.tool === "edit_image") {
         return (
-            <div className="mt-2">
+            <div className="mt-2.5">
                 <ImageResultGrid images={result.images} />
             </div>
         );
     }
     const target = result.target === "video" ? t("chat.tools.videoWorkbench") : t("chat.tools.imageWorkbench");
     return (
-        <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500">
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500">
             <span>→ {t("chat.tools.applied", { target })}</span>
-            <Button size="small" type="text" icon={<ArrowUpRight className="size-3" />} onClick={() => navigate(result.target === "video" ? "/video" : "/image")}>
+            <Button size="small" type="text" className="!h-6 !px-1.5 text-stone-600 dark:text-stone-300" icon={<ArrowUpRight className="size-3" />} onClick={() => navigate(result.target === "video" ? "/video" : "/image")}>
                 {t("chat.tools.open", { target })}
             </Button>
         </div>
@@ -118,18 +127,20 @@ function ToolMessage({ message }: { message: Extract<AgentMessage, { role: "tool
     const [expanded, setExpanded] = useState(false);
     return (
         <div className="agent-message-in flex gap-3">
-            <div className="w-7 shrink-0" />
+            <div className="w-7.5 shrink-0" />
             <div className="min-w-0 flex-1">
                 <button
                     type="button"
-                    className="flex w-full items-center gap-2 rounded-xl border border-stone-200/80 bg-white/60 px-3 py-1.5 text-left text-xs transition hover:bg-white dark:border-stone-800 dark:bg-white/[.025] dark:hover:bg-white/[.05]"
+                    className="flex w-full items-center gap-2.5 rounded-xl border border-stone-200/90 bg-white/70 px-3.5 py-2 text-left text-xs shadow-xs transition hover:bg-white hover:border-stone-300 dark:border-stone-800 dark:bg-stone-900/40 dark:hover:bg-stone-900/70 dark:hover:border-stone-700"
                     onClick={() => setExpanded((value) => !value)}
                 >
-                    <span className={cn("font-mono", message.result.ok ? "text-emerald-600 dark:text-emerald-400" : "text-red-500")}>{message.result.ok ? "✓" : "×"}</span>
+                    <span className={cn("flex size-4 items-center justify-center rounded-full text-[10px] font-bold font-mono", message.result.ok ? "bg-emerald-500/10 text-emerald-600 dark:bg-emerald-400/15 dark:text-emerald-400" : "bg-red-500/10 text-red-500")}>
+                        {message.result.ok ? "✓" : "×"}
+                    </span>
                     <span className="shrink-0 font-medium text-stone-700 dark:text-stone-200">{toolLabel(message.call.tool, t)}</span>
-                    <span className="min-w-0 flex-1 truncate text-stone-400 dark:text-stone-500">{toolArgsSummary(message.call)}</span>
-                    <span className="shrink-0 text-[10px] tabular-nums text-stone-400 dark:text-stone-500">{toolResultSummary(message.result, t)}</span>
-                    <ChevronDown className={cn("size-3.5 shrink-0 text-stone-400 transition-transform", expanded && "rotate-180")} />
+                    <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-stone-400 dark:text-stone-500">{toolArgsSummary(message.call)}</span>
+                    <span className="shrink-0 font-mono text-[10px] tabular-nums text-stone-400 dark:text-stone-500">{toolResultSummary(message.result, t)}</span>
+                    <ChevronDown className={cn("size-3.5 shrink-0 text-stone-400 transition-transform duration-200", expanded && "rotate-180")} />
                 </button>
                 <div className={cn("agent-collapse", expanded && "is-open")}>
                     <div>
@@ -149,7 +160,9 @@ export function ChatMessage({ message, onRetry }: { message: AgentMessage; onRet
     if (message.role === "user") {
         return (
             <div className="agent-message-in flex flex-col items-end">
-                <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl bg-stone-200/75 px-4 py-2.5 text-sm leading-6 text-stone-800 dark:bg-stone-800 dark:text-stone-100">{message.text}</div>
+                <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-tr-md bg-stone-200/85 px-4.5 py-3 text-sm leading-relaxed text-stone-900 shadow-[0_1px_2px_rgba(0,0,0,0.03)] dark:bg-stone-800 dark:text-stone-100">
+                    {message.text}
+                </div>
                 {message.attachments?.length ? <UserAttachments images={message.attachments} /> : null}
             </div>
         );
@@ -157,10 +170,10 @@ export function ChatMessage({ message, onRetry }: { message: AgentMessage; onRet
     if (message.role === "assistant") {
         return (
             <div className="agent-message-in flex gap-3">
-                <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-400">
-                    <Sparkles className="size-3.5" />
+                <div className="mt-0.5 flex size-7.5 shrink-0 items-center justify-center rounded-full border border-stone-200/90 bg-gradient-to-b from-stone-50 to-stone-100 text-stone-600 shadow-xs dark:border-stone-700/80 dark:from-stone-800 dark:to-stone-900 dark:text-stone-300">
+                    <Sparkles className="size-3.5 text-stone-500 dark:text-stone-400" />
                 </div>
-                <div className="min-w-0 flex-1 space-y-2">
+                <div className="min-w-0 flex-1 space-y-2.5">
                     {message.text ? <Streamdown className="agent-streamdown text-sm leading-7 text-stone-800 dark:text-stone-200">{message.text}</Streamdown> : null}
                     {message.promptBlocks.length ? (
                         <div className="max-w-xl space-y-2">
@@ -176,13 +189,13 @@ export function ChatMessage({ message, onRetry }: { message: AgentMessage; onRet
     if (message.role === "tool") return <ToolMessage message={message} />;
     return (
         <div className="agent-message-in flex gap-3">
-            <div className="w-7 shrink-0" />
-            <div className="flex max-w-[85%] items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs leading-5 text-amber-700 dark:border-amber-950 dark:bg-amber-950/20 dark:text-amber-300">
+            <div className="w-7.5 shrink-0" />
+            <div className="flex max-w-[85%] items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50/70 px-3.5 py-2.5 text-xs leading-5 text-amber-700 shadow-xs dark:border-amber-950 dark:bg-amber-950/20 dark:text-amber-300">
                 <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
                 <div className="min-w-0 flex-1 break-words">
                     {message.text}
                     {onRetry ? (
-                        <Button size="small" type="text" className="mt-0.5 !h-6 !px-1" icon={<RefreshCw className="size-3" />} onClick={onRetry}>
+                        <Button size="small" type="text" className="mt-1 !h-6 !px-1.5 text-amber-800 dark:text-amber-200" icon={<RefreshCw className="size-3" />} onClick={onRetry}>
                             {t("chat.actions.retry")}
                         </Button>
                     ) : null}
