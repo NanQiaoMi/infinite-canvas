@@ -24,6 +24,7 @@ import { ArtifactPanel } from "./components/artifact-panel";
 import { CommandPalette } from "./components/command-palette";
 import { StepTrail, type AgentStep } from "./components/step-trail";
 import { GenerationWaiting, ThinkingLine } from "./components/generation-waiting";
+import { AssistantAvatar } from "./components/assistant-avatar";
 import { SmoothStreamText } from "./components/smooth-stream-text";
 
 const modelLabelOf = (option: string) => option.split("::").pop() || option;
@@ -503,9 +504,7 @@ export default function ChatPage() {
                             {steps.length ? <StepTrail steps={steps} running={running} /> : null}
                             {running && streamingText ? (
                                 <div className="agent-message-in flex gap-3">
-                                    <div className="mt-0.5 flex size-7.5 shrink-0 items-center justify-center rounded-full border border-stone-200/90 bg-stone-100/90 text-stone-600 shadow-xs dark:border-stone-800 dark:bg-stone-800/90 dark:text-stone-300">
-                                        <Sparkles className="size-3.5 text-stone-500 dark:text-stone-400" />
-                                    </div>
+                                    <AssistantAvatar />
                                     <div className="min-w-0 flex-1">
                                         <div className="mb-1 text-[11px] font-medium text-stone-400 dark:text-stone-500">{t("chat.streaming")}</div>
                                         <SmoothStreamText rawText={streamingText} running={running} />

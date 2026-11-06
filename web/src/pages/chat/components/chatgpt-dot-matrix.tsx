@@ -6,11 +6,11 @@ type ChatGptDotMatrixProps = {
 };
 
 /**
- * ChatGPT DALL-E 3 真实物理波浪点阵引擎（Waveform Dot Matrix）：
- * - 波点具备真正的物理空间位移（dy 纵向起伏波与 dx 轴向推移波），呈现如海浪/绸缎般起伏的生动波浪效果；
- * - 波峰粒子物理抬升、向外膨胀变大、呈现高饱和电光蓝（#2563eb / #38bdf8）；
- * - 波谷粒子物理下沉、收缩变小、呈现柔和半透明浅天蓝（rgba(147, 197, 253, 0.3)）；
- * - 背景保持纯净通透（绝无任何多余的浑浊彩斑杂色），纯正还原 ChatGPT 科技艺术美感。
+ * ChatGPT DALL-E 3 官方同款极简纯单色波浪点阵（Dot Matrix Wave）：
+ * - 纯单色科技蓝（浅色模式：#2563eb / 深色模式：#38bdf8），绝不掺杂彩斑杂色；
+ * - 严格对齐网格阵列，同频驱动波点半径（0.8px ~ 3.2px）与不透明度（0.04 ~ 0.95）；
+ * - 波浪自左上方（圆心向外）如水波涟漪般平滑推进，波峰处波点饱满凝聚，波谷处展现开阔纯净留白；
+ * - 完美复现 ChatGPT 参考图 1 的宁静、高级科技美感。
  */
 export function ChatGptDotMatrix({ aspect = 1, className }: ChatGptDotMatrixProps) {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -53,77 +53,54 @@ export function ChatGptDotMatrix({ aspect = 1, className }: ChatGptDotMatrixProp
             const isDark = document.documentElement.classList.contains("dark");
             const time = (now - startTime) / 1000;
 
-            // 根据宽高比自适应行列数（密度均匀适中，完全符合截图视觉密度）
-            const baseCount = 19;
-            const cols = aspect >= 1 ? Math.round(baseCount * Math.min(1.4, Math.sqrt(aspect))) : Math.max(13, Math.round(baseCount * aspect));
-            const rows = aspect <= 1 ? Math.round(baseCount / Math.min(1.4, Math.sqrt(aspect))) : Math.max(13, Math.round(baseCount / aspect));
+            // 根据宽高比动态计算网格列数与行数（视觉密度严丝合缝对齐 ChatGPT 截图）
+            const baseCount = 24;
+            const cols = aspect >= 1 ? Math.round(baseCount * Math.min(1.35, Math.sqrt(aspect))) : Math.max(16, Math.round(baseCount * aspect));
+            const rows = aspect <= 1 ? Math.round(baseCount / Math.min(1.35, Math.sqrt(aspect))) : Math.max(16, Math.round(baseCount / aspect));
 
             const padX = width * 0.07;
             const padY = height * 0.07;
             const stepX = (width - padX * 2) / (cols - 1);
             const stepY = (height - padY * 2) / (rows - 1);
 
+            // 严格纯单色科技蓝（无任何桃红/鹅黄/薰衣草紫等杂色）
+            const rBase = isDark ? 56 : 37;
+            const gBase = isDark ? 189 : 99;
+            const bBase = isDark ? 248 : 235;
+
             for (let r = 0; r < rows; r++) {
                 for (let c = 0; c < cols; c++) {
-                    const baseX = padX + c * stepX;
-                    const baseY = padY + r * stepY;
+                    const x = padX + c * stepX;
+                    const y = padY + r * stepY;
 
                     const normCol = c / (cols - 1);
                     const normRow = r / (rows - 1);
 
-                    // ===== 物理波浪流体动力学计算 =====
-                    // 主前进波：自左上方朝右下方翻涌的宽幅波浪
-                    const phaseMain = (normCol * 2.5 + normRow * 2.5) * Math.PI - time * 3.4;
-                    // 次谐波：横向起伏调谐，产生水波自然涟漪
-                    const phaseCross = (normCol * 1.8 - normRow * 1.5) * Math.PI + time * 1.6;
+                    // 涟漪水波波源位于左上方微偏外侧 (-0.08, -0.08)
+                    // 产生自左上方朝右下方平滑扩展的同心弧面波
+                    const dist = Math.hypot(normCol + 0.08, normRow + 0.08);
 
-                    // 复合波高（-1.0 ~ +1.0）
-                    const waveHeight = Math.sin(phaseMain) * 0.72 + Math.sin(phaseCross) * 0.28;
+                    // 空间波数让画面内呈现约 1.5 个波峰周期（左上一波，右下一波，中间开阔空白）
+                    const phase = dist * Math.PI * 2.7 - time * 2.5;
+                    const rawWave = Math.sin(phase);
 
-                    // 1. 物理位置空间位移（真正像波浪一样翻涌波动！）
-                    // 纵向上下起伏（波浪振幅达 6.5px）
-                    const dy = waveHeight * 6.5;
-                    // 轴向微缩放推移（模拟流体纵波挤压效应）
-                    const dx = Math.cos(phaseMain) * 2.2;
+                    // 波峰整形：强化波峰凝聚，让波谷平滑隐匿
+                    const crest = Math.max(0, (rawWave + 0.3) / 1.3);
+                    const crestCurve = Math.pow(crest, 2.2);
 
-                    const drawX = baseX + dx;
-                    const drawY = baseY + dy;
-
-                    // 2. 波峰系数归一化（0.0 ~ 1.0），经指数锐化让波峰如浪尖般鲜明
-                    const rawCrest = (waveHeight + 1) / 2;
-                    const crest = Math.pow(Math.max(0, Math.min(1, rawCrest)), 1.9);
-
-                    // 3. 四周留白边缘平滑衰减，防止碰到边界突兀
+                    // 四周边缘正弦微衰减，防止波点生硬贴边
                     const edgeFade = Math.sin(normCol * Math.PI) * Math.sin(normRow * Math.PI);
-                    const finalCrest = crest * Math.pow(edgeFade, 0.22);
+                    const edgeFactor = Math.pow(edgeFade, 0.2);
 
-                    // 4. 波点大小随波浪起伏剧烈呼吸：波谷收缩为 1.5px，浪尖膨胀至 3.6px
-                    const radius = 1.5 + finalCrest * 2.1;
+                    const waveFactor = crestCurve * edgeFactor;
 
-                    // 5. 纯正极简科技蓝调色板（无任何杂色）
+                    // 严格纯单色波动：浪尖深邃饱满 (3.2px, opacity 0.95)，浪谷开阔素净 (0.8px, opacity 0.04)
+                    const radius = 0.8 + waveFactor * 2.4;
+                    const opacity = Math.max(0.04, waveFactor * 0.95);
+
                     ctx.beginPath();
-                    ctx.arc(drawX, drawY, radius, 0, Math.PI * 2);
-
-                    if (isDark) {
-                        // 暗色模式：从微弱天蓝过渡到明亮电光青蓝
-                        if (finalCrest > 0.6) {
-                            ctx.fillStyle = `rgba(56, 189, 248, ${0.85 + finalCrest * 0.15})`; // sky-400
-                        } else if (finalCrest > 0.25) {
-                            ctx.fillStyle = `rgba(96, 165, 250, ${0.45 + finalCrest * 0.35})`; // blue-400
-                        } else {
-                            ctx.fillStyle = "rgba(56, 189, 248, 0.2)"; // 柔和暗天蓝基底
-                        }
-                    } else {
-                        // 亮色模式：从浅淡透明冰蓝过渡到高饱和皇家宝蓝（#2563eb）
-                        if (finalCrest > 0.6) {
-                            ctx.fillStyle = `rgba(37, 99, 235, ${0.88 + finalCrest * 0.12})`; // 纯正电光蓝 #2563eb
-                        } else if (finalCrest > 0.25) {
-                            ctx.fillStyle = `rgba(59, 130, 246, ${0.5 + finalCrest * 0.35})`; // blue-500
-                        } else {
-                            ctx.fillStyle = "rgba(147, 197, 253, 0.32)"; // 浅冰蓝基底
-                        }
-                    }
-
+                    ctx.arc(x, y, radius, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(${rBase}, ${gBase}, ${bBase}, ${opacity.toFixed(3)})`;
                     ctx.fill();
                 }
             }

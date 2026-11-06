@@ -12,6 +12,7 @@ import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
 import { cn } from "@/lib/utils";
 
 import { ImageResultGrid } from "./image-result-card";
+import { AssistantAvatar } from "./assistant-avatar";
 
 function PromptCard({ text }: { text: string }) {
     const { t } = useTranslation();
@@ -170,9 +171,7 @@ export function ChatMessage({ message, onRetry }: { message: AgentMessage; onRet
     if (message.role === "assistant") {
         return (
             <div className="agent-message-in flex gap-3">
-                <div className="mt-0.5 flex size-7.5 shrink-0 items-center justify-center rounded-full border border-stone-200/90 bg-gradient-to-b from-stone-50 to-stone-100 text-stone-600 shadow-xs dark:border-stone-700/80 dark:from-stone-800 dark:to-stone-900 dark:text-stone-300">
-                    <Sparkles className="size-3.5 text-stone-500 dark:text-stone-400" />
-                </div>
+                <AssistantAvatar />
                 <div className="min-w-0 flex-1 space-y-2.5">
                     {message.text ? <Streamdown className="agent-streamdown text-sm leading-7 text-stone-800 dark:text-stone-200">{message.text}</Streamdown> : null}
                     {message.promptBlocks.length ? (
