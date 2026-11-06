@@ -839,3 +839,10 @@ POST /v1/responses (stream:false) → 200，返回 output_text "OK"（18.5s）
 - 页面与会话切换：对话页根节点 `agent-page-in` 淡入，会话消息列表按 session id 重新挂载并淡入。
 - `⌘K / Ctrl+K` 命令面板：`CommandPalette` 组件，搜索 + 方向键/回车 + Esc/遮罩关闭；条目包含新建对话、斜杠命令与最近对话；输入框底部增加 ⌘K 提示。
 - 验证：`tsc` 通过、34 项测试、构建通过；浏览器实测命令面板可打开并列出操作/命令/最近对话，Esc 关闭；部署后正常。
+
+### 17.8 生成结果面板与模型切换（2026-11-06）
+
+- 生成结果面板：新增 `ArtifactPanel`，点击对话图片从右侧滑出（`agent-slide-in`），展示大图、可编辑提示词、模型/尺寸/比例与下载/资产/工作台/参考图/复制操作；通过 `useConversationAgentStore.artifact` 与 `pendingReference` 与页面/输入框联动。
+- 图片卡片改为点击打开面板，保留下载/资产/工作台快捷按钮（阻止冒泡），悬停显示放大图标。
+- 模型切换：输入框底部新增文本模型下拉（服务端模式受 `allowModelSelection` 控制），新增 `/model`、`/model <name>` 命令与 ⌘K 命令面板条目；切换写入 `use-config-store`。
+- 验证：`tsc` 通过、34 项测试、构建通过；浏览器实测 `/model` 列出模型、`/image` 生成后点击图片打开右侧面板（截图），并清理测试会话。
