@@ -644,7 +644,7 @@ function GenerationSettings({ config, model, updateConfig, openConfigDialog }: {
                             </label>
                         </div>
                         <div className={cn("flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]", gifDurationWarning ? "text-amber-600 dark:text-amber-400" : "text-stone-400 dark:text-stone-500")}>
-                            <span>{t("imageWorkbench.gifTotalDuration", { frames: gifFrames, ms: gifFrameDuration, seconds: (gifFrames * gifFrameDuration / 1000).toFixed(1) })}</span>
+                            <span>{t("imageWorkbench.gifTotalDuration", { frames: gifFrames, ms: gifFrameDuration, seconds: (gifFrames * gifFrameDuration / 1000).toFixed(2) })}</span>
                             <span>{t("imageWorkbench.gifDurationHint")}</span>
                         </div>
                     </div>
