@@ -21,12 +21,15 @@ type ConversationAgentStore = {
     launchContext: AgentLaunchContext | null;
     artifact: AgentImageRef | null;
     pendingReference: AgentImageRef | null;
+    pendingReferences: AgentImageRef[];
     composerDraft: string | null;
     hydrate: () => Promise<void>;
     openArtifact: (image: AgentImageRef) => void;
     closeArtifact: () => void;
     requestReference: (image: AgentImageRef) => void;
+    requestReferences: (images: AgentImageRef[]) => void;
     consumeReference: () => AgentImageRef | null;
+    consumeReferences: () => AgentImageRef[];
     setComposerDraft: (text: string) => void;
     consumeComposerDraft: () => string | null;
     createSession: () => string;
@@ -94,14 +97,21 @@ export const useConversationAgentStore = create<ConversationAgentStore>()((set, 
         launchContext: null,
         artifact: null,
         pendingReference: null,
+        pendingReferences: [],
         composerDraft: null,
         openArtifact: (image) => set({ artifact: image }),
         closeArtifact: () => set({ artifact: null }),
-        requestReference: (image) => set({ pendingReference: image }),
+        requestReference: (image) => set((state) => ({ pendingReference: image, pendingReferences: [...state.pendingReferences, image] })),
+        requestReferences: (images) => set((state) => ({ pendingReferences: [...state.pendingReferences, ...images], pendingReference: images[0] ?? state.pendingReference })),
         consumeReference: () => {
             const reference = get().pendingReference;
             if (reference) set({ pendingReference: null });
             return reference;
+        },
+        consumeReferences: () => {
+            const list = get().pendingReferences;
+            if (list.length) set({ pendingReferences: [], pendingReference: null });
+            return list;
         },
         setComposerDraft: (text) => set({ composerDraft: text }),
         consumeComposerDraft: () => {

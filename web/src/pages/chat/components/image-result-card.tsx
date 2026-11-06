@@ -1,6 +1,6 @@
 import { App, Button, Tooltip } from "antd";
 import { saveAs } from "file-saver";
-import { Download, FolderPlus, ImageIcon, LoaderCircle, Maximize2, SlidersHorizontal } from "lucide-react";
+import { Check, Columns2, Download, FolderPlus, ImageIcon, Layers, LoaderCircle, Maximize2, SlidersHorizontal } from "lucide-react";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -9,8 +9,21 @@ import { useAssetStore } from "@/stores/use-asset-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
 import { useConversationAgentStore } from "@/stores/use-conversation-agent-store";
 import type { AgentImageRef } from "@/lib/conversation-agent/types";
+import { cn } from "@/lib/utils";
 
-export function ImageResultCard({ image }: { image: AgentImageRef }) {
+import { ImageCompareModal } from "./image-compare-modal";
+
+export function ImageResultCard({
+    image,
+    selectable,
+    selected,
+    onToggleSelect,
+}: {
+    image: AgentImageRef;
+    selectable?: boolean;
+    selected?: boolean;
+    onToggleSelect?: () => void;
+}) {
     const { t } = useTranslation();
     const { message } = App.useApp();
     const revision = useSyncExternalStore(subscribeImagePreviews, getImagePreviewRevision);
@@ -62,10 +75,51 @@ export function ImageResultCard({ image }: { image: AgentImageRef }) {
 
     return (
         <div
-            className="group cursor-pointer overflow-hidden rounded-lg border border-stone-200 bg-card transition-all duration-200 hover:-translate-y-0.5 hover:border-stone-300 hover:shadow-md dark:border-stone-800 dark:hover:border-stone-700"
-            onClick={() => openArtifact(image)}
-            title={t("chat.artifact.open")}
+            className={cn(
+                "group relative cursor-pointer overflow-hidden rounded-lg border transition-all duration-200",
+                selected
+                    ? "border-stone-800 ring-2 ring-stone-800/80 dark:border-stone-200 dark:ring-stone-200/80"
+                    : "border-stone-200 bg-card hover:-translate-y-0.5 hover:border-stone-300 hover:shadow-md dark:border-stone-800 dark:hover:border-stone-700",
+            )}
+            onClick={() => {
+                if (selectable) {
+                    onToggleSelect?.();
+                } else {
+                    openArtifact(image);
+                }
+            }}
+            title={selectable ? (selected ? t("chat.compare.deselect") : t("chat.compare.select")) : t("chat.artifact.open")}
         >
+            {/* 多选圈 */}
+            {selectable || selected ? (
+                <button
+                    type="button"
+                    className={cn(
+                        "absolute left-1.5 top-1.5 z-10 flex size-5 items-center justify-center rounded-full transition-transform",
+                        selected
+                            ? "bg-stone-900 text-white shadow dark:bg-white dark:text-stone-900"
+                            : "border border-black/30 bg-white/70 text-transparent backdrop-blur-sm hover:border-black/60 dark:border-white/40 dark:bg-black/60",
+                    )}
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        onToggleSelect?.();
+                    }}
+                >
+                    <Check className="size-3 stroke-[3]" />
+                </button>
+            ) : (
+                <button
+                    type="button"
+                    className="absolute left-1.5 top-1.5 z-10 hidden size-5 items-center justify-center rounded-full border border-black/30 bg-white/70 text-transparent opacity-0 backdrop-blur-sm transition hover:border-black/60 group-hover:flex group-hover:opacity-100 dark:border-white/40 dark:bg-black/60"
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        onToggleSelect?.();
+                    }}
+                >
+                    <Check className="size-3 stroke-[3]" />
+                </button>
+            )}
+
             <div className="relative flex aspect-square items-center justify-center overflow-hidden bg-stone-100 dark:bg-stone-800">
                 {thumb ? (
                     <img src={thumb} alt={image.prompt.slice(0, 40)} className="agent-fade-in h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]" />
@@ -98,6 +152,13 @@ export function ImageResultCard({ image }: { image: AgentImageRef }) {
 
 export function ImageResultGrid({ images }: { images: AgentImageRef[] }) {
     const { t } = useTranslation();
+    const { message } = App.useApp();
+    const [selecting, setSelecting] = useState(false);
+    const [selectedIds, setSelectedIds] = useState<string[]>([]);
+    const [compareOpen, setCompareOpen] = useState(false);
+
+    const requestReferences = useConversationAgentStore((state) => state.requestReferences);
+
     if (!images.length) {
         return (
             <div className="flex items-center gap-2 rounded-lg border border-dashed border-stone-300 px-3 py-2 text-xs text-stone-400 dark:border-stone-700">
@@ -106,11 +167,119 @@ export function ImageResultGrid({ images }: { images: AgentImageRef[] }) {
             </div>
         );
     }
+
+    const toggleSelect = (id: string) => {
+        setSelecting(true);
+        setSelectedIds((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
+    };
+
+    const handleBatchReference = () => {
+        const toAdd = images.filter((img) => selectedIds.includes(img.id));
+        if (!toAdd.length) return;
+        requestReferences(toAdd);
+        message.success(t("chat.actions.batchReferenceAdded", { count: toAdd.length }));
+        setSelecting(false);
+        setSelectedIds([]);
+    };
+
+    const selectedImages = images.filter((img) => selectedIds.includes(img.id));
+    const compareImages = selectedImages.length >= 2 ? selectedImages : images;
+
     return (
-        <div className="grid max-w-xl grid-cols-2 gap-2 sm:grid-cols-3">
-            {images.map((image) => (
-                <ImageResultCard key={image.id} image={image} />
-            ))}
+        <div className="max-w-xl">
+            {images.length >= 2 ? (
+                <div className="mb-2 flex items-center justify-between gap-2 text-xs text-stone-500 dark:text-stone-400">
+                    {selecting ? (
+                        <>
+                            <span className="font-medium text-[11px]">
+                                {t("chat.compare.selectedCount", { count: selectedIds.length, total: images.length })}
+                            </span>
+                            <div className="flex items-center gap-1">
+                                <Button
+                                    size="small"
+                                    type="text"
+                                    className="!h-6 !px-1.5 !text-[11px]"
+                                    onClick={() => {
+                                        if (selectedIds.length === images.length) setSelectedIds([]);
+                                        else setSelectedIds(images.map((img) => img.id));
+                                    }}
+                                >
+                                    {selectedIds.length === images.length ? t("chat.compare.clearSelection") : t("chat.compare.selectAll")}
+                                </Button>
+                                <Button
+                                    size="small"
+                                    type="default"
+                                    className="!h-6 !px-2 !text-[11px]"
+                                    disabled={selectedIds.length < 2}
+                                    icon={<Columns2 className="size-3" />}
+                                    onClick={() => setCompareOpen(true)}
+                                >
+                                    {t("chat.compare.sideBySide")}
+                                </Button>
+                                <Button
+                                    size="small"
+                                    type="primary"
+                                    className="!h-6 !px-2 !text-[11px]"
+                                    disabled={selectedIds.length === 0}
+                                    icon={<Layers className="size-3" />}
+                                    onClick={handleBatchReference}
+                                >
+                                    {t("chat.actions.batchReference")}
+                                </Button>
+                                <Button
+                                    size="small"
+                                    type="text"
+                                    className="!h-6 !px-1.5 !text-[11px]"
+                                    onClick={() => {
+                                        setSelecting(false);
+                                        setSelectedIds([]);
+                                    }}
+                                >
+                                    {t("common.cancel")}
+                                </Button>
+                            </div>
+                        </>
+                    ) : (
+                        <div className="ml-auto flex items-center gap-1">
+                            <Button
+                                size="small"
+                                type="text"
+                                className="!h-6 !px-1.5 !text-[11px] text-stone-400 hover:text-stone-700 dark:hover:text-stone-200"
+                                icon={<Columns2 className="size-3" />}
+                                onClick={() => {
+                                    setSelecting(true);
+                                    setSelectedIds(images.map((img) => img.id));
+                                }}
+                            >
+                                {t("chat.compare.selectImages")}
+                            </Button>
+                        </div>
+                    )}
+                </div>
+            ) : null}
+
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {images.map((image) => (
+                    <ImageResultCard
+                        key={image.id}
+                        image={image}
+                        selectable={selecting}
+                        selected={selectedIds.includes(image.id)}
+                        onToggleSelect={() => toggleSelect(image.id)}
+                    />
+                ))}
+            </div>
+
+            <ImageCompareModal
+                open={compareOpen}
+                images={compareImages}
+                onClose={() => setCompareOpen(false)}
+                onBatchReference={(batch) => {
+                    requestReferences(batch);
+                    setSelecting(false);
+                    setSelectedIds([]);
+                }}
+            />
         </div>
     );
 }

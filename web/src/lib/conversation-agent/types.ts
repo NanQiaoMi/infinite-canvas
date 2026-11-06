@@ -80,7 +80,8 @@ export type AgentToolExecutor = (call: AgentToolCall, context: { signal: AbortSi
 export type AgentEvent =
     | { type: "assistant-stream"; text: string }
     | { type: "tool-start"; call: AgentToolCall }
-    | { type: "tool-end"; call: AgentToolCall; result: AgentToolResult };
+    | { type: "tool-end"; call: AgentToolCall; result: AgentToolResult }
+    | { type: "correction-start"; reason: string };
 
 export type AgentLaunchContext = {
     page: "image" | "video";
@@ -95,4 +96,6 @@ export type AgentTurnResult = {
     messages: AgentMessage[];
     aborted: boolean;
     roundLimitReached: boolean;
+    /** 本地意图判定为 direct 时直接执行工具的结果，页面据此追加结果总结。 */
+    directToolResult?: AgentToolResult;
 };

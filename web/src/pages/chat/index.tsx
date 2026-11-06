@@ -13,7 +13,7 @@ import { AGENT_TOOLS, executeAgentTool } from "@/lib/conversation-agent/tools";
 import type { AgentContextInput, AgentEvent, AgentImageRef, AgentMessage, AgentModelCall, AgentToolCall } from "@/lib/conversation-agent/types";
 import { requestConversationTurn } from "@/services/api/image";
 import { uploadImage } from "@/services/image-storage";
-import { selectableModelsByCapability, useConfigStore } from "@/stores/use-config-store";
+import { decodeChannelModel, findModelOptionByQuery, modelOptionLabel, selectableModelsByCapability, useConfigStore } from "@/stores/use-config-store";
 import { useConversationAgentStore } from "@/stores/use-conversation-agent-store";
 import { useQuotaStore } from "@/stores/use-quota-store";
 import { cn } from "@/lib/utils";
@@ -52,7 +52,9 @@ export default function ChatPage() {
     const runningTool = useConversationAgentStore((state) => state.runningTool);
     const launchContext = useConversationAgentStore((state) => state.launchContext);
     const pendingReference = useConversationAgentStore((state) => state.pendingReference);
+    const pendingReferences = useConversationAgentStore((state) => state.pendingReferences);
     const consumeReference = useConversationAgentStore((state) => state.consumeReference);
+    const consumeReferences = useConversationAgentStore((state) => state.consumeReferences);
     const composerDraft = useConversationAgentStore((state) => state.composerDraft);
     const consumeComposerDraft = useConversationAgentStore((state) => state.consumeComposerDraft);
     const hydrate = useConversationAgentStore((state) => state.hydrate);
@@ -165,7 +167,24 @@ export default function ChatPage() {
                 turn = await run();
             } catch (error) {
                 if (signal.aborted || !isNetworkError(error)) throw error;
+                setSteps((current) => {
+                    const running = current.find((s) => s.status === "running");
+                    if (running) {
+                        return current.map((s) => (s.id === running.id ? { ...s, status: "waiting-retry" as const } : s));
+                    }
+                    stepSeqRef.current += 1;
+                    return [
+                        ...current,
+                        {
+                            id: `retry-${stepSeqRef.current}`,
+                            kind: "retry" as const,
+                            label: t("chat.steps.networkWaitRetry"),
+                            status: "waiting-retry" as const,
+                        },
+                    ];
+                });
                 await new Promise((resolve) => setTimeout(resolve, 900));
+                setSteps((current) => current.map((s) => (s.status === "waiting-retry" ? { ...s, status: "running" as const } : s)));
                 turn = await run();
             }
             const native = nativeToolCallsToAgent(turn.toolCalls.map((call) => ({ name: call.name, arguments: call.arguments })));
@@ -200,18 +219,36 @@ export default function ChatPage() {
                     if (!payload) {
                         let sessionId = useConversationAgentStore.getState().activeSessionId;
                         if (!sessionId) sessionId = createSession();
-                        const models = options.map((option) => option.split("::").pop()).join("、");
-                        appendMessages(sessionId, [{ id: nanoid(), role: "assistant", text: t("chat.commands.modelList", { current: modelLabelOf(config.textModel), models }), promptBlocks: [], createdAt: Date.now() }]);
+                        const models = options
+                            .map((option) => {
+                                const decoded = decodeChannelModel(option);
+                                const channel = config.channels.find((c) => c.id === decoded?.channelId);
+                                return channel ? `${channel.name}/${decoded?.model}` : (decoded?.model || option);
+                            })
+                            .join("、");
+                        appendMessages(sessionId, [
+                            {
+                                id: nanoid(),
+                                role: "assistant",
+                                text: t("chat.commands.modelList", { current: modelOptionLabel(config, config.textModel), models }),
+                                promptBlocks: [],
+                                createdAt: Date.now(),
+                            },
+                        ]);
                         setInput("");
                         return;
                     }
-                    const match = options.find((option) => option === payload || option.split("::").pop() === payload || option.split("::").pop()?.toLowerCase() === payload.toLowerCase());
-                    if (!match) {
-                        message.warning(t("chat.commands.unknownModel", { name: payload }));
+                    const matchResult = findModelOptionByQuery(payload, config, "text");
+                    if (!matchResult.matched) {
+                        if (matchResult.suggestions?.length) {
+                            message.warning(t("chat.commands.channelModelSuggestions", { channel: matchResult.channel?.name, models: matchResult.suggestions.join("、") }));
+                        } else {
+                            message.warning(t("chat.commands.unknownModel", { name: payload }));
+                        }
                         return;
                     }
-                    useConfigStore.getState().updateConfig("textModel", match);
-                    message.success(t("chat.commands.modelSwitched", { model: modelLabelOf(match) }));
+                    useConfigStore.getState().updateConfig("textModel", matchResult.matched);
+                    message.success(t("chat.commands.modelSwitched", { model: modelOptionLabel(config, matchResult.matched) }));
                     setInput("");
                     return;
                 }
@@ -252,7 +289,11 @@ export default function ChatPage() {
                             setStreamingText(event.text);
                             if (event.text.trim()) {
                                 setSteps((current) => {
-                                    const next = current.map((step) => (step.status === "running" && step.kind === "understand" ? { ...step, status: "done" as const } : step));
+                                    const next = current.map((step) =>
+                                        (step.status === "running" && step.kind === "understand") || step.status === "correction"
+                                            ? { ...step, status: "done" as const }
+                                            : step,
+                                    );
                                     if (!next.some((step) => step.status === "running")) {
                                         const hasTool = next.some((step) => step.kind === "tool");
                                         next.push({
@@ -271,11 +312,29 @@ export default function ChatPage() {
                             setExitingTool(null);
                             setRunningTool(event.call);
                             setSteps((current) => {
-                                const next = current.map((step) => (step.status === "running" ? { ...step, status: "done" as const } : step));
+                                const next = current.map((step) =>
+                                    step.status === "running" || step.status === "correction" || step.status === "waiting-retry"
+                                        ? { ...step, status: "done" as const }
+                                        : step,
+                                );
                                 stepSeqRef.current += 1;
                                 const stepId = `tool-${stepSeqRef.current}`;
                                 lastToolStepRef.current = stepId;
                                 return [...next, { id: stepId, kind: "tool" as const, label: toolStepLabel(event.call, t), status: "running" as const }];
+                            });
+                        } else if (event.type === "correction-start") {
+                            setSteps((current) => {
+                                const next = current.map((step) => (step.status === "running" ? { ...step, status: "done" as const } : step));
+                                stepSeqRef.current += 1;
+                                return [
+                                    ...next,
+                                    {
+                                        id: `correction-${stepSeqRef.current}`,
+                                        kind: "correction" as const,
+                                        label: t("chat.steps.correctionLabel"),
+                                        status: "correction" as const,
+                                    },
+                                ];
                             });
                         } else if (event.type === "tool-end") {
                             setRunningTool(null);
@@ -332,10 +391,17 @@ export default function ChatPage() {
     };
 
     useEffect(() => {
-        if (!pendingReference) return;
-        setReferences((current) => (current.some((item) => item.storageKey === pendingReference.storageKey) ? current : [...current, { ...pendingReference, id: nanoid() }]));
+        if (!pendingReferences?.length && !pendingReference) return;
+        const incoming = pendingReferences?.length ? pendingReferences : pendingReference ? [pendingReference] : [];
+        if (!incoming.length) return;
+        setReferences((current) => {
+            const existingKeys = new Set(current.map((item) => item.storageKey));
+            const toAdd = incoming.filter((item) => !existingKeys.has(item.storageKey)).map((item) => ({ ...item, id: nanoid() }));
+            return [...current, ...toAdd];
+        });
+        consumeReferences();
         consumeReference();
-    }, [pendingReference, consumeReference]);
+    }, [pendingReference, pendingReferences, consumeReference, consumeReferences]);
 
     useEffect(() => {
         if (composerDraft === null) return;

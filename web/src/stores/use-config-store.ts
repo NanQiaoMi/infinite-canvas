@@ -55,6 +55,9 @@ export type AiConfig = {
     size: string;
     background: string;
     count: string;
+    imageFormat: "png" | "gif";
+    gifFrames: string;
+    gifFrameDuration: string;
     canvasImageCount: string;
     proxyEnabled: boolean;
     proxyUrl: string;
@@ -126,6 +129,9 @@ export const defaultConfig: AiConfig = {
     size: "1:1",
     background: "",
     count: "1",
+    imageFormat: "png",
+    gifFrames: "8",
+    gifFrameDuration: "120",
     canvasImageCount: "3",
     proxyEnabled: false,
     proxyUrl: DEFAULT_LOCAL_PROXY_URL,
@@ -335,6 +341,9 @@ export const useConfigStore = create<ConfigStore>()(
                         videoGenerateAudio: config.videoGenerateAudio || "true",
                         videoWatermark: config.videoWatermark || "false",
                         videoMode: config.videoMode === "reference" ? "reference" : "frames",
+                        imageFormat: config.imageFormat === "gif" ? "gif" : "png",
+                        gifFrames: config.gifFrames || "8",
+                        gifFrameDuration: config.gifFrameDuration || "120",
                         canvasImageCount: config.canvasImageCount || "3",
                         proxyEnabled: Boolean(config.proxyEnabled),
                         proxyUrl: config.proxyUrl || DEFAULT_LOCAL_PROXY_URL,
@@ -500,6 +509,103 @@ export function resolveModelRequestConfig(config: AiConfig, value: string) {
         apiKey: channel.apiKey,
         apiFormat: channel.apiFormat,
     };
+}
+
+export type ModelQueryMatchResult = {
+    matched: string | null;
+    channel?: ModelChannel;
+    modelName?: string;
+    suggestions?: string[];
+};
+
+/**
+ * 根据用户输入的模型名称（支持渠道前缀，如 channelId/model、channelName/model、channel:model、channel::model）匹配可用的模型选项。
+ */
+export function findModelOptionByQuery(
+    query: string,
+    config: AiConfig,
+    capability: ModelCapability = "text",
+): ModelQueryMatchResult {
+    const raw = query.trim();
+    if (!raw) return { matched: null };
+    const options = selectableModelsByCapability(config, capability);
+    if (!options.length) return { matched: null };
+
+    // 1. 尝试拆分渠道前缀与模型名称（支持分隔符 ::、/、:）
+    let prefix = "";
+    let targetModel = raw;
+    const separatorMatch = raw.match(/^(.+?)(?:::|\/|:)(.+)$/);
+    if (separatorMatch) {
+        prefix = separatorMatch[1].trim();
+        targetModel = separatorMatch[2].trim();
+    }
+
+    if (prefix) {
+        const lowerPrefix = prefix.toLowerCase();
+        const lowerTarget = targetModel.toLowerCase();
+        for (const opt of options) {
+            const decoded = decodeChannelModel(opt);
+            if (!decoded) continue;
+            const channel = config.channels.find((c) => c.id === decoded.channelId);
+            const channelIdMatches = decoded.channelId.toLowerCase() === lowerPrefix;
+            const channelNameMatches = Boolean(channel?.name && channel.name.toLowerCase() === lowerPrefix);
+            const modelMatches = decoded.model.toLowerCase() === lowerTarget;
+            if ((channelIdMatches || channelNameMatches) && modelMatches) {
+                return { matched: opt, channel, modelName: decoded.model };
+            }
+        }
+    }
+
+    // 2. 无前缀或前缀未匹配到，按完整编码或纯模型名匹配
+    const lowerQuery = raw.toLowerCase();
+    const exact = options.find((opt) => opt.toLowerCase() === lowerQuery);
+    if (exact) {
+        const decoded = decodeChannelModel(exact);
+        const channel = decoded ? config.channels.find((c) => c.id === decoded.channelId) : undefined;
+        return { matched: exact, channel, modelName: decoded?.model || exact };
+    }
+
+    const nameMatches = options.filter((opt) => modelOptionName(opt).toLowerCase() === lowerQuery);
+    if (nameMatches.length === 1) {
+        const opt = nameMatches[0];
+        const decoded = decodeChannelModel(opt);
+        const channel = decoded ? config.channels.find((c) => c.id === decoded.channelId) : undefined;
+        return { matched: opt, channel, modelName: decoded?.model || opt };
+    }
+
+    if (nameMatches.length > 1) {
+        const currentModel = capability === "image" ? config.imageModel : capability === "video" ? config.videoModel : config.textModel;
+        const currentChannelId = decodeChannelModel(currentModel)?.channelId;
+        const preferred = nameMatches.find((opt) => decodeChannelModel(opt)?.channelId === currentChannelId) || nameMatches[0];
+        const decoded = decodeChannelModel(preferred);
+        const channel = decoded ? config.channels.find((c) => c.id === decoded.channelId) : undefined;
+        return { matched: preferred, channel, modelName: decoded?.model || preferred };
+    }
+
+    // 3. 检查是否匹配了某个渠道名或渠道 ID
+    const matchingChannel = config.channels.find(
+        (c) => c.id.toLowerCase() === lowerQuery || c.name.toLowerCase() === lowerQuery,
+    );
+    if (matchingChannel) {
+        const channelOptions = options.filter((opt) => decodeChannelModel(opt)?.channelId === matchingChannel.id);
+        return {
+            matched: null,
+            channel: matchingChannel,
+            suggestions: channelOptions.map((opt) => `${matchingChannel.name}/${modelOptionName(opt)}`),
+        };
+    }
+
+    return { matched: null };
+}
+
+export function formatChannelModelList(config: AiConfig, capability: ModelCapability = "text"): string[] {
+    const options = selectableModelsByCapability(config, capability);
+    return options.map((opt) => {
+        const decoded = decodeChannelModel(opt);
+        if (!decoded) return opt;
+        const channel = config.channels.find((c) => c.id === decoded.channelId);
+        return channel ? `${channel.name}/${decoded.model}（${channel.id}/${decoded.model}）` : decoded.model;
+    });
 }
 
 function normalizeChannels(config: AiConfig) {
