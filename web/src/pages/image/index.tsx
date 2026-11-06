@@ -366,9 +366,9 @@ export default function ImagePage() {
     };
 
     return (
-        <div className="flex h-full flex-col overflow-hidden bg-stone-50 text-stone-900 dark:bg-stone-950 dark:text-stone-100">
-            <main className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto p-3 lg:grid-cols-[300px_minmax(0,1fr)] lg:overflow-hidden xl:grid-cols-[320px_minmax(0,1fr)]">
-                <aside className="thin-scrollbar hidden min-h-0 overflow-y-auto rounded-lg border border-stone-200 bg-card p-4 shadow-sm dark:border-stone-800 lg:block">
+        <div className="flex h-full flex-col overflow-hidden bg-[#faf9f5] text-stone-900 dark:bg-[#1c1b19] dark:text-stone-100">
+            <main className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[260px_minmax(0,1fr)] lg:overflow-hidden">
+                <aside className="thin-scrollbar hidden min-h-0 overflow-y-auto border-r border-stone-200/70 bg-[#f2efe8] px-3 py-4 dark:border-stone-800 dark:bg-[#171614] lg:block">
                     <LogPanel
                         logs={logs}
                         selectedLogIds={selectedLogIds}
@@ -380,12 +380,12 @@ export default function ImagePage() {
                     />
                 </aside>
 
-                <section className="grid gap-3 lg:min-h-0 lg:overflow-hidden xl:grid-cols-[420px_minmax(0,1fr)]">
-                    <div className="thin-scrollbar flex flex-col rounded-lg border border-stone-200 bg-card p-4 shadow-sm dark:border-stone-800 lg:min-h-0 lg:overflow-y-auto">
+                <section className="grid lg:min-h-0 lg:overflow-hidden xl:grid-cols-[420px_minmax(0,1fr)]">
+                    <div className="thin-scrollbar flex flex-col border-stone-200/70 px-5 py-5 dark:border-stone-800 lg:min-h-0 lg:overflow-y-auto lg:border-r">
                         <div>
                             <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0">
-                                    <h1 className="text-2xl font-semibold text-stone-950 dark:text-stone-100">{t("imageWorkbench.title")}</h1>
+                                    <h1 className="text-lg font-semibold tracking-tight text-stone-950 dark:text-stone-100">{t("imageWorkbench.title")}</h1>
                                 </div>
                                 <div className="flex shrink-0 gap-2 lg:hidden">
                                     <Button icon={<History className="size-4" />} onClick={() => setLogsOpen(true)}>
@@ -400,9 +400,9 @@ export default function ImagePage() {
 
                         <div className="mt-6 space-y-5">
                             <div>
-                                <div className="mb-2 flex items-center justify-between gap-3">
-                                    <span className="text-base font-semibold">{t("workbench.prompt")}</span>
-                                    <div className="flex gap-2">
+                                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                                    <span className="shrink-0 whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-400 dark:text-stone-500">{t("workbench.prompt")}</span>
+                                    <div className="flex flex-wrap items-center gap-1.5">
                                         <Button
                                             size="small"
                                             icon={<Sparkles className="size-3.5" />}
@@ -421,13 +421,15 @@ export default function ImagePage() {
                                         </Button>
                                     </div>
                                 </div>
-                                <Input.TextArea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} placeholder={t("imageWorkbench.promptPlaceholder")} />
+                                <div className="rounded-2xl border border-stone-300/80 bg-white p-2.5 shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-all duration-200 focus-within:border-stone-400/80 focus-within:shadow-[0_2px_14px_rgba(0,0,0,0.06)] dark:border-stone-700 dark:bg-stone-900 dark:focus-within:border-stone-600">
+                                    <Input.TextArea variant="borderless" value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} className="!px-1 !py-1 !text-sm" placeholder={t("imageWorkbench.promptPlaceholder")} />
+                                </div>
                             </div>
 
                             <div className="min-w-0">
-                                <div className="mb-2 flex items-center justify-between gap-3">
-                                    <span className="text-base font-semibold">{t("imageWorkbench.references")}</span>
-                                    <div className="flex gap-2">
+                                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                                    <span className="shrink-0 whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-400 dark:text-stone-500">{t("imageWorkbench.references")}</span>
+                                    <div className="flex flex-wrap items-center gap-1.5">
                                         <Button size="small" icon={<ClipboardPaste className="size-3.5" />} onClick={() => void addReferencesFromClipboard()}>
                                             {t("workbench.clipboard")}
                                         </Button>
@@ -437,7 +439,7 @@ export default function ImagePage() {
                                     </div>
                                 </div>
                                 <div
-                                    className={`hover-scrollbar hover-scrollbar-hint relative flex min-h-24 w-full min-w-0 max-w-full gap-2 overflow-x-scroll overflow-y-hidden rounded-lg border border-dashed p-2 pb-3 overscroll-x-contain transition-colors ${isReferenceDragActive ? "border-stone-900 bg-stone-100/80 dark:border-stone-100 dark:bg-stone-900/80" : "border-stone-300 dark:border-stone-700"}`}
+                                    className={`hover-scrollbar hover-scrollbar-hint relative flex min-h-20 w-full min-w-0 max-w-full gap-2 overflow-x-scroll overflow-y-hidden rounded-2xl border border-dashed p-2 pb-3 overscroll-x-contain transition-colors ${isReferenceDragActive ? "border-stone-400 bg-white/70 dark:border-stone-500 dark:bg-white/[.06]" : "border-stone-300 dark:border-stone-700"}`}
                                     onDragEnter={(event) => {
                                         event.preventDefault();
                                         dragDepthRef.current += 1;
@@ -483,7 +485,7 @@ export default function ImagePage() {
                                 </div>
                             </div>
 
-                            <div className="flex items-center justify-between rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm dark:border-stone-800 dark:bg-stone-900 sm:hidden">
+                            <div className="flex items-center justify-between rounded-xl border border-stone-200/70 bg-white/50 px-3 py-2 text-sm dark:border-stone-800 dark:bg-white/[.03] sm:hidden">
                                 <span className="truncate text-stone-500 dark:text-stone-400">
                                     {modelOptionLabel(effectiveConfig, model)} · {effectiveConfig.size} · {effectiveConfig.quality}
                                 </span>
@@ -492,27 +494,27 @@ export default function ImagePage() {
                                 </Button>
                             </div>
 
-                            <div className="hidden gap-4 sm:grid sm:grid-cols-2">
+                            <div className="hidden rounded-2xl border border-stone-200/70 bg-white/40 p-3 dark:border-stone-800 dark:bg-white/[.02] sm:grid sm:grid-cols-2 sm:gap-4">
                                 <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} />
                             </div>
                         </div>
 
-                        <div className="mt-auto pt-6">
-                            <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
+                        <div className="sticky bottom-0 z-10 -mx-5 mt-auto border-t border-stone-200/70 bg-[#faf9f5] px-5 py-3 dark:border-stone-800 dark:bg-[#1c1b19]">
+                            <Button type="primary" size="large" block className="!h-11 !rounded-xl" icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
                                 {t("workbench.generate")}
                             </Button>
                         </div>
                     </div>
 
-                    <div className="thin-scrollbar rounded-lg border border-stone-200 bg-card p-4 shadow-sm dark:border-stone-800 lg:min-h-0 lg:overflow-y-auto lg:p-5">
+                    <div className="thin-scrollbar px-5 py-5 lg:min-h-0 lg:overflow-y-auto">
                         <div className="mb-4 flex items-center justify-between gap-3">
                             <div>
-                                <h2 className="text-xl font-semibold">{t("workbench.results")}</h2>
+                                <h2 className="text-sm font-semibold tracking-tight">{t("workbench.results")}</h2>
                             </div>
-                            {running ? <Tag className="m-0 px-2 py-1">{t("workbench.waiting", { time: formatDuration(elapsedMs) })}</Tag> : null}
+                            {running ? <span className="rounded-full border border-stone-200 px-2 py-0.5 text-[11px] tabular-nums text-stone-400 dark:border-stone-700 dark:text-stone-500">{t("workbench.waiting", { time: formatDuration(elapsedMs) })}</span> : null}
                         </div>
                         {results.length ? (
-                            <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">
+                            <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
                                 {results.map((result, index) =>
                                     result.status === "success" && result.image ? (
                                         <ResultImageCard key={result.id} image={result.image} index={index} onEdit={addResultToReferences} onDownload={downloadImage} onSaveAsset={saveResultToAssets} />
@@ -524,7 +526,7 @@ export default function ImagePage() {
                                 )}
                             </div>
                         ) : (
-                            <div className="flex min-h-[320px] flex-col items-center justify-center rounded-lg border border-dashed border-stone-300 text-center dark:border-stone-700 lg:min-h-[560px]">
+                            <div className="flex min-h-[320px] flex-col items-center justify-center text-center lg:min-h-[520px]">
                                 <ImagePlus className="mb-4 size-11 text-stone-400" />
                                 <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("imageWorkbench.empty")} />
                             </div>
@@ -601,9 +603,9 @@ function ResultImageCard({
     const { t } = useTranslation();
     useSyncExternalStore(subscribeImagePreviews, getImagePreviewRevision);
     return (
-        <div className="overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800">
-            <Image src={previewUrlFor(image.storageKey) || image.dataUrl} preview={{ src: image.dataUrl }} alt={t("imageWorkbench.resultAlt", { count: index + 1 })} className="aspect-square object-cover" />
-            <div className="space-y-2 border-t border-stone-200 px-3 py-2.5 dark:border-stone-800">
+        <div className="group overflow-hidden rounded-xl border border-stone-200/90 bg-white transition-all duration-200 hover:-translate-y-0.5 hover:border-stone-300 hover:shadow-md dark:border-stone-800 dark:bg-stone-900 dark:hover:border-stone-700">
+            <Image src={previewUrlFor(image.storageKey) || image.dataUrl} preview={{ src: image.dataUrl }} alt={t("imageWorkbench.resultAlt", { count: index + 1 })} className="agent-fade-in aspect-square object-cover transition-transform duration-300 group-hover:scale-[1.01]" />
+            <div className="space-y-2 border-t border-stone-200/70 px-3 py-2.5 dark:border-stone-800">
                 <div className="flex min-w-0 gap-x-2 gap-y-1 text-xs text-stone-500 dark:text-stone-400">
                     <span>
                         {image.width}x{image.height}
@@ -636,16 +638,10 @@ function ResultImageCard({
 function PendingImageCard() {
     const { t } = useTranslation();
     return (
-        <div className="relative aspect-square overflow-hidden rounded-lg border border-dashed border-stone-300 bg-stone-50 dark:border-stone-700 dark:bg-stone-900">
-            <div
-                className="absolute inset-0 opacity-60"
-                style={{
-                    backgroundImage: "radial-gradient(circle, rgba(120,113,108,0.35) 1.4px, transparent 1.6px)",
-                    backgroundSize: "16px 16px",
-                }}
-            />
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-stone-500 dark:text-stone-400">
-                <LoaderCircle className="size-6 animate-spin" />
+        <div className="relative aspect-square overflow-hidden rounded-xl border border-stone-200/80 dark:border-stone-800">
+            <div className="agent-shimmer absolute inset-0" />
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-xs text-stone-500 dark:text-stone-400">
+                <LoaderCircle className="size-5 animate-spin" />
                 <span>{t("workbench.generating")}</span>
             </div>
         </div>
@@ -655,7 +651,7 @@ function PendingImageCard() {
 function FailedImageCard({ error, onRetry }: { error: string; onRetry: () => void }) {
     const { t } = useTranslation();
     return (
-        <div className="overflow-hidden rounded-lg border border-red-200 bg-red-50 dark:border-red-950 dark:bg-red-950/20">
+        <div className="overflow-hidden rounded-xl border border-red-200/80 bg-red-50/60 dark:border-red-950 dark:bg-red-950/20">
             <div className="flex aspect-square flex-col items-center justify-center gap-3 p-5 text-center">
                 <div className="text-sm font-medium text-red-600 dark:text-red-300">{t("workbench.failed")}</div>
                 <Typography.Paragraph ellipsis={{ rows: 4 }} className="!mb-0 !text-xs !text-red-500 dark:!text-red-300">
@@ -698,20 +694,18 @@ function LogPanel({
 
     return (
         <>
-            <div className="mb-3 flex items-center justify-between gap-3">
-                <div>
-                    <h2 className="text-base font-semibold">{t("workbench.logs")}</h2>
-                </div>
-                <Tag className="m-0">{logs.length}</Tag>
+            <div className="mb-2 flex items-center justify-between gap-3 px-1">
+                <h2 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-stone-400 dark:text-stone-500">{t("workbench.logs")}</h2>
+                <span className="text-[10px] tabular-nums text-stone-400 dark:text-stone-500">{logs.length}</span>
             </div>
-            <div className="mb-4 flex flex-wrap gap-2">
-                <Button size="small" icon={<Plus className="size-3.5" />} onClick={onCreateSession}>
+            <div className="mb-3 flex flex-wrap gap-1 px-0.5">
+                <Button type="text" size="small" className="!h-7 !rounded-lg !px-2 !text-[11px] !text-stone-500 hover:!bg-black/[.05] dark:!text-stone-400 dark:hover:!bg-white/[.06]" icon={<Plus className="size-3.5" />} onClick={onCreateSession}>
                     {t("workbench.new")}
                 </Button>
-                <Button size="small" icon={<CheckSquare className="size-3.5" />} disabled={!logs.length} onClick={toggleAll}>
+                <Button type="text" size="small" className="!h-7 !rounded-lg !px-2 !text-[11px] !text-stone-500 hover:!bg-black/[.05] dark:!text-stone-400 dark:hover:!bg-white/[.06]" icon={<CheckSquare className="size-3.5" />} disabled={!logs.length} onClick={toggleAll}>
                     {allSelected ? t("common.cancel") : t("workbench.selectAll")}
                 </Button>
-                <Button size="small" danger icon={<Trash2 className="size-3.5" />} disabled={!selectedLogIds.length} onClick={onDeleteSelected}>
+                <Button type="text" size="small" className="!h-7 !rounded-lg !px-2 !text-[11px] !text-red-500 hover:!bg-red-50 dark:!text-red-400 dark:hover:!bg-red-950/20" icon={<Trash2 className="size-3.5" />} disabled={!selectedLogIds.length} onClick={onDeleteSelected}>
                     {t("common.delete")}
                 </Button>
             </div>
@@ -726,7 +720,7 @@ function LogPanel({
                         onClick={() => onPreviewLog(log)}
                     />
                 ))}
-                {!logs.length ? <div className="flex min-h-48 items-center justify-center rounded-lg border border-dashed border-stone-300 text-center text-sm text-stone-500 dark:border-stone-700">{t("workbench.noLogs")}</div> : null}
+                {!logs.length ? <div className="flex min-h-32 items-center justify-center text-center text-sm text-stone-400 dark:text-stone-500">{t("workbench.noLogs")}</div> : null}
             </div>
         </>
     );
@@ -740,18 +734,18 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
     return (
         <button
             type="button"
-            className={`block w-full rounded-lg border p-2 text-left transition ${active ? "border-stone-900 bg-blue-50 dark:border-stone-100 dark:bg-blue-950/20" : "border-stone-200 bg-background hover:bg-stone-50 dark:border-stone-800 dark:hover:bg-stone-900"}`}
+            className={`block w-full rounded-lg px-2.5 py-2 text-left transition-colors ${active ? "bg-black/[.06] dark:bg-white/[.08]" : "hover:bg-black/[.04] dark:hover:bg-white/[.05]"}`}
             onClick={onClick}
         >
             <div className="grid grid-cols-[minmax(128px,1fr)_auto] gap-2">
                 <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-2">
                     <Checkbox className="mt-0.5" checked={selected} onClick={(event) => event.stopPropagation()} onChange={(event) => onSelectedChange(event.target.checked)} />
                     <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold leading-5">{log.title}</div>
+                        <div className="truncate text-[13px] font-medium leading-5 text-stone-800 dark:text-stone-200">{log.title}</div>
                         {thumbnails.length ? (
-                            <div className="mt-2 flex gap-1 overflow-hidden">
+                            <div className="mt-1.5 flex gap-1 overflow-hidden">
                                 {thumbnails.map((image) => (
-                                    <img key={image.id} src={previewUrlFor(image.storageKey) || image.dataUrl} alt="" className="size-8 shrink-0 rounded-md object-cover" />
+                                    <img key={image.id} src={previewUrlFor(image.storageKey) || image.dataUrl} alt="" className="size-8 shrink-0 rounded-lg object-cover" />
                                 ))}
                             </div>
                         ) : null}
