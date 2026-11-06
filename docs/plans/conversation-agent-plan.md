@@ -909,3 +909,11 @@ POST /v1/responses (stream:false) → 200，返回 output_text "OK"（18.5s）
 - 比例：默认配置 `size` 从 `1:1` 改为 `auto`，避免默认固定方形；具体比例选择仍走 `computeMediaSize` 与 `resolveRequestSize`。
 - 提示词优化：`AiConfig` 增加 `optimizePrompt`（默认开启）；新增 `requestPromptOptimization` 调用文本模型改写提示词；生成前弹窗对比原文与可编辑优化结果，支持「使用优化词 / 使用原词 / 取消」；带参考图或 Agent 自动任务跳过。
 - 验证：`tsc` 通过、Web 测试、构建通过；浏览器实测比例切换与优化弹窗流程。
+
+### 17.15 输入框斜杠命令菜单优化（2026-11-07）
+
+- 补全：`ChatComposer` 的命令菜单支持键盘操作——`↑/↓` 循环选择、`Tab` 补全当前项、`Enter` 在菜单打开时只确认补全（不发送）、`Esc` 收起且方向键不会再次打开；输入变化后重新打开。
+- 保参数：Tab 补全只在「已完整输入命令词且尚未输入参数」时生效（`exactQuery && value.trim() === query`），`/image 一只猫` 这类草稿不会被覆盖；补全后通过 `resizableTextArea.textArea.setSelectionRange` 把光标放到末尾，焦点留在输入框。
+- 视觉：菜单当前项补充深浅色文字对比，右侧显示 `Tab` kbd 提示，底部展示「↑↓ 选择 / Tab 补全 / ↵ 确认 / esc 关闭」（复用 `chat.palette.hint*`，新增 `chat.commands.hintTab` 中英文案）；列表限高 `max-h-72` 可滚动，并将当前项 `scrollIntoView({ block: "nearest" })`。
+- 交互细节：菜单项 `onMouseDown` 阻止默认行为避免输入框失焦，`onMouseEnter` 同步高亮；带 `role="listbox" / role="option" / aria-selected`，输入法组合中（`isComposing`）不拦截按键。
+- 验证：`bun run typecheck` exit 0、`bun test` 84 pass / 0 fail；隔离实例（当前代码构建 dist + 数据副本，3003 端口）真实浏览器验证：`/` 打开 6 项菜单、`↓` 高亮第 2 项、`Tab` 补全为 `/image `、`↑` 循环到 `/help`、`Enter` 补全不发送、`Esc` 收起后 `↓` 不重开、`/image 一只猫` 与 `/help 参数` 按 Tab 内容不变、`/image` 按 Tab 变 `/image `。

@@ -12,6 +12,7 @@ import type { AgentImageRef } from "@/lib/conversation-agent/types";
 import { cn } from "@/lib/utils";
 
 import { ImageCompareModal } from "./image-compare-modal";
+import { ChatGptDotMatrix } from "./chatgpt-dot-matrix";
 
 export function ImageResultCard({
     image,
@@ -140,19 +141,12 @@ export function ImageResultCard({
                 ) : null}
 
                 {!loaded ? (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center overflow-hidden bg-gradient-to-br from-stone-100/90 via-[#f7f5f0] to-stone-100/70 dark:from-stone-900/90 dark:via-[#191816] dark:to-stone-950">
-                        {/* 背景流体微光 */}
-                        <div className="agent-ambient-float-1 absolute -left-8 -top-8 size-32 rounded-full bg-amber-300/30 blur-2xl dark:bg-amber-500/15" />
-                        <div className="agent-ambient-float-2 absolute -bottom-8 -right-8 size-36 rounded-full bg-indigo-300/25 blur-2xl dark:bg-indigo-600/15" />
-                        <div
-                            className="pointer-events-none absolute inset-0 opacity-[0.14] dark:opacity-[0.18]"
-                            style={{
-                                backgroundImage: "radial-gradient(circle, currentColor 1px, transparent 1px)",
-                                backgroundSize: "16px 16px",
-                            }}
-                        />
-                        <div className="relative flex size-8 items-center justify-center rounded-full bg-white/70 shadow-xs backdrop-blur-md dark:bg-stone-800/80">
-                            <Sparkles className="size-4 animate-pulse text-amber-500" />
+                    <div className="absolute inset-0 flex flex-col justify-between p-3.5 bg-white dark:bg-stone-900">
+                        <span className="text-[11px] font-medium text-stone-500 dark:text-stone-400">
+                            {t("chat.waiting.phaseRender")}
+                        </span>
+                        <div className="relative min-h-0 flex-1">
+                            <ChatGptDotMatrix aspect={1} />
                         </div>
                     </div>
                 ) : null}

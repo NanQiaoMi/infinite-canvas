@@ -3,6 +3,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { AgentToolCall } from "@/lib/conversation-agent/types";
+import { cn } from "@/lib/utils";
+
+import { ChatGptDotMatrix } from "./chatgpt-dot-matrix";
 
 function parseAspect(size: unknown) {
     if (typeof size !== "string") return 1;
@@ -15,12 +18,113 @@ function parseAspect(size: unknown) {
 }
 
 /**
- * ChatGPT & Claude 风格生图等待态：
- * - 摒弃机械呆板的齿轮虚线旋转与伪百分比倒数；
- * - 采用多层流体生成极光（Generative Ambient Aurora Mesh）与潜在空间微粒子网格；
- * - 居中悬浮极简毛玻璃胶囊徽章，配合随阶段演进的诗意视觉生成文案与三点呼吸律动；
- * - 营造出深邃、灵动且高级的 AI 艺术创作沉浸感。
+ * 模拟生图进度百分比（真实映射 ChatGPT DALL-E 3 生成节奏）：
+ * 4 秒左右恰好处于 39% 前后，契合官方勾勒草图阶段，并在 15 秒内平滑走向高精渲染。
  */
+export function estimateProgress(elapsedSeconds: number, indexOffset = 0): number {
+    const s = Math.max(0, elapsedSeconds - indexOffset * 0.4);
+    if (s <= 1) return Math.min(14, Math.round(s * 14));
+    if (s <= 4) return Math.min(42, Math.round(14 + (s - 1) * 9.3));
+    if (s <= 8) return Math.min(70, Math.round(42 + (s - 4) * 7));
+    if (s <= 15) return Math.min(90, Math.round(70 + (s - 8) * 2.85));
+    return Math.min(98, Math.round(90 + (s - 15) * 0.5));
+}
+
+/**
+ * ChatGPT 官方风格图片生成卡片组件：
+ * 完整还原用户提供的 ChatGPT 生产界面：
+ * - 阶段 1（0 ~ 1.5s）：灰色极简圆角卡片，左下角「正在思考」（对应参考图 2）；
+ * - 阶段 2（> 1.5s）：白色圆角卡片，左上角「正在勾勒草图/绘制细节」，中心是灵动的蓝色驻波点阵，右下角带有百分比胶囊（如「39%」，对应参考图 1）。
+ */
+function ChatGptImageWaitingCard({
+    index,
+    total,
+    aspect,
+    isEdit,
+    elapsedSeconds,
+}: {
+    index: number;
+    total: number;
+    aspect: number;
+    isEdit: boolean;
+    elapsedSeconds: number;
+}) {
+    const { t } = useTranslation();
+    const progress = estimateProgress(elapsedSeconds, index);
+
+    // 动态生成阶段文案
+    const phase = useMemo(() => {
+        if (isEdit) {
+            if (elapsedSeconds < 2) return t("chat.waiting.thinking");
+            if (elapsedSeconds < 7) return t("chat.waiting.phaseEditSketch");
+            if (elapsedSeconds < 14) return t("chat.waiting.phaseEditDetails");
+            return t("chat.waiting.phaseRender");
+        }
+        if (elapsedSeconds < 1.6) return t("chat.waiting.thinking");
+        if (elapsedSeconds < 7) return t("chat.waiting.phaseSketch");
+        if (elapsedSeconds < 14) return t("chat.waiting.phaseDetails");
+        return t("chat.waiting.phaseRender");
+    }, [elapsedSeconds, isEdit, t]);
+
+    const isEarlyThinking = elapsedSeconds < 1.4;
+
+    return (
+        <div
+            className={cn(
+                "group relative overflow-hidden rounded-2xl transition-all duration-300 sm:rounded-3xl",
+                isEarlyThinking
+                    ? "border border-stone-200/60 bg-stone-100/90 dark:border-stone-800 dark:bg-stone-850"
+                    : "border border-stone-200/80 bg-white p-4 shadow-xs sm:p-5 dark:border-stone-800 dark:bg-stone-900",
+            )}
+            style={{ aspectRatio: String(aspect) }}
+        >
+            {isEarlyThinking ? (
+                /* 阶段 1：初期思考态（对应参考图 2） */
+                <div className="absolute inset-0 flex flex-col justify-end p-5">
+                    <div className="flex items-center gap-1.5 text-sm text-stone-400 dark:text-stone-500">
+                        <span>{t("chat.waiting.thinking")}</span>
+                        <span className="flex items-center gap-0.5">
+                            <span className="agent-dot" />
+                            <span className="agent-dot" />
+                            <span className="agent-dot" />
+                        </span>
+                    </div>
+                </div>
+            ) : (
+                /* 阶段 2：点阵波浪与进度胶囊（对应参考图 1） */
+                <div className="agent-fade-in flex h-full w-full flex-col justify-between">
+                    {/* 左上角阶段状态文字 */}
+                    <div className="flex items-center justify-between">
+                        <span
+                            key={phase}
+                            className="agent-fade-in text-[13px] font-medium tracking-tight text-stone-600 dark:text-stone-300"
+                        >
+                            {phase}
+                        </span>
+                        {total > 1 ? (
+                            <span className="font-mono text-[10px] uppercase tracking-wider text-stone-400 dark:text-stone-500">
+                                {index + 1} / {total}
+                            </span>
+                        ) : null}
+                    </div>
+
+                    {/* 核心点阵波浪画布 */}
+                    <div className="relative min-h-0 flex-1 py-1">
+                        <ChatGptDotMatrix aspect={aspect} />
+                    </div>
+
+                    {/* 右下角百分比胶囊（还原参考图 1） */}
+                    <div className="flex items-center justify-end">
+                        <div className="rounded-full border border-stone-200/90 bg-white/95 px-2.5 py-0.5 font-mono text-xs font-semibold tabular-nums text-blue-600 shadow-xs backdrop-blur-sm dark:border-stone-700/80 dark:bg-stone-800 dark:text-blue-400">
+                            {progress}%
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
 export function GenerationWaiting({ call, startedAt }: { call: AgentToolCall; startedAt: number }) {
     const { t } = useTranslation();
     const [elapsedMs, setElapsedMs] = useState(() => Date.now() - startedAt);
@@ -32,15 +136,6 @@ export function GenerationWaiting({ call, startedAt }: { call: AgentToolCall; st
     }, [startedAt]);
 
     const elapsedSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
-
-    // 根据生成时长平滑演进生成阶段状态
-    const phase = useMemo(() => {
-        if (elapsedSeconds < 3) return t("chat.waiting.phasePrepare");
-        if (elapsedSeconds < 9) return t("chat.waiting.phaseRequest");
-        if (elapsedSeconds < 16) return t("chat.waiting.phaseTexture");
-        return t("chat.waiting.phaseRender");
-    }, [elapsedSeconds, t]);
-
     const count = Math.max(1, Math.min(4, Number(call.arguments.count) || 1));
     const aspect = parseAspect(call.arguments.size);
     const isEdit = call.tool === "edit_image";
@@ -50,13 +145,13 @@ export function GenerationWaiting({ call, startedAt }: { call: AgentToolCall; st
 
     return (
         <div className="agent-message-in flex gap-3">
-            {/* 助手头像：灵动微光星标 */}
+            {/* 助手头像 */}
             <div className="mt-0.5 flex size-7.5 shrink-0 items-center justify-center rounded-full border border-stone-200/90 bg-gradient-to-b from-stone-50 to-stone-100 text-stone-600 shadow-xs dark:border-stone-700/80 dark:from-stone-800 dark:to-stone-900 dark:text-stone-300">
                 <Sparkles className="size-3.5 text-amber-500/90 dark:text-amber-400" />
             </div>
 
             <div className="min-w-0 flex-1">
-                {/* 顶部标题栏：工具名、尺寸与提示词 */}
+                {/* 顶部标题与元数据 */}
                 <div className="flex items-center gap-2 text-xs">
                     <span className="flex items-center gap-1.5 font-medium text-stone-800 dark:text-stone-200">
                         {isEdit ? <Wand2 className="size-3.5 text-amber-500" /> : <Sparkles className="size-3.5 text-amber-500" />}
@@ -82,86 +177,27 @@ export function GenerationWaiting({ call, startedAt }: { call: AgentToolCall; st
                     </span>
                 </div>
 
-                {/* 生成画布骨架屏（ChatGPT DALL-E 流体极光 + 潜在空间微粒子网格） */}
+                {/* ChatGPT 官方同款生图卡片区域 */}
                 <div
                     className="mt-3 grid max-w-[460px] gap-3"
                     style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
                 >
                     {Array.from({ length: count }).map((_, index) => (
-                        <div
+                        <ChatGptImageWaitingCard
                             key={index}
-                            className="group relative overflow-hidden rounded-2xl border border-stone-200/90 bg-gradient-to-br from-stone-100/90 via-[#f7f5f0] to-stone-100/70 shadow-xs dark:border-stone-800/90 dark:from-stone-900/90 dark:via-[#191816] dark:to-stone-950"
-                            style={{
-                                aspectRatio: String(aspect),
-                            }}
-                        >
-                            {/* 流体极光光晕 1：暖琥珀与蜜桃辉光（缓慢对角浮动） */}
-                            <div
-                                className="agent-ambient-float-1 absolute -left-12 -top-12 size-48 rounded-full bg-gradient-to-tr from-amber-300/40 via-rose-300/35 to-amber-200/20 blur-3xl dark:from-amber-500/20 dark:via-rose-600/15 dark:to-transparent"
-                                style={{ animationDelay: `${index * 1.5}s` }}
-                            />
-
-                            {/* 流体极光光晕 2：淡青蓝与薰衣草紫辉光（逆向回旋浮动） */}
-                            <div
-                                className="agent-ambient-float-2 absolute -bottom-12 -right-12 size-52 rounded-full bg-gradient-to-br from-indigo-300/30 via-purple-300/25 to-sky-300/35 blur-3xl dark:from-indigo-600/20 dark:via-purple-700/15 dark:to-transparent"
-                                style={{ animationDelay: `${index * 2}s` }}
-                            />
-
-                            {/* 潜在空间微粒子点阵网格（ChatGPT 经典采样质感） */}
-                            <div
-                                className="pointer-events-none absolute inset-0 opacity-[0.18] dark:opacity-[0.22]"
-                                style={{
-                                    backgroundImage: "radial-gradient(circle, currentColor 1px, transparent 1px)",
-                                    backgroundSize: "18px 18px",
-                                }}
-                            />
-
-                            {/* 柔光光泽扫掠层 */}
-                            <div className="agent-shimmer pointer-events-none absolute inset-0 opacity-40 dark:opacity-25" />
-
-                            {/* 居中悬浮极简毛玻璃胶囊（Claude & ChatGPT 高级质感） */}
-                            <div className="absolute inset-0 flex flex-col items-center justify-center p-4">
-                                <div className="flex items-center gap-2.5 rounded-full border border-white/70 bg-white/80 px-4 py-2 shadow-[0_4px_24px_-2px_rgba(0,0,0,0.06)] backdrop-blur-xl transition-all duration-300 dark:border-stone-700/60 dark:bg-stone-900/80 dark:shadow-[0_4px_24px_-2px_rgba(0,0,0,0.4)]">
-                                    {/* 呼吸微光图标 */}
-                                    <div className="relative flex size-4 items-center justify-center">
-                                        <div className="agent-glow-breathe absolute inset-0 rounded-full bg-amber-400/35 blur-xs dark:bg-amber-400/25" />
-                                        {isEdit ? (
-                                            <Wand2 className="relative size-3.5 text-amber-600 dark:text-amber-400" />
-                                        ) : (
-                                            <Sparkles className="relative size-3.5 text-amber-600 dark:text-amber-400" />
-                                        )}
-                                    </div>
-
-                                    {/* 阶段性演化文案 */}
-                                    <span
-                                        key={phase}
-                                        className="agent-fade-in text-[12px] font-medium tracking-wide text-stone-700 dark:text-stone-200"
-                                    >
-                                        {phase}
-                                    </span>
-
-                                    {/* 节奏感三点呼吸微动效 */}
-                                    <span className="flex items-center gap-0.5 text-stone-400 dark:text-stone-500">
-                                        <span className="agent-dot" />
-                                        <span className="agent-dot" />
-                                        <span className="agent-dot" />
-                                    </span>
-                                </div>
-
-                                {count > 1 ? (
-                                    <div className="mt-2 text-[10px] font-mono uppercase tracking-widest text-stone-400 dark:text-stone-500">
-                                        {index + 1} / {count}
-                                    </div>
-                                ) : null}
-                            </div>
-                        </div>
+                            index={index}
+                            total={count}
+                            aspect={aspect}
+                            isEdit={isEdit}
+                            elapsedSeconds={elapsedSeconds}
+                        />
                     ))}
                 </div>
 
                 {/* 底部微信息栏 */}
                 <div className="mt-2.5 flex items-center justify-between text-[11px] text-stone-400 dark:text-stone-500">
                     <span className="flex items-center gap-1.5">
-                        <span className="size-1.5 animate-pulse rounded-full bg-amber-500/80" />
+                        <span className="size-1.5 animate-pulse rounded-full bg-blue-500" />
                         {isEdit ? t("chat.waiting.editing") : t("chat.waiting.generating")}
                     </span>
                     <span className="font-mono text-[10px] tabular-nums">
