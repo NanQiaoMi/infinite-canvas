@@ -1,3 +1,4 @@
+import type { AgentIntent } from "./intent";
 import type { AgentContextInput, AgentToolDefinition } from "./types";
 
 export type AgentLocale = "zh" | "en";
@@ -66,6 +67,8 @@ const ZH_PROMPT = `你是「无限画布」内置的 AI 创作助手，运行在
 - 信息不足且会明显影响结果时，先问 1-2 个关键问题（主体、用途、风格、比例）；否则直接给出可执行结果。
 - 默认简洁：先给结果，再给简短说明；用户要求详细时再展开。
 - 用户只想要提示词时，不要调用生成工具；给出提示词后询问是否需要生成。
+- 用户直接发送一段完整的生图提示词（只描述画面、人物、镜头、光线、风格等，没有要求评价/优化/改写，也没有提问）时，视为生成图片请求：直接调用 generate_image，不要先点评提示词、不要反问。
+- 出现「生成图片 / 生成一张 / 出图 / 画一张 / 来一张 / 换一版」等明确生成动作时，必须调用 generate_image 工具，不要只回复文字或反问用户。
 
 ## 提示词方法论
 - 结构按需覆盖：主体与动作 / 环境与背景 / 构图与视角 / 镜头与景深 / 光线与氛围 / 色彩与材质 / 风格参考 / 画质细节 / 负面约束。
@@ -133,6 +136,8 @@ const EN_PROMPT = `You are the built-in AI creation assistant of "Infinite Canva
 - If key details are missing and would clearly change the result, ask 1-2 focused questions (subject, usage, style, aspect ratio); otherwise produce a usable result directly.
 - Be concise by default: result first, then a short explanation.
 - If the user only wants prompts, do not call generation tools; offer to generate afterwards.
+- When the user directly sends a complete image prompt (only describing the scene, subject, lens, lighting or style, with no request to evaluate/refine/rewrite it and no question), treat it as a generation request: call generate_image directly instead of commenting on the prompt or asking back.
+- When there is an explicit generation action such as "generate an image / draw a picture / create a photo / another version", you must call the generate_image tool instead of replying with text only or asking the user back.
 
 ## Prompt methodology
 - Cover as needed: subject and action / environment and background / composition and angle / camera and depth of field / lighting and mood / color and material / style reference / detail and quality / negative constraints.
@@ -183,4 +188,34 @@ Rules:
 export function buildSystemPrompt(options: { locale: AgentLocale; context: AgentContextInput; tools: AgentToolDefinition[] }) {
     const template = options.locale === "zh" ? ZH_PROMPT : EN_PROMPT;
     return template.replace("{{tool_list}}", formatToolList(options.tools, options.locale)).replace("{{context}}", buildContextBlock(options.context, options.locale));
+}
+
+/**
+ * 本地意图判定为「生成/改图」但不是高置信度直接执行时，在首轮模型调用前注入的强约束指令，
+ * 避免模型把完整提示词当成聊天点评，或者只回复文字不调用工具。
+ */
+export function buildIntentDirective(locale: AgentLocale, intent: AgentIntent) {
+    const isEdit = intent.kind === "edit_image";
+    const tool = isEdit ? "edit_image" : "generate_image";
+    const prompt = intent.prompt.trim();
+    if (locale === "zh") {
+        const lines = [
+            `【意图路由·系统指令】系统已在本地判定：用户本轮想要${isEdit ? "修改参考图（edit_image）" : "生成图片（generate_image）"}，不是写提示词、不是优化提示词、也不是咨询。`,
+            "要求：",
+            `1) 必须直接输出 \`\`\`tool 代码块调用 ${tool}，不要反问、不要只回复文字；`,
+            prompt ? `2) prompt 使用用户给出的画面描述原文：${prompt}` : "2) prompt 使用用户给出的画面描述原文；信息不足时结合上下文补全为完整提示词。",
+        ];
+        if (isEdit) lines.push("3) 参考图由系统自动传入，arguments 只需要 prompt。");
+        lines.push(`${isEdit ? 4 : 3}) 生成完成后用 1-3 句总结结果并给出下一步。`);
+        return lines.join("\n");
+    }
+    const lines = [
+        `[Intent routing · system directive] The system has locally determined that the user wants to ${isEdit ? "edit the reference image (edit_image)" : "generate an image (generate_image)"}, not to write, refine or discuss a prompt.`,
+        "Requirements:",
+        `1) You must output a \`\`\`tool code block calling ${tool} directly; do not ask questions and do not reply with text only;`,
+        prompt ? `2) Use the user's original visual description as the prompt: ${prompt}` : "2) Use the user's original visual description as the prompt; complete it into a full prompt if needed.",
+    ];
+    if (isEdit) lines.push("3) References are passed automatically, so arguments only need the prompt.");
+    lines.push(`${isEdit ? 4 : 3}) After generating, summarize the result in 1-3 sentences and offer next steps.`);
+    return lines.join("\n");
 }

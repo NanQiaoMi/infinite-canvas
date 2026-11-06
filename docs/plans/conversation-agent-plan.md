@@ -881,3 +881,17 @@ POST /v1/responses (stream:false) → 200，返回 output_text "OK"（18.5s）
 - 填入：新增 `promptDialogOpen` 状态与 `Input.TextArea` ref；`applyPrompt` 在草稿为空时直接填入，已有草稿时 `trimEnd()` 后用两个换行（空行）追加，不覆盖原内容；弹窗关闭动画结束（约 400ms）后再聚焦输入框，避开 antd Modal 把焦点还给触发按钮。
 - 范围：只改 `web/src/pages/chat/components/chat-composer.tsx`（+22/−2），不修改 `ChatComposerProps`，未新增 i18n 键与依赖；发送/停止、附件上传、斜杠命令弹层、⌘K 命令面板逻辑未变。
 - 验证：`bun test` 全部通过（59 pass / 0 fail，含工作区并发测试改动）；`bun run typecheck` 在整棵工作区因范围外并发未跟踪文件 `image-compare-modal.tsx` 报 exit 2（唯一错误，HEAD 基线同样失败，非本次改动引入，已升级处理），隔离验证（HEAD + 本次改动）exit 0，`chat-composer.tsx` 无类型错误；另用隔离构建（HEAD + 本次改动，未部署到用户容器）起独立服务，在独立浏览器页面实测：按钮打开工作台同款提示词库（分类/标签/搜索/20 张卡片）、选中后面板关闭并填入输入框、再次选择以空行追加且不覆盖、约 400ms 后焦点落在输入框；浅色与深色截图核对样式正常。部署环境的人工验收仍见 `pending-test` 清单。
+
+### 17.14 对话意图识别修复（2026-11-07）
+
+- 现象：用户在 `/chat` 直接粘贴一段完整生图提示词（如「真实摄影风格的日系JK少女…，50mm镜头，浅景深…，8K高清。」）时，模型把提示词当作聊天内容点评，不调用 `generate_image`；必须手动加「生成图片：」前缀才出图。
+- 根因：意图判断完全交给模型自由解读；当前文本通道常不返回原生工具调用，文本协议下模型倾向先点评提示词，缺少客户端确定性路由，属于「模型不按要求调用工具」的稳定性问题。
+- 方案：
+  - `intent.ts`（新增）：本地 `detectAgentIntent(text, { hasReferences })` 按固定顺序判定 `chat / generate_image / edit_image / apply_prompt`。提示词编写/优化/评价/检查类元指令、否定生成、帮助/用法类提问走聊天；有参考图且含改图动作走 `edit_image`；显式生成动作（生成图片 / 生成一张 / 出图 / 画一张 / 来一张 / 换一版 / generate an image 等，兼容「生成 2 张」「生成 一张」）→ `generate_image`，冒号指令形式（指令词紧邻冒号）直接取正文并 direct 执行，`16:9` 等比例冒号不切分；独立完整生图提示词（去空白 ≥30 字符且命中 ≥2 类画面要素、非提问/闲聊且无提示词元指令）→ `generate_image` direct 执行；指代型文本（这个 / 之前 / 参考图… 且无画面要素）不作为提示词。
+  - `runtime.ts`：`runAgentTurn` 在未显式传 `intent` 时用最后一条 user 消息自动识别（`/chat` 页面无需改动），显式 intent 优先；direct 意图直接执行工具、不调用模型并返回 `directToolResult`（canceled 返回 aborted；其他失败回落模型解释）；非 direct 的生成/改图意图在首轮模型调用前注入一次性意图指令，模型仍未调用工具时兜底强制执行一次（prompt 取意图提取结果或历史提示词卡片，两者皆空则跳过兜底）。
+  - `system-prompt.ts`：新增 `buildIntentDirective(locale, intent)` 中英双语强约束（必须直接输出 tool 代码块调用 generate_image/edit_image，不要反问、不要只回复文字），并补充「用户直接发送完整生图提示词视为生成请求」「出现明确生成动作必须调用工具」两条交互规则。
+  - `types.ts`：`AgentTurnResult` 增加可选 `directToolResult`。
+- 验证：
+  - `docker run --rm -v "$PWD/web:/app/web" -v "$PWD:/app" -w /app/web infinite-canvas:server bun test` → 72 pass / 0 fail（含仓库内并发会话新增的测试文件），退出码 0；本轮新增 `conversation-intent.test.ts` 17 例，`conversation-runtime.test.ts` 共 17 例（既有 5 + W1 新增 8 + S1 新增 4）。
+  - 隔离快照复核：`git archive HEAD web | tar -x -C /tmp/s1-verify` 后仅覆盖本轮改动文件，`bun test` 63 pass / 0 fail（exit 0）、`bun run typecheck` exit 0。
+  - 说明：整棵工作区 `bun run typecheck` 当前因外部并发会话新建的未跟踪文件 `web/src/pages/chat/components/image-compare-modal.tsx`（antd Modal `styles.content` 类型）报 exit 2，唯一错误不在本轮改动文件内，本轮文件零类型错误。浏览器人工验收见 `pending-test` 清单（本次未部署、未操作用户浏览器页面）。
