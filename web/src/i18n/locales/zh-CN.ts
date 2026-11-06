@@ -932,6 +932,7 @@ export default {
         commands: {
             label: "命令",
             items: { prompt: "写提示词", image: "生成图片", edit: "修改图片", model: "切换模型", new: "新建对话", help: "帮助" },
+            hintTab: "Tab 补全",
             promptPrefix: "帮我写一个生图提示词：{{text}}",
             imagePrefix: "生成图片：{{text}}",
             editPrefix: "基于参考图修改：{{text}}",

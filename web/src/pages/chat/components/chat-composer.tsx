@@ -1,6 +1,6 @@
 import { Dropdown, Input, type GetRef } from "antd";
 import { ArrowUp, BookOpen, ChevronDown, Paperclip, Square, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
@@ -84,12 +84,76 @@ export function ChatComposer({ value, onChange, onSend, onStop, running, modelLa
     };
     const fileInputRef = useRef<HTMLInputElement | null>(null);
     const textAreaRef = useRef<GetRef<typeof Input.TextArea>>(null);
+    const commandMenuRef = useRef<HTMLDivElement | null>(null);
     const [promptDialogOpen, setPromptDialogOpen] = useState(false);
+    const [activeCommandIndex, setActiveCommandIndex] = useState(0);
+    const [commandMenuDismissed, setCommandMenuDismissed] = useState(false);
     const query = value.trimStart().startsWith("/") ? value.trimStart().split(/\s/)[0].toLowerCase() : "";
-    const slashOpen = Boolean(query) && !running && COMMANDS.some((command) => command.command.startsWith(query) && command.command !== query);
-    const matches = COMMANDS.filter((command) => command.command.startsWith(query));
+    const matches = query ? COMMANDS.filter((command) => command.command.startsWith(query)) : [];
+    const exactQuery = matches.length === 1 && matches[0].command === query;
+    const commandMenuOpen = Boolean(query) && !running && !commandMenuDismissed && matches.length > 0 && !exactQuery;
+    const activeCommand = commandMenuOpen ? matches[Math.min(activeCommandIndex, matches.length - 1)] : null;
+
+    // 命令词变化时回到第一项；输入内容变化时取消 Esc 的收起状态。
+    useEffect(() => setActiveCommandIndex(0), [query]);
+    useEffect(() => setCommandMenuDismissed(false), [value]);
+    useEffect(() => {
+        if (!commandMenuOpen) return;
+        const item = commandMenuRef.current?.querySelector<HTMLElement>(`[data-command-index="${activeCommandIndex}"]`);
+        item?.scrollIntoView({ block: "nearest" });
+    }, [activeCommandIndex, commandMenuOpen]);
+
     const applyCommand = (command: string) => {
-        onChange(`${command} `);
+        const next = `${command} `;
+        onChange(next);
+        // 补全后把光标留在输入框末尾，方便继续输入参数。
+        window.requestAnimationFrame(() => {
+            window.requestAnimationFrame(() => {
+                const textarea = textAreaRef.current?.resizableTextArea?.textArea;
+                if (!textarea) return;
+                textarea.focus();
+                textarea.setSelectionRange(next.length, next.length);
+            });
+        });
+    };
+
+    const handleComposerKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+        if (event.nativeEvent.isComposing) return;
+        if (commandMenuOpen && activeCommand) {
+            if (event.key === "Tab" && !event.shiftKey) {
+                event.preventDefault();
+                applyCommand(activeCommand.command);
+                return;
+            }
+            if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                event.preventDefault();
+                setActiveCommandIndex((current) => {
+                    const next = event.key === "ArrowDown" ? current + 1 : current - 1;
+                    return (next + matches.length) % matches.length;
+                });
+                return;
+            }
+            if (event.key === "Escape") {
+                event.preventDefault();
+                setCommandMenuDismissed(true);
+                return;
+            }
+            if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                applyCommand(activeCommand.command);
+                return;
+            }
+        }
+        // 菜单已收起（命令词已完整输入）时，Tab 仍然补一个空格，不把焦点移出输入框。
+        if (event.key === "Tab" && !event.shiftKey && exactQuery && !/\s$/.test(value)) {
+            event.preventDefault();
+            applyCommand(matches[0].command);
+            return;
+        }
+        if (event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault();
+            if (!running) onSend();
+        }
     };
     const applyPrompt = (prompt: string) => {
         const draft = value.trimEnd();
@@ -100,19 +164,49 @@ export function ChatComposer({ value, onChange, onSend, onStop, running, modelLa
     const canSend = Boolean(value.trim()) && !running;
     return (
         <div className="relative">
-            {slashOpen ? (
-                <div className="agent-pop-in absolute bottom-full left-0 right-0 mb-2 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-lg dark:border-stone-700 dark:bg-stone-900">
-                    {matches.map((command) => (
-                        <button
-                            key={command.command}
-                            type="button"
-                            className="flex w-full items-center gap-3 px-3 py-2 text-left text-xs transition hover:bg-stone-50 dark:hover:bg-stone-800"
-                            onClick={() => applyCommand(command.command)}
-                        >
-                            <span className="w-16 shrink-0 font-mono text-stone-500 dark:text-stone-400">{command.command}</span>
-                            <span className="truncate text-stone-500 dark:text-stone-400">{t(command.labelKey)}</span>
-                        </button>
-                    ))}
+            {commandMenuOpen ? (
+                <div
+                    ref={commandMenuRef}
+                    role="listbox"
+                    aria-label={t("chat.commands.label")}
+                    className="agent-pop-in absolute bottom-full left-0 right-0 mb-2 max-h-72 overflow-y-auto rounded-xl border border-stone-200 bg-white shadow-lg dark:border-stone-700 dark:bg-stone-900"
+                >
+                    {matches.map((command, index) => {
+                        const active = index === activeCommandIndex;
+                        return (
+                            <button
+                                key={command.command}
+                                type="button"
+                                role="option"
+                                aria-selected={active}
+                                data-command-index={index}
+                                className={cn(
+                                    "flex w-full items-center gap-3 px-3 py-2 text-left text-xs transition-colors",
+                                    active ? "bg-stone-100 dark:bg-white/[.08]" : "hover:bg-stone-50 dark:hover:bg-white/[.04]",
+                                )}
+                                onMouseEnter={() => setActiveCommandIndex(index)}
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={() => applyCommand(command.command)}
+                            >
+                                <span className="w-16 shrink-0 font-mono text-[11px] text-stone-400 dark:text-stone-500">
+                                    <span className="font-semibold text-stone-800 dark:text-stone-100">{command.command.slice(0, query.length)}</span>
+                                    {command.command.slice(query.length)}
+                                </span>
+                                <span className="min-w-0 flex-1 truncate text-stone-500 dark:text-stone-400">{t(command.labelKey)}</span>
+                                {active ? (
+                                    <kbd className="hidden shrink-0 rounded border border-stone-200 px-1 font-mono text-[9px] text-stone-400 sm:inline-block dark:border-stone-700 dark:text-stone-500">
+                                        Tab
+                                    </kbd>
+                                ) : null}
+                            </button>
+                        );
+                    })}
+                    <div className="flex items-center justify-end gap-2.5 border-t border-stone-200/70 px-3 py-1.5 text-[10px] text-stone-400 dark:border-stone-800 dark:text-stone-500">
+                        <span>{t("chat.palette.hintSelect")}</span>
+                        <span>{t("chat.commands.hintTab")}</span>
+                        <span>{t("chat.palette.hintConfirm")}</span>
+                        <span>{t("chat.palette.hintClose")}</span>
+                    </div>
                 </div>
             ) : null}
             <div className="rounded-2xl border border-stone-300/80 bg-white p-2.5 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition-all duration-200 focus-within:border-stone-400 focus-within:shadow-[0_4px_18px_rgba(0,0,0,0.06)] dark:border-stone-700/80 dark:bg-stone-900 dark:focus-within:border-stone-500 dark:focus-within:shadow-[0_4px_18px_rgba(0,0,0,0.3)]">
@@ -129,12 +223,7 @@ export function ChatComposer({ value, onChange, onSend, onStop, running, modelLa
                     onChange={(event) => onChange(event.target.value)}
                     placeholder={t("chat.placeholder")}
                     autoSize={{ minRows: 2, maxRows: 10 }}
-                    onKeyDown={(event) => {
-                        if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-                            event.preventDefault();
-                            if (!running) onSend();
-                        }
-                    }}
+                    onKeyDown={handleComposerKeyDown}
                     className="!border-0 !bg-transparent !px-1 !py-1 !text-sm !shadow-none"
                 />
                 <div className="mt-1 flex items-center justify-between gap-2 px-1">

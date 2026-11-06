@@ -932,6 +932,7 @@ export default {
         commands: {
             label: "Commands",
             items: { prompt: "Write prompt", image: "Generate image", edit: "Edit image", model: "Switch model", new: "New chat", help: "Help" },
+            hintTab: "Tab complete",
             promptPrefix: "Write an image prompt for: {{text}}",
             imagePrefix: "Generate an image: {{text}}",
             editPrefix: "Edit the reference image: {{text}}",
