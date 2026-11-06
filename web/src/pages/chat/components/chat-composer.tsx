@@ -144,8 +144,8 @@ export function ChatComposer({ value, onChange, onSend, onStop, running, modelLa
                 return;
             }
         }
-        // 菜单已收起（命令词已完整输入）时，Tab 仍然补一个空格，不把焦点移出输入框。
-        if (event.key === "Tab" && !event.shiftKey && exactQuery && !/\s$/.test(value)) {
+        // 菜单已收起（命令词已完整输入、还没写参数）时，Tab 仍然补一个空格，不把焦点移出输入框。
+        if (event.key === "Tab" && !event.shiftKey && exactQuery && value.trim() === query) {
             event.preventDefault();
             applyCommand(matches[0].command);
             return;
@@ -182,7 +182,7 @@ export function ChatComposer({ value, onChange, onSend, onStop, running, modelLa
                                 data-command-index={index}
                                 className={cn(
                                     "flex w-full items-center gap-3 px-3 py-2 text-left text-xs transition-colors",
-                                    active ? "bg-stone-100 dark:bg-white/[.08]" : "hover:bg-stone-50 dark:hover:bg-white/[.04]",
+                                    active ? "bg-stone-100 text-stone-900 dark:bg-white/[.08] dark:text-stone-100" : "text-stone-600 hover:bg-stone-50 dark:text-stone-300 dark:hover:bg-white/[.04]",
                                 )}
                                 onMouseEnter={() => setActiveCommandIndex(index)}
                                 onMouseDown={(event) => event.preventDefault()}
