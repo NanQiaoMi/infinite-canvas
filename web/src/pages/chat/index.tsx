@@ -23,11 +23,23 @@ import { ChatMessage } from "./components/chat-message";
 import { ChatSessionList } from "./components/chat-session-list";
 import { ArtifactPanel } from "./components/artifact-panel";
 import { CommandPalette } from "./components/command-palette";
+import { StepTrail, type AgentStep } from "./components/step-trail";
 import { GenerationWaiting, ThinkingLine } from "./components/generation-waiting";
 
 const modelLabelOf = (option: string) => option.split("::").pop() || option;
 const NETWORK_ERROR_PATTERN = /network error|failed to fetch|load failed|networkerror|econnreset|socket hang up|fetch failed/i;
 const isNetworkError = (error: unknown) => NETWORK_ERROR_PATTERN.test(error instanceof Error ? error.message : String(error));
+
+function toolStepLabel(call: AgentToolCall, t: (key: string) => string) {
+    const names: Record<string, string> = {
+        generate_image: t("chat.tools.names.generate_image"),
+        edit_image: t("chat.tools.names.edit_image"),
+        apply_prompt: t("chat.tools.names.apply_prompt"),
+    };
+    const label = names[call.tool] || call.tool;
+    const prompt = typeof call.arguments.prompt === "string" ? call.arguments.prompt : "";
+    return prompt ? `${label} · ${prompt.slice(0, 26)}` : label;
+}
 
 export default function ChatPage() {
     const { t } = useTranslation();
@@ -61,8 +73,12 @@ export default function ChatPage() {
     const [references, setReferences] = useState<AgentImageRef[]>([]);
     const [turnStartedAt, setTurnStartedAt] = useState(0);
     const [paletteOpen, setPaletteOpen] = useState(false);
+    const [steps, setSteps] = useState<AgentStep[]>([]);
     const [exitingTool, setExitingTool] = useState<AgentToolCall | null>(null);
     const exitTimerRef = useRef<number | null>(null);
+    const stepsTimerRef = useRef<number | null>(null);
+    const stepSeqRef = useRef(0);
+    const lastToolStepRef = useRef<string | null>(null);
     const [pageContext, setPageContext] = useState<string | undefined>(undefined);
     const [listOpen, setListOpen] = useState(false);
     const controllerRef = useRef<AbortController | null>(null);
@@ -217,6 +233,8 @@ export default function ChatPage() {
             setInput("");
             setStreamingText("");
             setTurnStartedAt(Date.now());
+            if (stepsTimerRef.current) window.clearTimeout(stepsTimerRef.current);
+            setSteps([{ id: "understand", kind: "understand", label: t("chat.steps.understand"), status: "running" }]);
             setRunning(true);
             const controller = new AbortController();
             controllerRef.current = controller;
@@ -230,14 +248,39 @@ export default function ChatPage() {
                     callModel,
                     executeTool: (call, context) => executeAgentTool(call, context),
                     onEvent: (event: AgentEvent) => {
-                        if (event.type === "assistant-stream") setStreamingText(event.text);
-                        else if (event.type === "tool-start") {
+                        if (event.type === "assistant-stream") {
+                            setStreamingText(event.text);
+                            if (event.text.trim()) {
+                                setSteps((current) => {
+                                    const next = current.map((step) => (step.status === "running" && step.kind === "understand" ? { ...step, status: "done" as const } : step));
+                                    if (!next.some((step) => step.status === "running")) {
+                                        const hasTool = next.some((step) => step.kind === "tool");
+                                        next.push({
+                                            id: `respond-${next.length}`,
+                                            kind: hasTool ? "summarize" : "respond",
+                                            label: hasTool ? t("chat.steps.summarize") : t("chat.steps.respond"),
+                                            status: "running",
+                                        });
+                                    }
+                                    return next;
+                                });
+                            }
+                        } else if (event.type === "tool-start") {
                             setStreamingText("");
                             if (exitTimerRef.current) window.clearTimeout(exitTimerRef.current);
                             setExitingTool(null);
                             setRunningTool(event.call);
+                            setSteps((current) => {
+                                const next = current.map((step) => (step.status === "running" ? { ...step, status: "done" as const } : step));
+                                stepSeqRef.current += 1;
+                                const stepId = `tool-${stepSeqRef.current}`;
+                                lastToolStepRef.current = stepId;
+                                return [...next, { id: stepId, kind: "tool" as const, label: toolStepLabel(event.call, t), status: "running" as const }];
+                            });
                         } else if (event.type === "tool-end") {
                             setRunningTool(null);
+                            setSteps((current) => current.map((step) => (step.id === lastToolStepRef.current && step.status === "running" ? { ...step, status: "done" as const } : step)));
+                            lastToolStepRef.current = null;
                             if (event.call.tool === "generate_image" || event.call.tool === "edit_image") {
                                 setExitingTool(event.call);
                                 if (exitTimerRef.current) window.clearTimeout(exitTimerRef.current);
@@ -264,6 +307,9 @@ export default function ChatPage() {
                 setRunning(false);
                 setStreamingText("");
                 setRunningTool(null);
+                setSteps((current) => current.map((step) => (step.status === "running" ? { ...step, status: controller.signal.aborted ? ("error" as const) : ("done" as const) } : step)));
+                if (stepsTimerRef.current) window.clearTimeout(stepsTimerRef.current);
+                stepsTimerRef.current = window.setTimeout(() => setSteps([]), 1100);
                 setTurnStartedAt(0);
                 useQuotaStore.getState().scheduleRefresh();
             }
@@ -374,6 +420,7 @@ export default function ChatPage() {
                             : activeSession.messages.map((item, index) => (
                                   <ChatMessage key={item.id} message={item} onRetry={item.role === "error" ? () => retryMessage(index) : undefined} />
                               ))}
+                        {steps.length ? <StepTrail steps={steps} running={running} /> : null}
                         {running && streamingText ? (
                             <div className="flex gap-3">
                                 <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-400">

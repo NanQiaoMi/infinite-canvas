@@ -898,6 +898,7 @@ export default {
             continueDraft: "基于这张参考图修改：{{text}}",
             continueDefault: "基于这张参考图继续优化。",
         },
+        steps: { title: "执行步骤", understand: "理解需求", respond: "生成回复", summarize: "整理结果", running: "进行中" },
         composerHint: "输入 / 查看命令",
         commands: {
             label: "命令",

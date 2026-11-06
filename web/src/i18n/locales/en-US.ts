@@ -898,6 +898,7 @@ export default {
             continueDraft: "Edit this reference image: {{text}}",
             continueDefault: "Keep refining this reference image.",
         },
+        steps: { title: "Progress", understand: "Understanding request", respond: "Writing reply", summarize: "Summarizing result", running: "Running" },
         composerHint: "Type / for commands",
         commands: {
             label: "Commands",
