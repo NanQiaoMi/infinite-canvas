@@ -317,6 +317,15 @@ export const useConfigStore = create<ConfigStore>()(
                 const persistedConfig = (persistedState.config || {}) as Partial<AiConfig>;
                 const persistedWebdav = (persistedState.webdav || {}) as Partial<WebdavSyncConfig>;
                 const config = { ...defaultConfig, ...persistedConfig };
+                // 一次性迁移：旧版本默认比例为 1:1，升级后首次加载改为「自动」；用户之后手动选择的 1:1 不会被反复重置。
+                try {
+                    if (typeof window !== "undefined" && window.localStorage.getItem("ic.size-auto-migrated") !== "1") {
+                        if (config.size === "1:1") config.size = "auto";
+                        window.localStorage.setItem("ic.size-auto-migrated", "1");
+                    }
+                } catch {
+                    // 隐私模式或存储不可用时忽略迁移。
+                }
                 if (!Array.isArray(persistedConfig.channels)) config.channels = [];
                 const channels = normalizeChannels(config);
                 const models = modelOptionsFromChannels(channels);
