@@ -171,7 +171,7 @@ export function ImageCompareModal({ open, images, onClose, onBatchReference }: I
             width="92vw"
             style={{ maxWidth: 1280, top: 32 }}
             styles={{
-                content: {
+                container: {
                     padding: 0,
                     borderRadius: 20,
                     overflow: "hidden",
