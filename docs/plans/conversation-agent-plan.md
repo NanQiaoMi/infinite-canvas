@@ -900,6 +900,6 @@ POST /v1/responses (stream:false) → 200，返回 output_text "OK"（18.5s）
 
 - 能力接入：`requestGeneration` 新增 GIF 选项（`output_format=gif`、`frame_count`、`frame_duration_ms`、`size=auto`），校验模型必须匹配 `gpt-image-2.6` 系列、帧数 2–16、时长 20–2000ms，并禁止脚本/Gemini 渠道；响应 Base64 按 `image/gif` 解析，其余链路保持 PNG。
 - 配置：`AiConfig` 增加 `imageFormat` / `gifFrames` / `gifFrameDuration`，带默认值与持久化兼容。
-- UI：生图工作台参数区新增「动图 GIF」分组（模型支持时才可开启），展示帧数与每帧时长；结果卡片显示 GIF 标记，下载按 MIME 使用 `.gif` 后缀；参考图场景自动回退静态图。
+- UI：生图工作台参数区新增「动图 GIF」分组（模型支持时才可开启），展示帧数（2–16）与帧率（1–20 fps，默认 9 帧 / 5 fps / 200ms），并显示「帧数 × 每帧时长 ≈ 总时长」与 1–3 秒建议；请求按 50–1000ms/帧 校验；结果卡片显示 GIF 标记，下载按 MIME 使用 `.gif` 后缀；参考图场景自动回退静态图。
 - 渠道：通过管理端接口为 chatgpt2api 渠道补充 `gpt-image-2.6`、`gpt-image-2.6-flare`、`gpt-image-2.6-sunburst` 图片模型（保留原 API Key）。
 - 验证：按文档实测 `gpt-image-2.6` GIF 生成（8 帧 / 120ms），确认返回 `GIF89a` 动画并以 `image/gif` 渲染；构建与测试通过。

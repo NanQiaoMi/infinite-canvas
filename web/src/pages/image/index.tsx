@@ -14,6 +14,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
 import { modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
+import { cn } from "@/lib/utils";
 import { nanoid } from "nanoid";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { requestEdit, requestGeneration } from "@/services/api/image";
@@ -329,7 +330,7 @@ export default function ImagePage() {
             const gifWanted = snapshot.config.imageFormat === "gif" && /gpt-image-2\.6/i.test(snapshot.config.model || snapshot.config.imageModel) && !snapshot.references.length;
             const result = snapshot.references.length
                 ? await requestEdit(snapshot.config, snapshot.text, snapshot.references)
-                : await requestGeneration(snapshot.config, snapshot.text, gifWanted ? { outputFormat: "gif", frameCount: Number(snapshot.config.gifFrames) || 8, frameDurationMs: Number(snapshot.config.gifFrameDuration) || 120 } : undefined);
+                : await requestGeneration(snapshot.config, snapshot.text, gifWanted ? { outputFormat: "gif", frameCount: Math.min(16, Math.max(2, Math.round(Number(snapshot.config.gifFrames) || 9))), frameDurationMs: Math.min(1000, Math.max(50, Math.round((Number(snapshot.config.gifFrameDuration) || 200) / 10) * 10)) } : undefined);
             const image = result[0];
             if (!image) throw new Error(t("imageWorkbench.missingResult"));
             const stored = await uploadImage(image.dataUrl);
@@ -585,6 +586,10 @@ function GenerationSettings({ config, model, updateConfig, openConfigDialog }: {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
     const gifSupported = /gpt-image-2\.6/i.test(model);
+    const gifFrames = Math.min(16, Math.max(2, Math.round(Number(config.gifFrames) || 9)));
+    const gifFrameDuration = Math.min(1000, Math.max(50, Math.round((Number(config.gifFrameDuration) || 200) / 10) * 10));
+    const gifFps = Math.max(1, Math.min(20, Math.round(1000 / gifFrameDuration)));
+    const gifDurationWarning = (gifFrames * gifFrameDuration) / 1000 < 1 || (gifFrames * gifFrameDuration) / 1000 > 3;
 
     return (
         <>
@@ -609,30 +614,39 @@ function GenerationSettings({ config, model, updateConfig, openConfigDialog }: {
                     />
                 </div>
                 {gifSupported && config.imageFormat === "gif" ? (
-                    <div className="grid grid-cols-2 gap-3">
-                        <label className="min-w-0 space-y-1">
-                            <span className="block text-[11px] text-stone-400 dark:text-stone-500">{t("imageWorkbench.gifFrames")}</span>
-                            <InputNumber
-                                min={2}
-                                max={16}
-                                step={1}
-                                value={Math.min(16, Math.max(2, Math.round(Number(config.gifFrames) || 8)))}
-                                onChange={(value) => updateConfig("gifFrames", String(value ?? 8))}
-                                className="!w-full"
-                            />
-                        </label>
-                        <label className="min-w-0 space-y-1">
-                            <span className="block text-[11px] text-stone-400 dark:text-stone-500">{t("imageWorkbench.gifFrameDuration")}</span>
-                            <InputNumber
-                                min={20}
-                                max={2000}
-                                step={10}
-                                value={Math.min(2000, Math.max(20, Math.round((Number(config.gifFrameDuration) || 120) / 10) * 10))}
-                                onChange={(value) => updateConfig("gifFrameDuration", String(value ?? 120))}
-                                addonAfter="ms"
-                                className="!w-full"
-                            />
-                        </label>
+                    <div className="space-y-1.5">
+                        <div className="grid grid-cols-2 gap-3">
+                            <label className="min-w-0 space-y-1">
+                                <span className="block text-[11px] text-stone-400 dark:text-stone-500">{t("imageWorkbench.gifFrames")}</span>
+                                <InputNumber
+                                    min={2}
+                                    max={16}
+                                    step={1}
+                                    value={gifFrames}
+                                    onChange={(value) => updateConfig("gifFrames", String(value ?? 9))}
+                                    className="!w-full"
+                                />
+                            </label>
+                            <label className="min-w-0 space-y-1">
+                                <span className="block text-[11px] text-stone-400 dark:text-stone-500">{t("imageWorkbench.gifFps")}</span>
+                                <InputNumber
+                                    min={1}
+                                    max={20}
+                                    step={1}
+                                    value={gifFps}
+                                    onChange={(value) => {
+                                        const fps = Math.min(20, Math.max(1, Math.round(Number(value) || 5)));
+                                        updateConfig("gifFrameDuration", String(Math.min(1000, Math.max(50, Math.round(1000 / fps / 10) * 10))));
+                                    }}
+                                    addonAfter="fps"
+                                    className="!w-full"
+                                />
+                            </label>
+                        </div>
+                        <div className={cn("flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]", gifDurationWarning ? "text-amber-600 dark:text-amber-400" : "text-stone-400 dark:text-stone-500")}>
+                            <span>{t("imageWorkbench.gifTotalDuration", { frames: gifFrames, ms: gifFrameDuration, seconds: (gifFrames * gifFrameDuration / 1000).toFixed(1) })}</span>
+                            <span>{t("imageWorkbench.gifDurationHint")}</span>
+                        </div>
                     </div>
                 ) : null}
             </div>

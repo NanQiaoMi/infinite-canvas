@@ -705,10 +705,11 @@ function resolveGifOptions(config: AiConfig, options?: RequestOptions) {
     if (options?.outputFormat !== "gif") return null;
     const model = config.model || config.imageModel;
     if (!GIF_MODEL_PATTERN.test(model)) throw new Error(apiText("gifModelUnsupported"));
-    const frames = Math.round(Number(options.frameCount ?? 8));
+    const frames = Math.round(Number(options.frameCount ?? 9));
     if (!Number.isFinite(frames) || frames < 2 || frames > 16) throw new Error(apiText("gifFramesRange"));
-    const duration = Math.round(Number(options.frameDurationMs ?? 120) / 10) * 10;
-    if (!Number.isFinite(duration) || duration < 20 || duration > 2000) throw new Error(apiText("gifDurationRange"));
+    const duration = Math.round(Number(options.frameDurationMs ?? 200) / 10) * 10;
+    // 画布端按文档建议限制在 1–20 fps（50–1000ms/帧），避免浏览器改写 <20ms 延迟。
+    if (!Number.isFinite(duration) || duration < 50 || duration > 1000) throw new Error(apiText("gifDurationRange"));
     return { frames, duration };
 }
 
