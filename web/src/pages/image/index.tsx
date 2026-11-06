@@ -21,6 +21,7 @@ import { deleteStoredImages, ensureImagePreview, getImagePreviewRevision, previe
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
 import { useConversationAgentStore } from "@/stores/use-conversation-agent-store";
+import { useQuotaStore } from "@/stores/use-quota-store";
 import type { ReferenceImage } from "@/types/image";
 import i18n from "@/i18n";
 
@@ -66,7 +67,6 @@ type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "quality" | "
 type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
 
 const LOG_STORE_KEY = "infinite-canvas:image_generation_logs";
-const RESULT_ACTION_BUTTON_CLASS = "min-w-0 px-1.5 [&_.ant-btn-icon]:shrink-0 [&>span:last-child]:min-w-0 [&>span:last-child]:truncate";
 const logStore = localforage.createInstance({ name: "infinite-canvas", storeName: "image_generation_logs" });
 
 export default function ImagePage() {
@@ -368,8 +368,10 @@ export default function ImagePage() {
     return (
         <div className="flex h-full flex-col overflow-hidden bg-[#faf9f5] text-stone-900 dark:bg-[#1c1b19] dark:text-stone-100">
             <main className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[260px_minmax(0,1fr)] lg:overflow-hidden">
-                <aside className="thin-scrollbar hidden min-h-0 overflow-y-auto border-r border-stone-200/70 bg-[#f2efe8] px-3 py-4 dark:border-stone-800 dark:bg-[#171614] lg:block">
+                <aside className="hidden min-h-0 flex-col overflow-hidden border-r border-stone-200/70 bg-[#f2efe8] dark:border-stone-800 dark:bg-[#171614] lg:flex p-3">
                     <LogPanel
+                        modelLabel={effectiveConfig.imageModel.split("::").pop() || effectiveConfig.imageModel}
+                        quotaCapability="image"
                         logs={logs}
                         selectedLogIds={selectedLogIds}
                         activeLogId={previewLog?.id}
@@ -402,10 +404,12 @@ export default function ImagePage() {
                             <div>
                                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                                     <span className="shrink-0 whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-400 dark:text-stone-500">{t("workbench.prompt")}</span>
-                                    <div className="flex flex-wrap items-center gap-1.5">
+                                    <div className="flex flex-wrap items-center justify-end gap-0.5">
                                         <Button
+                                            type="text"
                                             size="small"
-                                            icon={<Sparkles className="size-3.5" />}
+                                            className="!h-7 !rounded-lg !px-2 !text-[11px] !font-normal !text-stone-500 hover:!bg-black/[.05] hover:!text-stone-700 dark:!text-stone-400 dark:hover:!bg-white/[.06] dark:hover:!text-stone-200"
+                                            icon={<Sparkles className="size-3.5 text-amber-500" />}
                                             onClick={() => {
                                                 setLaunchContext({ page: "image", prompt, model, size: config.size, quality: config.quality, count: String(generationCount) });
                                                 navigate("/chat");
@@ -413,10 +417,10 @@ export default function ImagePage() {
                                         >
                                             {t("chat.workbenchEntry")}
                                         </Button>
-                                        <Button size="small" icon={<BookOpen className="size-3.5" />} onClick={() => setPromptDialogOpen(true)}>
+                                        <Button type="text" size="small" className="!h-7 !rounded-lg !px-2 !text-[11px] !font-normal !text-stone-500 hover:!bg-black/[.05] hover:!text-stone-700 dark:!text-stone-400 dark:hover:!bg-white/[.06] dark:hover:!text-stone-200" icon={<BookOpen className="size-3.5" />} onClick={() => setPromptDialogOpen(true)}>
                                             {t("workbench.viewPrompts")}
                                         </Button>
-                                        <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => setAssetPickerOpen(true)}>
+                                        <Button type="text" size="small" className="!h-7 !rounded-lg !px-2 !text-[11px] !font-normal !text-stone-500 hover:!bg-black/[.05] hover:!text-stone-700 dark:!text-stone-400 dark:hover:!bg-white/[.06] dark:hover:!text-stone-200" icon={<FolderPlus className="size-3.5" />} onClick={() => setAssetPickerOpen(true)}>
                                             {t("workbench.viewAssets")}
                                         </Button>
                                     </div>
@@ -430,10 +434,10 @@ export default function ImagePage() {
                                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                                     <span className="shrink-0 whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-400 dark:text-stone-500">{t("imageWorkbench.references")}</span>
                                     <div className="flex flex-wrap items-center gap-1.5">
-                                        <Button size="small" icon={<ClipboardPaste className="size-3.5" />} onClick={() => void addReferencesFromClipboard()}>
+                                        <Button type="text" size="small" className="!h-7 !rounded-lg !px-2 !text-[11px] !font-normal !text-stone-500 hover:!bg-black/[.05] hover:!text-stone-700 dark:!text-stone-400 dark:hover:!bg-white/[.06] dark:hover:!text-stone-200" icon={<ClipboardPaste className="size-3.5" />} onClick={() => void addReferencesFromClipboard()}>
                                             {t("workbench.clipboard")}
                                         </Button>
-                                        <Button size="small" icon={<Upload className="size-3.5" />} onClick={() => fileInputRef.current?.click()}>
+                                        <Button type="text" size="small" className="!h-7 !rounded-lg !px-2 !text-[11px] !font-normal !text-stone-500 hover:!bg-black/[.05] hover:!text-stone-700 dark:!text-stone-400 dark:hover:!bg-white/[.06] dark:hover:!text-stone-200" icon={<Upload className="size-3.5" />} onClick={() => fileInputRef.current?.click()}>
                                             {t("workbench.upload")}
                                         </Button>
                                     </div>
@@ -487,7 +491,7 @@ export default function ImagePage() {
 
                             <div className="flex items-center justify-between rounded-xl border border-stone-200/70 bg-white/50 px-3 py-2 text-sm dark:border-stone-800 dark:bg-white/[.03] sm:hidden">
                                 <span className="truncate text-stone-500 dark:text-stone-400">
-                                    {modelOptionLabel(effectiveConfig, model)} · {effectiveConfig.size} · {effectiveConfig.quality}
+                                    {model.split("::").pop() || model} · {effectiveConfig.size} · {effectiveConfig.quality}
                                 </span>
                                 <Button size="small" type="text" icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
                                     {t("workbench.adjust")}
@@ -547,6 +551,9 @@ export default function ImagePage() {
             />
             <Drawer title={t("workbench.logs")} placement="bottom" size="large" open={logsOpen} onClose={() => setLogsOpen(false)}>
                 <LogPanel
+                    modelLabel={effectiveConfig.imageModel.split("::").pop() || effectiveConfig.imageModel}
+                    quotaCapability="image"
+                    showTitle={false}
                     logs={logs}
                     selectedLogIds={selectedLogIds}
                     activeLogId={previewLog?.id}
@@ -605,29 +612,23 @@ function ResultImageCard({
     return (
         <div className="group overflow-hidden rounded-xl border border-stone-200/90 bg-white transition-all duration-200 hover:-translate-y-0.5 hover:border-stone-300 hover:shadow-md dark:border-stone-800 dark:bg-stone-900 dark:hover:border-stone-700">
             <Image src={previewUrlFor(image.storageKey) || image.dataUrl} preview={{ src: image.dataUrl }} alt={t("imageWorkbench.resultAlt", { count: index + 1 })} className="agent-fade-in aspect-square object-cover transition-transform duration-300 group-hover:scale-[1.01]" />
-            <div className="space-y-2 border-t border-stone-200/70 px-3 py-2.5 dark:border-stone-800">
-                <div className="flex min-w-0 gap-x-2 gap-y-1 text-xs text-stone-500 dark:text-stone-400">
-                    <span>
+            <div className="flex items-center justify-between gap-2 border-t border-stone-200/70 px-3 py-2 dark:border-stone-800">
+                <div className="flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-[11px] text-stone-400 dark:text-stone-500">
+                    <span className="tabular-nums">
                         {image.width}x{image.height}
                     </span>
                     <span>{formatBytes(image.bytes)}</span>
                     <span>{formatDuration(image.durationMs)}</span>
                 </div>
-                <div className="grid min-w-0 grid-cols-3 gap-2">
+                <div className="flex shrink-0 items-center">
                     <Tooltip title={t("common.addToAssets")}>
-                        <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => void onSaveAsset(image, index)}>
-                            {t("common.addToAssets")}
-                        </Button>
+                        <Button size="small" type="text" icon={<FolderPlus className="size-3.5" />} onClick={() => void onSaveAsset(image, index)} />
                     </Tooltip>
                     <Tooltip title={t("imageWorkbench.addReference")}>
-                        <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" icon={<PenLine className="size-3.5" />} onClick={() => void onEdit(image, index)}>
-                            {t("imageWorkbench.addReference")}
-                        </Button>
+                        <Button size="small" type="text" icon={<PenLine className="size-3.5" />} onClick={() => void onEdit(image, index)} />
                     </Tooltip>
                     <Tooltip title={t("common.download")}>
-                        <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" icon={<Download className="size-3.5" />} onClick={() => onDownload(image, index)}>
-                            {t("common.download")}
-                        </Button>
+                        <Button size="small" type="text" icon={<Download className="size-3.5" />} onClick={() => onDownload(image, index)} />
                     </Tooltip>
                 </div>
             </div>
@@ -675,6 +676,9 @@ function LogPanel({
     logs,
     selectedLogIds,
     activeLogId,
+    modelLabel,
+    showTitle = true,
+    quotaCapability,
     onSelectedLogIdsChange,
     onCreateSession,
     onDeleteSelected,
@@ -683,33 +687,43 @@ function LogPanel({
     logs: GenerationLog[];
     selectedLogIds: string[];
     activeLogId?: string;
+    modelLabel?: string;
+    quotaCapability?: "image" | "video";
+    showTitle?: boolean;
     onSelectedLogIdsChange: (ids: string[]) => void;
     onCreateSession: () => void;
     onDeleteSelected: () => void;
     onPreviewLog: (log: GenerationLog) => void;
 }) {
     const { t } = useTranslation();
+    const quotaStatus = useQuotaStore((state) => state.status);
+    const usage = quotaCapability ? quotaStatus?.capabilities?.[quotaCapability] : undefined;
+    const quotaHint = usage && usage.dailyLimit > 0 ? t("workbench.quotaHint", { used: usage.dailyUsed, limit: usage.dailyLimit }) : "";
     const allSelected = Boolean(logs.length) && selectedLogIds.length === logs.length;
     const toggleAll = () => onSelectedLogIdsChange(allSelected ? [] : logs.map((log) => log.id));
 
     return (
-        <>
-            <div className="mb-2 flex items-center justify-between gap-3 px-1">
-                <h2 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-stone-400 dark:text-stone-500">{t("workbench.logs")}</h2>
-                <span className="text-[10px] tabular-nums text-stone-400 dark:text-stone-500">{logs.length}</span>
+        <div className="flex h-full min-h-0 flex-col">
+            <div className="shrink-0 px-1 pb-2 pt-1">
+                {showTitle ? (
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                        <h2 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-stone-400 dark:text-stone-500">{t("workbench.logs")}</h2>
+                        <span className="text-[10px] tabular-nums text-stone-400 dark:text-stone-500">{logs.length}</span>
+                    </div>
+                ) : null}
+                <div className="flex flex-wrap gap-1">
+                    <Button type="text" size="small" className="!h-7 !rounded-lg !px-2 !text-[11px] !text-stone-500 hover:!bg-black/[.05] dark:!text-stone-400 dark:hover:!bg-white/[.06]" icon={<Plus className="size-3.5" />} onClick={onCreateSession}>
+                        {t("workbench.new")}
+                    </Button>
+                    <Button type="text" size="small" className="!h-7 !rounded-lg !px-2 !text-[11px] !text-stone-500 hover:!bg-black/[.05] dark:!text-stone-400 dark:hover:!bg-white/[.06]" icon={<CheckSquare className="size-3.5" />} disabled={!logs.length} onClick={toggleAll}>
+                        {allSelected ? t("common.cancel") : t("workbench.selectAll")}
+                    </Button>
+                    <Button type="text" size="small" className="!h-7 !rounded-lg !px-2 !text-[11px] !text-red-500 hover:!bg-red-50 dark:!text-red-400 dark:hover:!bg-red-950/20" icon={<Trash2 className="size-3.5" />} disabled={!selectedLogIds.length} onClick={onDeleteSelected}>
+                        {t("common.delete")}
+                    </Button>
+                </div>
             </div>
-            <div className="mb-3 flex flex-wrap gap-1 px-0.5">
-                <Button type="text" size="small" className="!h-7 !rounded-lg !px-2 !text-[11px] !text-stone-500 hover:!bg-black/[.05] dark:!text-stone-400 dark:hover:!bg-white/[.06]" icon={<Plus className="size-3.5" />} onClick={onCreateSession}>
-                    {t("workbench.new")}
-                </Button>
-                <Button type="text" size="small" className="!h-7 !rounded-lg !px-2 !text-[11px] !text-stone-500 hover:!bg-black/[.05] dark:!text-stone-400 dark:hover:!bg-white/[.06]" icon={<CheckSquare className="size-3.5" />} disabled={!logs.length} onClick={toggleAll}>
-                    {allSelected ? t("common.cancel") : t("workbench.selectAll")}
-                </Button>
-                <Button type="text" size="small" className="!h-7 !rounded-lg !px-2 !text-[11px] !text-red-500 hover:!bg-red-50 dark:!text-red-400 dark:hover:!bg-red-950/20" icon={<Trash2 className="size-3.5" />} disabled={!selectedLogIds.length} onClick={onDeleteSelected}>
-                    {t("common.delete")}
-                </Button>
-            </div>
-            <div className="space-y-3">
+            <div className="hover-scrollbar min-h-0 flex-1 space-y-1 overflow-y-auto px-0.5">
                 {logs.map((log) => (
                     <LogCard
                         key={log.id}
@@ -720,9 +734,16 @@ function LogPanel({
                         onClick={() => onPreviewLog(log)}
                     />
                 ))}
-                {!logs.length ? <div className="flex min-h-32 items-center justify-center text-center text-sm text-stone-400 dark:text-stone-500">{t("workbench.noLogs")}</div> : null}
+                {!logs.length ? <div className="flex min-h-40 flex-1 items-center justify-center text-center text-xs text-stone-400 dark:text-stone-500">{t("workbench.noLogs")}</div> : null}
             </div>
-        </>
+            <div className="mt-2 shrink-0 border-t border-stone-200/70 px-1 pt-2.5 dark:border-stone-800">
+                <div className="flex items-center gap-2 text-[11px] text-stone-500 dark:text-stone-400">
+                    <span className="size-1.5 shrink-0 rounded-full bg-emerald-500" />
+                    <span className="min-w-0 truncate font-mono">{modelLabel || "-"}</span>
+                    {quotaHint ? <span className="ml-auto shrink-0 tabular-nums text-stone-400 dark:text-stone-500">{quotaHint}</span> : null}
+                </div>
+            </div>
+        </div>
     );
 }
 
@@ -751,26 +772,16 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
                         ) : null}
                     </div>
                 </div>
-                <div className="grid justify-items-end gap-2">
-                    <div className="flex gap-1">
-                        <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none" color="blue">
-                            {t("workbench.successCount", { count: log.successCount ?? log.imageCount })}
-                        </Tag>
-                        {log.failCount ? (
-                            <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none" color="red">
-                                {t("workbench.failCount", { count: log.failCount })}
-                            </Tag>
-                        ) : null}
+                <div className="grid justify-items-end gap-1 text-[10px] text-stone-400 dark:text-stone-500">
+                    <div className="flex gap-2">
+                        <span>{t("workbench.successCount", { count: log.successCount ?? log.imageCount })}</span>
+                        {log.failCount ? <span className="text-red-500">{t("workbench.failCount", { count: log.failCount })}</span> : null}
                     </div>
-                    <div className="flex flex-wrap justify-end gap-1">
-                        <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{t("workbench.itemCount", { count: log.imageCount })}</Tag>
-                        <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none" color="green">
-                            {formatDuration(log.durationMs)}
-                        </Tag>
+                    <div className="flex flex-wrap justify-end gap-x-2 gap-y-0.5">
+                        <span>{t("workbench.itemCount", { count: log.imageCount })}</span>
+                        <span className="tabular-nums">{formatDuration(log.durationMs)}</span>
                     </div>
-                    <div className="flex justify-end">
-                        <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{log.time}</Tag>
-                    </div>
+                    <span className="tabular-nums opacity-80">{log.time}</span>
                 </div>
             </div>
         </button>

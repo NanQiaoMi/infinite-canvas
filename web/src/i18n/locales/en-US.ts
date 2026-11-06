@@ -144,6 +144,7 @@ export default {
         results: "Results",
         waiting: "Waiting {{time}}",
         model: "Model",
+        quotaHint: "Today {{used}}/{{limit}}",
         generating: "Generating",
         success: "Succeeded",
         failed: "Generation failed",

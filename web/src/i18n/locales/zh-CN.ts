@@ -144,6 +144,7 @@ export default {
         results: "生成结果",
         waiting: "等待 {{time}}",
         model: "模型",
+        quotaHint: "今日额度 {{used}}/{{limit}}",
         generating: "生成中",
         success: "成功",
         failed: "生成失败",
