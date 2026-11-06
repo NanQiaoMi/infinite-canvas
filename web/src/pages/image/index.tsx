@@ -17,7 +17,7 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import { cn } from "@/lib/utils";
 import { nanoid } from "nanoid";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
-import { requestEdit, requestGeneration } from "@/services/api/image";
+import { requestEdit, requestGeneration, requestPromptOptimization } from "@/services/api/image";
 import { deleteStoredImages, ensureImagePreview, getImagePreviewRevision, previewUrlFor, resolveImageUrl, subscribeImagePreviews, uploadImage } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
@@ -98,6 +98,8 @@ export default function ImagePage() {
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
     const [isReferenceDragActive, setIsReferenceDragActive] = useState(false);
     const [autoRunToken, setAutoRunToken] = useState(0);
+    const [optimizing, setOptimizing] = useState(false);
+    const [optimization, setOptimization] = useState<{ original: string; optimized: string; edited: string } | null>(null);
     const imageCommand = useWorkbenchAgentStore((state) => state.imageCommand);
     const clearImageCommand = useWorkbenchAgentStore((state) => state.clearImageCommand);
     const updateAgentTask = useWorkbenchAgentStore((state) => state.updateTask);
@@ -152,23 +154,8 @@ export default function ImagePage() {
         }
     };
 
-    const generate = async () => {
-        const agentTaskId = agentTaskIdRef.current;
-        agentTaskIdRef.current = undefined;
-        const text = prompt.trim();
-        if (!text) {
-            message.error(t("imageWorkbench.promptRequired"));
-            if (agentTaskId) updateAgentTask(agentTaskId, { status: "failed", error: t("imageWorkbench.promptRequired") });
-            return;
-        }
-        if (!isAiConfigReady(effectiveConfig, model)) {
-            message.warning(t("workbench.configFirst"));
-            openConfigDialog(true);
-            if (agentTaskId) updateAgentTask(agentTaskId, { status: "failed", error: t("imageWorkbench.configIncomplete") });
-            return;
-        }
-
-        const snapshot = buildRequestSnapshot();
+    const runGenerationBatch = async (text: string, agentTaskId?: string) => {
+        const snapshot = buildRequestSnapshot(text);
         if (!snapshot) {
             if (agentTaskId) updateAgentTask(agentTaskId, { status: "failed", error: t("imageWorkbench.invalidParams") });
             return;
@@ -210,6 +197,56 @@ export default function ImagePage() {
         } finally {
             setRunning(false);
         }
+    };
+
+    const generate = async () => {
+        const agentTaskId = agentTaskIdRef.current;
+        agentTaskIdRef.current = undefined;
+        const text = prompt.trim();
+        if (!text) {
+            message.error(t("imageWorkbench.promptRequired"));
+            if (agentTaskId) updateAgentTask(agentTaskId, { status: "failed", error: t("imageWorkbench.promptRequired") });
+            return;
+        }
+        if (!isAiConfigReady(effectiveConfig, model)) {
+            message.warning(t("workbench.configFirst"));
+            openConfigDialog(true);
+            if (agentTaskId) updateAgentTask(agentTaskId, { status: "failed", error: t("imageWorkbench.configIncomplete") });
+            return;
+        }
+
+        // 生成前可选优化：仅文生图与手动生成时触发，由用户确认是否采用；带参考图/Agent 自动执行时直接使用原提示词。
+        const shouldOptimize = config.optimizePrompt !== false && !references.length && !agentTaskId;
+        if (shouldOptimize) {
+            setOptimizing(true);
+            try {
+                const optimized = await requestPromptOptimization(effectiveConfig, text);
+                if (optimized && optimized.trim() && optimized.trim() !== text) {
+                    setOptimization({ original: text, optimized: optimized.trim(), edited: optimized.trim() });
+                    setOptimizing(false);
+                    return;
+                }
+            } catch {
+                message.warning(t("imageWorkbench.optimizeFailed"));
+            }
+            setOptimizing(false);
+        }
+        await runGenerationBatch(text, agentTaskId);
+    };
+
+    const approveOptimization = async () => {
+        if (!optimization) return;
+        const approved = optimization.edited.trim() || optimization.original;
+        setOptimization(null);
+        setPrompt(approved);
+        await runGenerationBatch(approved);
+    };
+
+    const useOriginalOptimization = async () => {
+        if (!optimization) return;
+        const original = optimization.original;
+        setOptimization(null);
+        await runGenerationBatch(original);
     };
 
     // Handle image-generation commands from the Agent panel by setting the prompt and optionally starting generation.
@@ -310,8 +347,8 @@ export default function ImagePage() {
         setResults(log.images.map((image) => ({ id: image.id, status: "success", image })));
     };
 
-    const buildRequestSnapshot = () => {
-        const text = prompt.trim();
+    const buildRequestSnapshot = (textOverride?: string) => {
+        const text = (textOverride ?? prompt).trim();
         if (!text) {
             message.error(t("imageWorkbench.promptRequired"));
             return null;
@@ -432,6 +469,14 @@ export default function ImagePage() {
                                 </div>
                                 <div className="rounded-2xl border border-stone-300/80 bg-white p-2.5 shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-all duration-200 focus-within:border-stone-400/80 focus-within:shadow-[0_2px_14px_rgba(0,0,0,0.06)] dark:border-stone-700 dark:bg-stone-900 dark:focus-within:border-stone-600">
                                     <Input.TextArea variant="borderless" value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} className="!px-1 !py-1 !text-sm" placeholder={t("imageWorkbench.promptPlaceholder")} />
+                                </div>
+                                <div className="mt-2 flex flex-wrap items-center justify-between gap-2 px-1">
+                                    <div className="flex min-w-0 items-center gap-1.5 text-xs text-stone-500 dark:text-stone-400">
+                                        <Sparkles className="size-3.5 shrink-0 text-amber-500" />
+                                        <span className="shrink-0">{t("imageWorkbench.optimizePrompt")}</span>
+                                        <span className="hidden truncate text-stone-400 sm:inline dark:text-stone-500">{t("imageWorkbench.optimizePromptHint")}</span>
+                                    </div>
+                                    <Switch size="small" checked={config.optimizePrompt !== false} onChange={(checked) => updateConfig("optimizePrompt", checked)} />
                                 </div>
                             </div>
 
@@ -573,6 +618,29 @@ export default function ImagePage() {
                     <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} />
                 </div>
             </Drawer>
+            <Modal open={Boolean(optimization)} title={t("imageWorkbench.optimizeTitle")} onCancel={() => setOptimization(null)} footer={null} width={760}>
+                <p className="mb-4 text-sm leading-6 text-stone-500 dark:text-stone-400">{t("imageWorkbench.optimizeDescription")}</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="min-w-0">
+                        <div className="mb-1.5 text-[11px] font-medium uppercase tracking-[0.14em] text-stone-400 dark:text-stone-500">{t("imageWorkbench.optimizeOriginal")}</div>
+                        <div className="hover-scrollbar max-h-60 overflow-y-auto whitespace-pre-wrap rounded-xl border border-stone-200/80 bg-white/60 p-3 text-sm leading-6 text-stone-600 dark:border-stone-800 dark:bg-white/[.03] dark:text-stone-300">{optimization?.original}</div>
+                    </div>
+                    <div className="min-w-0">
+                        <div className="mb-1.5 text-[11px] font-medium uppercase tracking-[0.14em] text-stone-400 dark:text-stone-500">{t("imageWorkbench.optimizeOptimized")}</div>
+                        <Input.TextArea
+                            value={optimization?.edited ?? ""}
+                            onChange={(event) => setOptimization((value) => (value ? { ...value, edited: event.target.value } : value))}
+                            autoSize={{ minRows: 8, maxRows: 14 }}
+                            className="!text-sm"
+                        />
+                    </div>
+                </div>
+                <div className="mt-4 flex flex-wrap justify-end gap-2">
+                    <Button onClick={() => setOptimization(null)}>{t("common.cancel")}</Button>
+                    <Button onClick={() => void useOriginalOptimization()}>{t("imageWorkbench.optimizeUseOriginal")}</Button>
+                    <Button type="primary" onClick={() => void approveOptimization()}>{t("imageWorkbench.optimizeUseOptimized")}</Button>
+                </div>
+            </Modal>
             <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={setPrompt} />
             <AssetPickerModal open={assetPickerOpen} defaultTab="my-assets" onInsert={(payload) => void insertPickedAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
             <Modal title={t("workbench.deleteLogs")} open={deleteConfirmOpen} onCancel={() => setDeleteConfirmOpen(false)} onOk={deleteSelectedLogs} okText={t("common.delete")} okButtonProps={{ danger: true }} cancelText={t("common.cancel")}>

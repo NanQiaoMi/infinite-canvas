@@ -780,6 +780,33 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
     }
 }
 
+const PROMPT_OPTIMIZER_SYSTEM = [
+    "你是专业的 AI 生图提示词工程师。",
+    "请把用户提供的生图提示词改写得更具体、可执行：补充主体细节、构图、镜头、光线、色彩、风格与氛围；",
+    "保留原意和原语言，不要改变核心主体；如果原文已经足够完整，只做小幅润色。",
+    "只输出优化后的提示词本身，不要解释、不要引号、不要 Markdown 代码块。",
+].join("");
+
+/** 生成前的可选提示词优化：调用文本模型改写提示词，由前端询问用户是否采用。 */
+export async function requestPromptOptimization(config: AiConfig, prompt: string, options?: RequestOptions) {
+    if (!config.textModel) throw new Error(apiText("textModelRequired"));
+    const textConfig = { ...config, model: config.textModel };
+    const text = await requestImageQuestion(
+        textConfig,
+        [
+            { role: "system", content: PROMPT_OPTIMIZER_SYSTEM },
+            { role: "user", content: prompt },
+        ],
+        () => {},
+        options,
+    );
+    return text
+        .replace(/^```[a-z]*\n?/i, "")
+        .replace(/```$/i, "")
+        .replace(/^["'「『]+|["'」』]+$/g, "")
+        .trim();
+}
+
 export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], options?: RequestOptions) {
     assertQuotaAvailable("image");
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);

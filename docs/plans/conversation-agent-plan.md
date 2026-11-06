@@ -903,3 +903,9 @@ POST /v1/responses (stream:false) → 200，返回 output_text "OK"（18.5s）
 - UI：生图工作台参数区新增「动图 GIF」分组（模型支持时才可开启），展示帧数（2–16）与帧率（1–20 fps，默认 9 帧 / 5 fps / 200ms），并显示「帧数 × 每帧时长 ≈ 总时长」与 1–3 秒建议；请求按 50–1000ms/帧 校验；结果卡片显示 GIF 标记，下载按 MIME 使用 `.gif` 后缀；参考图场景自动回退静态图。
 - 渠道：通过管理端接口为 chatgpt2api 渠道补充 `gpt-image-2.6`、`gpt-image-2.6-flare`、`gpt-image-2.6-sunburst` 图片模型（保留原 API Key）。
 - 验证：按文档实测 `gpt-image-2.6` GIF 生成（8 帧 / 120ms），确认返回 `GIF89a` 动画并以 `image/gif` 渲染；构建与测试通过。
+
+### 17.14 生图比例默认值与提示词优化确认（2026-11-07）
+
+- 比例：默认配置 `size` 从 `1:1` 改为 `auto`，避免默认固定方形；具体比例选择仍走 `computeMediaSize` 与 `resolveRequestSize`。
+- 提示词优化：`AiConfig` 增加 `optimizePrompt`（默认开启）；新增 `requestPromptOptimization` 调用文本模型改写提示词；生成前弹窗对比原文与可编辑优化结果，支持「使用优化词 / 使用原词 / 取消」；带参考图或 Agent 自动任务跳过。
+- 验证：`tsc` 通过、Web 测试、构建通过；浏览器实测比例切换与优化弹窗流程。

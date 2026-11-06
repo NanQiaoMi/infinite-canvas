@@ -58,6 +58,7 @@ export type AiConfig = {
     imageFormat: "png" | "gif";
     gifFrames: string;
     gifFrameDuration: string;
+    optimizePrompt: boolean;
     canvasImageCount: string;
     proxyEnabled: boolean;
     proxyUrl: string;
@@ -126,12 +127,13 @@ export const defaultConfig: AiConfig = {
     reasoningEffort: "auto",
     models: ["default::gpt-image-2", "default::grok-imagine-video", "default::gpt-5.5", "default::gpt-4o-mini-tts"],
     quality: "auto",
-    size: "1:1",
+    size: "auto",
     background: "",
     count: "1",
     imageFormat: "png",
     gifFrames: "9",
     gifFrameDuration: "200",
+    optimizePrompt: true,
     canvasImageCount: "3",
     proxyEnabled: false,
     proxyUrl: DEFAULT_LOCAL_PROXY_URL,
@@ -344,6 +346,7 @@ export const useConfigStore = create<ConfigStore>()(
                         imageFormat: config.imageFormat === "gif" ? "gif" : "png",
                         gifFrames: String(Math.min(16, Math.max(2, Math.round(Number(config.gifFrames) || 9)))),
                         gifFrameDuration: String(Math.min(1000, Math.max(50, Math.round((Number(config.gifFrameDuration) || 200) / 10) * 10))),
+                        optimizePrompt: config.optimizePrompt !== false,
                         canvasImageCount: config.canvasImageCount || "3",
                         proxyEnabled: Boolean(config.proxyEnabled),
                         proxyUrl: config.proxyUrl || DEFAULT_LOCAL_PROXY_URL,
