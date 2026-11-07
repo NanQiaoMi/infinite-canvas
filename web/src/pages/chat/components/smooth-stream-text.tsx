@@ -5,8 +5,10 @@ import { normalizeMarkdownForChat } from "@/lib/conversation-agent/markdown-norm
 import { cn } from "@/lib/utils";
 
 type SmoothStreamTextProps = {
-    rawText: string;
-    running: boolean;
+    rawText?: string;
+    text?: string;
+    running?: boolean;
+    isRun?: boolean;
     onComplete?: () => void;
 };
 
@@ -48,7 +50,10 @@ export function calculateStreamStep(
  * - 突发大块 chunk 时自适应动态加速平滑追赶（150~300ms 内追齐），彻底消除画面生硬跳动；
  * - 配合尾随呼吸光标与精致排版，带来 Claude 级别丝滑流畅的视觉体验。
  */
-export function SmoothStreamText({ rawText, running, onComplete }: SmoothStreamTextProps) {
+export function SmoothStreamText(props: SmoothStreamTextProps) {
+    const rawText = (props.rawText ?? props.text ?? "") || "";
+    const running = Boolean(props.running ?? props.isRun);
+    const onComplete = props.onComplete;
     const [displayedLength, setDisplayedLength] = useState(0);
     const targetLengthRef = useRef(rawText.length);
     targetLengthRef.current = rawText.length;

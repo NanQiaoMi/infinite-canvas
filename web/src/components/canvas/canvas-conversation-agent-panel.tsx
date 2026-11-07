@@ -353,7 +353,7 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
                 {running && (
                     <div className="space-y-2">
                         {steps.length > 0 && <StepTrail steps={steps} running={running} defaultExpanded />}
-                        {streamingText && <SmoothStreamText text={streamingText} isRun={running} />}
+                        {streamingText && <SmoothStreamText rawText={streamingText} running={running} />}
                     </div>
                 )}
             </div>

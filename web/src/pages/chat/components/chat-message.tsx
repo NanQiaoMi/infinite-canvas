@@ -27,7 +27,7 @@ function PromptCard({ text }: { text: string }) {
         <div className="overflow-hidden rounded-xl border border-stone-200/90 bg-white dark:border-stone-800 dark:bg-stone-900">
             <div className="flex items-center justify-between gap-2 border-b border-stone-200/70 px-3 py-2 dark:border-stone-800">
                 <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-stone-400 dark:text-stone-500">prompt</span>
-                <span className="text-[10px] tabular-nums text-stone-400 dark:text-stone-500">{text.length}</span>
+                <span className="text-[10px] tabular-nums text-stone-400 dark:text-stone-500">{(text || "").length}</span>
             </div>
             <div className="whitespace-pre-wrap break-words px-3 py-2.5 font-mono text-[12.5px] leading-6 text-stone-800 dark:text-stone-200">{text}</div>
             <div className="flex items-center justify-end gap-1 border-t border-stone-200/70 px-2 py-1 dark:border-stone-800">

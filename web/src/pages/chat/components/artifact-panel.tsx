@@ -102,12 +102,12 @@ export function ArtifactPanel() {
                 </div>
                 <div className="hover-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
                     <div className="flex items-center justify-center overflow-hidden rounded-xl border border-stone-200 bg-stone-100 dark:border-stone-800 dark:bg-stone-900">
-                        {url ? <img src={url} alt={prompt.slice(0, 40)} className="agent-fade-in max-h-[46vh] w-full object-contain" /> : null}
+                        {url ? <img src={url} alt={(prompt || "").slice(0, 40)} className="agent-fade-in max-h-[46vh] w-full object-contain" /> : null}
                     </div>
                     <div>
                         <div className="mb-1.5 flex items-center justify-between">
                             <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-stone-400 dark:text-stone-500">{t("chat.artifact.prompt")}</span>
-                            <span className="text-[10px] tabular-nums text-stone-400 dark:text-stone-500">{prompt.length}</span>
+                            <span className="text-[10px] tabular-nums text-stone-400 dark:text-stone-500">{(prompt || "").length}</span>
                         </div>
                         <Input.TextArea value={prompt} onChange={(event) => setPrompt(event.target.value)} autoSize={{ minRows: 5, maxRows: 12 }} className="!rounded-xl !text-[13px] !leading-6" />
                     </div>
