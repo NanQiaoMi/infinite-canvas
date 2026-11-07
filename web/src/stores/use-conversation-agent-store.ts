@@ -2,7 +2,8 @@ import localforage from "localforage";
 import { nanoid } from "nanoid";
 import { create } from "zustand";
 
-import type { AgentImageRef, AgentLaunchContext, AgentMessage, AgentSession, AgentToolCall } from "@/lib/conversation-agent/types";
+import type { AgentImageRef, AgentLaunchContext, AgentMessage, AgentSession, AgentStep, AgentToolCall, AgentToolResult } from "@/lib/conversation-agent/types";
+import type { AgentIntent } from "@/lib/conversation-agent/intent";
 
 const storage = localforage.createInstance({ name: "infinite-canvas", storeName: "agent_conversations" });
 const MAX_SESSIONS = 50;
@@ -11,10 +12,22 @@ const PERSIST_DELAY_MS = 400;
 
 type PersistedState = { sessions: AgentSession[]; activeSessionId: string | null };
 
+export type SessionRunState = {
+    running: boolean;
+    streamingText: string;
+    runningTool: AgentToolCall | null;
+    steps: AgentStep[];
+    completedToolResults: Array<{ id: string; call: AgentToolCall; result: AgentToolResult }>;
+    turnStartedAt: number;
+    intent: AgentIntent | null;
+    turnId: string | null;
+};
+
 type ConversationAgentStore = {
     hydrated: boolean;
     sessions: AgentSession[];
     activeSessionId: string | null;
+    sessionRuns: Record<string, SessionRunState>;
     streamingText: string;
     running: boolean;
     runningTool: AgentToolCall | null;
@@ -37,6 +50,8 @@ type ConversationAgentStore = {
     renameSession: (id: string, title: string) => void;
     setActiveSession: (id: string) => void;
     appendMessages: (sessionId: string, messages: AgentMessage[]) => void;
+    setSessionRun: (sessionId: string, updater: Partial<SessionRunState> | ((prev: SessionRunState) => SessionRunState)) => void;
+    clearSessionRun: (sessionId: string) => void;
     setStreamingText: (text: string) => void;
     setRunning: (running: boolean) => void;
     setRunningTool: (call: AgentToolCall | null) => void;
@@ -47,8 +62,8 @@ type ConversationAgentStore = {
 export function formatSessionTitle(text: string): string {
     const cleaned = text
         .replace(/^\/(prompt|image|edit|model)\s+/, "")
-        .replace(/^在画布上(?:批量)?(?:生成|创建)?/i, "")
-        .replace(/^(?:帮我|请帮我|请|给我)?(?:生成|画一张|画一个|制作)?(?:png)?(?:透明底|透明图片|透明背景)?[:：]?/i, "")
+        .replace(/^在画布(?:上|中)?(?:批量)?(?:创建|生成|排布|制作)?/i, "")
+        .replace(/^(?:帮我|请帮我|请|给我)?(?:生成|画一张|画一个|制作)?(?:png)?(?:透明底|透明图片|透明背景)?(?:图片|图像)?[:：]?/i, "")
         .trim();
     const target = cleaned || text.trim();
     if (!target) return "";
@@ -137,6 +152,7 @@ export const useConversationAgentStore = create<ConversationAgentStore>()((set, 
         hydrated: false,
         sessions: [],
         activeSessionId: null,
+        sessionRuns: {},
         streamingText: "",
         running: false,
         runningTool: null,
@@ -208,8 +224,18 @@ export const useConversationAgentStore = create<ConversationAgentStore>()((set, 
         deleteSession: (id) => {
             set((state) => {
                 const sessions = state.sessions.filter((session) => session.id !== id);
+                const nextRuns = { ...state.sessionRuns };
+                delete nextRuns[id];
                 const activeSessionId = state.activeSessionId === id ? (sessions[0]?.id ?? null) : state.activeSessionId;
-                return { sessions, activeSessionId };
+                const activeRun = activeSessionId ? nextRuns[activeSessionId] : undefined;
+                return {
+                    sessions,
+                    activeSessionId,
+                    sessionRuns: nextRuns,
+                    streamingText: activeRun?.streamingText ?? "",
+                    runningTool: activeRun?.runningTool ?? null,
+                    running: activeRun?.running ?? false,
+                };
             });
             schedulePersist();
         },
@@ -221,7 +247,13 @@ export const useConversationAgentStore = create<ConversationAgentStore>()((set, 
         },
         setActiveSession: (id) => {
             if (!get().sessions.some((session) => session.id === id)) return;
-            set({ activeSessionId: id, streamingText: "", runningTool: null });
+            const targetRun = get().sessionRuns[id];
+            set({
+                activeSessionId: id,
+                streamingText: targetRun?.streamingText ?? "",
+                runningTool: targetRun?.runningTool ?? null,
+                running: targetRun?.running ?? false,
+            });
             schedulePersist();
         },
         appendMessages: (sessionId, messages) => {
@@ -230,7 +262,12 @@ export const useConversationAgentStore = create<ConversationAgentStore>()((set, 
                 sessions: state.sessions.map((session) => {
                     if (session.id !== sessionId) return session;
                     const existing = new Set(session.messages.map((message) => message.id));
-                    const merged = [...session.messages, ...messages.filter((message) => !existing.has(message.id))].slice(-MAX_MESSAGES);
+                    const tagged = messages.map((m) => ({
+                        ...m,
+                        threadId: m.threadId || sessionId,
+                        itemId: m.itemId || m.id,
+                    }));
+                    const merged = [...session.messages, ...tagged.filter((message) => !existing.has(message.id))].slice(-MAX_MESSAGES);
                     const userMsg = merged.find((message) => message.role === "user");
                     const title = session.title || (userMsg?.text ? formatSessionTitle(userMsg.text) : "");
                     return { ...session, messages: merged, title, updatedAt: Date.now() };
@@ -238,12 +275,56 @@ export const useConversationAgentStore = create<ConversationAgentStore>()((set, 
             }));
             schedulePersist();
         },
+        setSessionRun: (sessionId, updater) => {
+            set((state) => {
+                const current = state.sessionRuns[sessionId] || {
+                    running: false,
+                    streamingText: "",
+                    runningTool: null,
+                    steps: [],
+                    completedToolResults: [],
+                    turnStartedAt: 0,
+                    intent: null,
+                    turnId: null,
+                };
+                const next = typeof updater === "function" ? updater(current) : { ...current, ...updater };
+                const nextRuns = { ...state.sessionRuns, [sessionId]: next };
+                const isActive = state.activeSessionId === sessionId;
+                return {
+                    sessionRuns: nextRuns,
+                    ...(isActive
+                        ? {
+                              running: next.running,
+                              streamingText: next.streamingText,
+                              runningTool: next.runningTool,
+                          }
+                        : {}),
+                };
+            });
+        },
+        clearSessionRun: (sessionId) => {
+            set((state) => {
+                const nextRuns = { ...state.sessionRuns };
+                delete nextRuns[sessionId];
+                const isActive = state.activeSessionId === sessionId;
+                return {
+                    sessionRuns: nextRuns,
+                    ...(isActive
+                        ? {
+                              running: false,
+                              streamingText: "",
+                              runningTool: null,
+                          }
+                        : {}),
+                };
+            });
+        },
         setStreamingText: (text) => set({ streamingText: text }),
         setRunning: (running) => set({ running, ...(running ? {} : { streamingText: "", runningTool: null }) }),
         setRunningTool: (call) => set({ runningTool: call }),
         setLaunchContext: (context) => set({ launchContext: context }),
         clearAll: () => {
-            set({ sessions: [], activeSessionId: null, streamingText: "", running: false, runningTool: null });
+            set({ sessions: [], activeSessionId: null, sessionRuns: {}, streamingText: "", running: false, runningTool: null });
             persistSeq += 1;
             void storage.removeItem("state").catch(() => undefined);
         },

@@ -460,7 +460,7 @@ function NodeContent(props: NodeContentRendererProps) {
     if (props.node.type === CanvasNodeType.Config && props.renderNodeContent) return props.renderNodeContent(props.node);
     if (props.isBatchRoot && props.node.type === CanvasNodeType.Image) return <ImageNodeContent {...props} />;
     if (props.node.type === CanvasNodeType.Text && props.node.metadata?.texts?.length && (props.node.metadata.status !== "error" || props.node.metadata.texts.some((text) => text.content))) return <TextContent {...props} />;
-    if (props.node.metadata?.status === "loading") return <LoadingContent theme={props.theme} />;
+    if (props.node.metadata?.status === "loading") return <LoadingContent theme={props.theme} node={props.node} />;
     if (props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />;
 
     const Renderer = nodeContentRenderers[props.node.type as CanvasNodeType];
@@ -499,12 +499,37 @@ function GroupNodeContent({ node, theme, groupChildCount }: NodeContentRendererP
     );
 }
 
-function LoadingContent({ theme }: Pick<NodeContentRendererProps, "theme">) {
+function LoadingContent({ theme, node }: { theme: CanvasTheme; node?: CanvasNodeData }) {
     const { t } = useTranslation();
+    const isQueued = node?.metadata?.phase === "queued" || (Boolean(node?.metadata?.queuePosition) && (node?.metadata?.queuePosition ?? 0) > 0);
+    const progress = Math.min(100, Math.max(0, Math.round(((node?.metadata?.progress as number) || 0) * 100)));
+
+    if (isQueued) {
+        return (
+            <div className="flex h-full w-full flex-col items-center justify-center gap-2 p-4 text-center select-none" style={{ color: theme.node.text }}>
+                <div className="size-8 animate-spin rounded-full border-2 border-amber-500/30 border-t-amber-500" />
+                <div className="text-xs font-semibold text-amber-600 dark:text-amber-400">
+                    排队中 · 前方 {node?.metadata?.queuePosition || 1} 人
+                </div>
+                <div className="text-[10px] opacity-70">
+                    预计约 {node?.metadata?.estimatedWaitSeconds || 45}s
+                </div>
+            </div>
+        );
+    }
+
     return (
-        <div className="flex h-full w-full flex-col items-center justify-center gap-3" style={{ color: theme.node.activeStroke }}>
-            <div className="size-10 animate-spin rounded-full border-2" style={{ borderColor: theme.node.stroke, borderTopColor: theme.node.activeStroke }} />
-            <span className="text-[10px] tracking-[0.2em]">{t("canvas.node.generating")}</span>
+        <div className="flex h-full w-full flex-col items-center justify-center gap-2 p-4 text-center select-none" style={{ color: theme.node.activeStroke }}>
+            <div className="size-8 animate-spin rounded-full border-2" style={{ borderColor: theme.node.stroke, borderTopColor: theme.node.activeStroke }} />
+            <span className="text-[10px] tracking-[0.2em] font-medium">{t("canvas.node.generating")}</span>
+            {node?.metadata?.progress ? (
+                <div className="w-24 space-y-1">
+                    <div className="h-1 w-full overflow-hidden rounded-full bg-stone-200 dark:bg-stone-700">
+                        <div className="h-full bg-blue-500 transition-all duration-300" style={{ width: `${progress}%` }} />
+                    </div>
+                    <span className="text-[9px] font-mono tabular-nums opacity-75">{progress}%</span>
+                </div>
+            ) : null}
         </div>
     );
 }

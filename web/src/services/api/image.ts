@@ -10,6 +10,7 @@ import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
 import { imageToDataUrl } from "@/services/image-storage";
 import { imageSizePresets, inferMediaScale } from "@/lib/media-size";
 import type { ReferenceImage } from "@/types/image";
+import { pollImageTask, type ImageTaskResult } from "./image-queue";
 
 const apiText = (key: string, options?: Record<string, unknown>) => i18n.t(`apiErrors.${key}`, options);
 
@@ -97,12 +98,14 @@ type GeminiPayload = {
 };
 type GeminiStreamState = { buffer: string; text: string; toolCalls: ResponseToolCall[]; error?: string };
 type ImageOutputFormat = "png" | "gif";
-type RequestOptions = {
+export type RequestOptions = {
     signal?: AbortSignal;
     /** 仅图片工作台使用：生成 GIF 动图（需 gpt-image-2.6 系列）。 */
     outputFormat?: ImageOutputFormat;
     frameCount?: number;
     frameDurationMs?: number;
+    onProgress?: (task: ImageTaskResult) => void;
+    recoveryTaskId?: string;
 };
 
 const IMAGE_QUALITY_VALUES = ["low", "medium", "high", "xhigh", "max"];
@@ -285,7 +288,7 @@ function readApiErrorMessage(value: unknown): string {
     );
 }
 
-function readAxiosError(error: unknown, fallback: string) {
+export function readAxiosError(error: unknown, fallback: string) {
     if (axios.isCancel(error)) return apiText("requestCanceled");
     if (axios.isAxiosError(error)) {
         if (error.code === "ECONNABORTED" || error.code === "ETIMEDOUT") return apiText("imageTimeout");
@@ -731,8 +734,21 @@ function resolveGifOptions(config: AiConfig, options?: RequestOptions) {
 export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
     assertQuotaAvailable("image");
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
-    const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const gif = resolveGifOptions(config, options);
+
+    if (options?.recoveryTaskId) {
+        try {
+            const completedTask = await pollImageTask(requestConfig, options.recoveryTaskId, {
+                signal: options?.signal,
+                onProgress: options?.onProgress,
+            });
+            return await parseImagePayload({ data: completedTask.data }, gif ? "image/gif" : "image/png");
+        } catch (error) {
+            throw new Error(readAxiosError(error, apiText("requestFailed")));
+        }
+    }
+
+    const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const script = resolveModelScript(config, config.model || config.imageModel);
     if (gif && (script || requestConfig.apiFormat === "gemini")) throw new Error(apiText("gifChannelUnsupported"));
     if (script) {
@@ -765,12 +781,13 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
     const requestSize = resolveRequestSize(config.size);
     const background = normalizeBackground(config.background);
     try {
-        const response = await axios.post<ImageApiResponse>(
-            aiApiUrl(requestConfig, "/images/generations"),
+        const response = await axios.post<ImageApiResponse | ImageTaskResult>(
+            aiApiUrl(requestConfig, "/images/generations?async=true"),
             {
                 model: requestConfig.model,
                 prompt: withSystemPrompt(requestConfig, prompt),
                 n,
+                async: true,
                 ...(quality ? { quality } : {}),
                 ...(gif
                     ? { size: "auto", output_format: "gif", frame_count: gif.frames, frame_duration_ms: gif.duration }
@@ -783,12 +800,28 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
                       }),
             },
             {
-                headers: aiHeaders(requestConfig, "application/json"),
+                headers: {
+                    ...aiHeaders(requestConfig, "application/json"),
+                    Prefer: "respond-async",
+                },
                 signal: options?.signal,
                 timeout: IMAGE_REQUEST_TIMEOUT_MS,
             },
         );
-        const images = await parseImagePayload(response.data, gif ? "image/gif" : "image/png");
+        const data = response.data as unknown as Record<string, unknown>;
+        const isAsync =
+            response.status === 202 ||
+            (data && typeof data === "object" && "task_id" in data && (data.status === "queued" || data.status === "processing"));
+        if (isAsync) {
+            const initialTask = data as unknown as ImageTaskResult;
+            options?.onProgress?.(initialTask);
+            const completedTask = await pollImageTask(requestConfig, initialTask.task_id, {
+                signal: options?.signal,
+                onProgress: options?.onProgress,
+            });
+            return await parseImagePayload({ data: completedTask.data }, gif ? "image/gif" : "image/png");
+        }
+        const images = await parseImagePayload(response.data as ImageApiResponse, gif ? "image/gif" : "image/png");
         return images;
     } catch (error) {
         throw new Error(readAxiosError(error, apiText("requestFailed")));
@@ -825,6 +858,19 @@ export async function requestPromptOptimization(config: AiConfig, prompt: string
 export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], options?: RequestOptions) {
     assertQuotaAvailable("image");
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
+
+    if (options?.recoveryTaskId) {
+        try {
+            const completedTask = await pollImageTask(requestConfig, options.recoveryTaskId, {
+                signal: options?.signal,
+                onProgress: options?.onProgress,
+            });
+            return await parseImagePayload({ data: completedTask.data });
+        } catch (error) {
+            throw new Error(readAxiosError(error, apiText("requestFailed")));
+        }
+    }
+
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const requestPrompt = buildImageReferencePromptText(prompt, references);
     const script = resolveModelScript(config, config.model || config.imageModel);
@@ -868,6 +914,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
         formData.set("response_format", "b64_json");
     }
     formData.set("output_format", IMAGE_OUTPUT_FORMAT);
+    formData.set("async", "true");
     if (quality) {
         formData.set("quality", quality);
     }
@@ -882,8 +929,32 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     files.forEach((file) => formData.append(imageField, file));
 
     try {
-        const response = await axios.post<ImageApiResponse>(aiApiUrl(requestConfig, "/images/edits"), formData, { headers: aiHeaders(requestConfig), signal: options?.signal, timeout: IMAGE_REQUEST_TIMEOUT_MS });
-        const images = await parseImagePayload(response.data);
+        const response = await axios.post<ImageApiResponse | ImageTaskResult>(
+            aiApiUrl(requestConfig, "/images/edits?async=true"),
+            formData,
+            {
+                headers: {
+                    ...aiHeaders(requestConfig),
+                    Prefer: "respond-async",
+                },
+                signal: options?.signal,
+                timeout: IMAGE_REQUEST_TIMEOUT_MS,
+            },
+        );
+        const data = response.data as unknown as Record<string, unknown>;
+        const isAsync =
+            response.status === 202 ||
+            (data && typeof data === "object" && "task_id" in data && (data.status === "queued" || data.status === "processing"));
+        if (isAsync) {
+            const initialTask = data as unknown as ImageTaskResult;
+            options?.onProgress?.(initialTask);
+            const completedTask = await pollImageTask(requestConfig, initialTask.task_id, {
+                signal: options?.signal,
+                onProgress: options?.onProgress,
+            });
+            return await parseImagePayload({ data: completedTask.data });
+        }
+        const images = await parseImagePayload(response.data as ImageApiResponse);
         return images;
     } catch (error) {
         throw new Error(readAxiosError(error, apiText("requestFailed")));

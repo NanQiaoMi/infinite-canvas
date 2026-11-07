@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/utils";
 import type { AgentSession } from "@/lib/conversation-agent/types";
+import { formatSessionTitle, useConversationAgentStore } from "@/stores/use-conversation-agent-store";
 
 type ChatSessionListProps = {
     sessions: AgentSession[];
@@ -20,6 +21,7 @@ type ChatSessionListProps = {
 export function ChatSessionList({ sessions, activeSessionId, onSelect, onCreate, onDelete, onRename, modelLabel, quotaHint }: ChatSessionListProps) {
     const { t } = useTranslation();
     const { modal } = App.useApp();
+    const sessionRuns = useConversationAgentStore((state) => state.sessionRuns);
     const [renameId, setRenameId] = useState<string | null>(null);
     const [renameValue, setRenameValue] = useState("");
     const renameSession = sessions.find((session) => session.id === renameId);
@@ -62,15 +64,20 @@ export function ChatSessionList({ sessions, activeSessionId, onSelect, onCreate,
                 {sessions.length === 0 ? <div className="px-2 py-6 text-center text-xs text-stone-400 dark:text-stone-500">{t("chat.sidebar.empty")}</div> : null}
                 {sessions.map((session) => {
                     const active = session.id === activeSessionId;
+                    const isRunning = Boolean(sessionRuns[session.id]?.running);
+                    const displayTitle = formatSessionTitle(session.title || "") || t("chat.untitled");
                     return (
                         <div key={session.id} className={cn("group flex items-center gap-1 rounded-lg px-2.5 py-2 transition-colors", active ? "bg-black/[.06] dark:bg-white/[.08]" : "hover:bg-black/[.04] dark:hover:bg-white/[.05]")}>
                             <button
                                 type="button"
-                                className={cn("min-w-0 flex-1 text-left text-[13px] leading-5", active ? "font-medium text-stone-900 dark:text-stone-100" : "text-stone-600 dark:text-stone-300")}
+                                className={cn("flex min-w-0 flex-1 items-center gap-1.5 text-left text-[13px] leading-5", active ? "font-medium text-stone-900 dark:text-stone-100" : "text-stone-600 dark:text-stone-300")}
                                 onClick={() => onSelect(session.id)}
                                 title={session.title || t("chat.untitled")}
                             >
-                                <span className="block truncate">{session.title || t("chat.untitled")}</span>
+                                {isRunning ? (
+                                    <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-blue-500 dark:bg-blue-400" title={t("chat.generating") || "正在生成..."} />
+                                ) : null}
+                                <span className="min-w-0 flex-1 truncate">{displayTitle}</span>
                             </button>
                             <Dropdown
                                 trigger={["click"]}
