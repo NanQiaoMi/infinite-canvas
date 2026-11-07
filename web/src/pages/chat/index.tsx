@@ -75,7 +75,15 @@ export default function ChatPage() {
     const [references, setReferences] = useState<AgentImageRef[]>([]);
     const [turnStartedAt, setTurnStartedAt] = useState(0);
     const [paletteOpen, setPaletteOpen] = useState(false);
-    const [steps, setSteps] = useState<AgentStep[]>([]);
+    const [steps, setStepsState] = useState<AgentStep[]>([]);
+    const currentStepsRef = useRef<AgentStep[]>([]);
+    const setSteps = useCallback((action: AgentStep[] | ((current: AgentStep[]) => AgentStep[])) => {
+        setStepsState((prev) => {
+            const next = typeof action === "function" ? action(prev) : action;
+            currentStepsRef.current = next;
+            return next;
+        });
+    }, []);
     const [exitingTool, setExitingTool] = useState<AgentToolCall | null>(null);
     const exitTimerRef = useRef<number | null>(null);
     const stepsTimerRef = useRef<number | null>(null);
@@ -350,7 +358,14 @@ export default function ChatPage() {
                     signal: controller.signal,
                     references: attachments,
                 });
-                appendMessages(sessionId, result.messages);
+                const finalSteps = currentStepsRef.current.map((s) => (s.status === "running" ? { ...s, status: "done" as const } : s));
+                const messagesWithSteps = result.messages.map((msg, idx) => {
+                    if (msg.role === "assistant" && idx === result.messages.length - 1 && finalSteps.length > 0) {
+                        return { ...msg, steps: finalSteps };
+                    }
+                    return msg;
+                });
+                appendMessages(sessionId, messagesWithSteps);
                 if (result.roundLimitReached) appendMessages(sessionId, [{ id: nanoid(), role: "error", text: t("chat.errors.tooManyRounds"), createdAt: Date.now() }]);
             } catch (error) {
                 const aborted = controller.signal.aborted;
@@ -366,9 +381,8 @@ export default function ChatPage() {
                 setRunning(false);
                 setStreamingText("");
                 setRunningTool(null);
-                setSteps((current) => current.map((step) => (step.status === "running" ? { ...step, status: controller.signal.aborted ? ("error" as const) : ("done" as const) } : step)));
+                setSteps([]);
                 if (stepsTimerRef.current) window.clearTimeout(stepsTimerRef.current);
-                stepsTimerRef.current = window.setTimeout(() => setSteps([]), 1100);
                 setTurnStartedAt(0);
                 useQuotaStore.getState().scheduleRefresh();
             }
@@ -522,7 +536,7 @@ export default function ChatPage() {
                                     </div>
                                 </div>
                             ) : null}
-                            {running && !streamingText && !runningTool ? <ThinkingLine startedAt={turnStartedAt || Date.now()} /> : null}
+                            {running && !streamingText && !runningTool && !steps.length ? <ThinkingLine startedAt={turnStartedAt || Date.now()} /> : null}
                         </div>
                     </div>
                     {/* 底部向上渐变遮罩，使接近输入框的文字柔和淡化，不再生硬切断 */}

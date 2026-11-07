@@ -919,6 +919,10 @@ export default {
         },
         steps: {
             title: "Progress",
+            thinking: "Thinking process",
+            summaryRunning: "Thinking and executing · {{count}} steps",
+            summaryDone: "Ran {{count}} steps{{tools}}",
+            summaryToolsPart: ", invoked {{count}} tools",
             understand: "Understanding request",
             respond: "Writing reply",
             summarize: "Summarizing result",

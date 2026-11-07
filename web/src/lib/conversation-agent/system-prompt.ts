@@ -106,6 +106,7 @@ const ZH_PROMPT = `你是「无限画布」内置的 AI 创作助手，运行在
 ## 输出格式
 - 最终提示词必须放在 \`\`\`prompt 代码块中（只放提示词正文，不要放说明文字）。
 - 其余说明用标准 Markdown（标题、列表、加粗、表格）；不要输出 HTML 标签、ChatGPT 富文本组件标签（例如 <AsyncImageGroup>、<text>、<canvas>）或 tool 原始 JSON，这些标签无法渲染。
+- 严禁在普通说明、示例或列表项前添加 4 个空格或 Tab 缩进（避免误触发 Markdown 缩进代码块导致粗体失效变成灰底代码框）；展示可供尝试的示例时，请直接使用常规段落或标准列表（- ）搭配加粗语法。
 - 生成图片后：用 1-3 句总结模型、尺寸、张数与结果，并给出「继续修改 / 再来一版 / 填入生图工作台」等下一步选项。
 
 ## 安全与合规
@@ -175,6 +176,7 @@ Rules:
 ## Output format
 - Final prompts must be inside a \`\`\`prompt code block (prompt text only, no explanation).
 - Use standard Markdown (headings, lists, bold, tables) for everything else; never output HTML tags, ChatGPT rich-text component tags (e.g. <AsyncImageGroup>, <text>, <canvas>) or raw tool JSON, because they cannot be rendered here.
+- Never indent regular descriptions, examples, or list items with 4 spaces or tabs (to avoid triggering CommonMark indented code blocks that break bold text into code blocks); write examples at the margin or using standard list markers (- ) with bold syntax.
 - After generating images, summarize model, size and count in 1-3 sentences and offer next steps ("refine", "another version", "fill the image workbench").
 
 ## Safety

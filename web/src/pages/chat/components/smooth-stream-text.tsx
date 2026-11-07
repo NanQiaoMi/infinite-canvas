@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Streamdown } from "streamdown";
 
+import { normalizeMarkdownForChat } from "@/lib/conversation-agent/markdown-normalizer";
 import { cn } from "@/lib/utils";
 
 type SmoothStreamTextProps = {
@@ -102,7 +103,7 @@ export function SmoothStreamText({ rawText, running, onComplete }: SmoothStreamT
     return (
         <div className="relative leading-relaxed">
             <Streamdown className="agent-streamdown">
-                {visibleText}
+                {normalizeMarkdownForChat(visibleText)}
             </Streamdown>
             {/* 丝滑尾随光标：输出中常亮/呼吸，完成时优雅隐退 */}
             {running || isActivelyTyping ? (

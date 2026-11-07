@@ -6,12 +6,14 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 
 import { useCopyText } from "@/hooks/use-copy-text";
+import { normalizeMarkdownForChat } from "@/lib/conversation-agent/markdown-normalizer";
 import type { AgentImageRef, AgentMessage, AgentToolCall, AgentToolResult } from "@/lib/conversation-agent/types";
 import { ensureImagePreview, getImagePreviewRevision, resolveImageUrl, subscribeImagePreviews } from "@/services/image-storage";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
 import { cn } from "@/lib/utils";
 
 import { ImageResultGrid } from "./image-result-card";
+import { StepTrail } from "./step-trail";
 
 function PromptCard({ text }: { text: string }) {
     const { t } = useTranslation();
@@ -167,9 +169,12 @@ export function ChatMessage({ message, onRetry }: { message: AgentMessage; onRet
     if (message.role === "assistant") {
         return (
             <div className="agent-message-in w-full space-y-3">
+                {message.steps?.length ? (
+                    <StepTrail steps={message.steps} running={false} defaultExpanded={false} />
+                ) : null}
                 {message.text ? (
                     <Streamdown className="agent-streamdown">
-                        {message.text}
+                        {normalizeMarkdownForChat(message.text)}
                     </Streamdown>
                 ) : null}
                 {message.promptBlocks.length ? (

@@ -26,9 +26,18 @@ export type AgentToolResult =
 
 export type AgentToolCall = { tool: string; arguments: Record<string, unknown> };
 
+export type AgentStepStatus = "running" | "done" | "error" | "correction" | "waiting-retry";
+export type AgentStep = {
+    id: string;
+    kind: "understand" | "respond" | "summarize" | "tool" | "correction" | "retry";
+    label: string;
+    status: AgentStepStatus;
+    detail?: string;
+};
+
 export type AgentMessage =
     | { id: string; role: "user"; text: string; attachments?: AgentImageRef[]; createdAt: number }
-    | { id: string; role: "assistant"; text: string; raw?: string; promptBlocks: string[]; createdAt: number }
+    | { id: string; role: "assistant"; text: string; raw?: string; promptBlocks: string[]; steps?: AgentStep[]; createdAt: number }
     | { id: string; role: "tool"; call: AgentToolCall; result: AgentToolResult; text: string; createdAt: number }
     | { id: string; role: "error"; text: string; createdAt: number };
 

@@ -919,6 +919,10 @@ export default {
         },
         steps: {
             title: "执行步骤",
+            thinking: "思考过程",
+            summaryRunning: "正在思考与执行 · {{count}} 个步骤",
+            summaryDone: "已运行 {{count}} 个步骤{{tools}}",
+            summaryToolsPart: "，调用了 {{count}} 个工具",
             understand: "理解需求",
             respond: "生成回复",
             summarize: "整理结果",
