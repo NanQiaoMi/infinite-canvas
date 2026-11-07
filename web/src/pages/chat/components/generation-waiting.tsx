@@ -31,10 +31,10 @@ export function estimateProgress(elapsedSeconds: number, indexOffset = 0): numbe
 }
 
 /**
- * ChatGPT 官方同款极简生图卡片组件：
- * 彻底移除浑浊彩色渐变与浮夸黄色 AI 星星符号，纯净单色、克制高雅：
- * - 阶段 1（0 ~ 1.5s）：浅灰圆角卡片，左下角「正在思考」（严格还原参考图 2）；
- * - 阶段 2（> 1.5s）：纯白卡片，左上角干净文字「正在勾勒草图」，中心是蓝色的波动波点海浪，右下角「39%」白底蓝字胶囊（严格还原参考图 1）。
+ * ChatGPT 官方同款无框生图卡片：
+ * 彻底去除外框、白色底色与投影，直接在聊天流背景中自然流动呈现：
+ * - 阶段 1（0 ~ 1.5s）：直接在背景中显示「正在思考」；
+ * - 阶段 2（> 1.5s）：左上角干净文字「正在勾勒草图」，中心是蓝色的波动波点海浪，右下角「39%」轻巧胶囊。
  */
 function ChatGptImageWaitingCard({
     index,
@@ -71,16 +71,15 @@ function ChatGptImageWaitingCard({
     return (
         <div
             className={cn(
-                "group relative overflow-hidden rounded-2xl transition-all duration-300 sm:rounded-3xl",
-                isEarlyThinking
-                    ? "border border-stone-200/70 bg-[#f4f4f4] dark:border-stone-800 dark:bg-[#202020]"
-                    : "border border-stone-200/80 bg-white p-4 shadow-[0_2px_14px_rgba(0,0,0,0.03)] sm:p-5 dark:border-stone-800 dark:bg-[#18181b] dark:shadow-[0_2px_14px_rgba(0,0,0,0.25)]",
+                "group relative overflow-hidden transition-all duration-300",
+                // 彻底去除边框、阴影与白色填充卡片，直接融入页面背景
+                "bg-transparent border-0 shadow-none p-0",
             )}
             style={{ aspectRatio: String(aspect) }}
         >
             {isEarlyThinking ? (
-                /* 阶段 1：极简思考态（对应参考图 2） */
-                <div className="absolute inset-0 flex flex-col justify-end p-5">
+                /* 阶段 1：极简思考态，直接在背景中浮现 */
+                <div className="flex h-full w-full flex-col justify-end py-3">
                     <div className="flex items-center gap-1.5 text-sm text-stone-500 dark:text-stone-400">
                         <span>{t("chat.waiting.thinking")}</span>
                         <span className="flex items-center gap-0.5 opacity-70">
@@ -91,10 +90,10 @@ function ChatGptImageWaitingCard({
                     </div>
                 </div>
             ) : (
-                /* 阶段 2：波浪点阵与进度胶囊（严格对齐参考图 1） */
-                <div className="agent-fade-in flex h-full w-full flex-col justify-between">
-                    {/* 左上角干净的阶段文字（无任何杂乱图标与彩色） */}
-                    <div className="flex items-center justify-between">
+                /* 阶段 2：波浪点阵与进度胶囊，直接在背景中展现波浪 */
+                <div className="agent-fade-in flex h-full w-full flex-col justify-between py-1">
+                    {/* 左上角阶段文字，直接在背景中浮现 */}
+                    <div className="flex items-center justify-between pb-1">
                         <span
                             key={phase}
                             className="agent-fade-in text-sm font-medium tracking-tight text-stone-700 dark:text-stone-300"
@@ -108,14 +107,14 @@ function ChatGptImageWaitingCard({
                         ) : null}
                     </div>
 
-                    {/* 纯单色科技蓝波浪点阵（居中起伏流动） */}
-                    <div className="relative min-h-0 flex-1 py-1">
+                    {/* 纯单色科技蓝波浪点阵，直接在背景中起伏流动 */}
+                    <div className="relative min-h-0 flex-1">
                         <ChatGptDotMatrix aspect={aspect} />
                     </div>
 
-                    {/* 右下角极简白底百分比胶囊 */}
-                    <div className="flex items-center justify-end">
-                        <div className="rounded-full border border-stone-200/90 bg-white/95 px-2.5 py-0.5 font-mono text-xs font-semibold tabular-nums text-blue-600 shadow-xs dark:border-stone-700/80 dark:bg-stone-800 dark:text-blue-400">
+                    {/* 右下角极简百分比 */}
+                    <div className="flex items-center justify-end pt-1">
+                        <div className="rounded-full border border-stone-300/80 bg-white/80 px-2.5 py-0.5 font-mono text-xs font-semibold tabular-nums text-blue-600 shadow-xs backdrop-blur-sm dark:border-stone-700/80 dark:bg-stone-850/80 dark:text-blue-400">
                             {progress}%
                         </div>
                     </div>
@@ -144,13 +143,13 @@ export function GenerationWaiting({ call, startedAt }: { call: AgentToolCall; st
 
     return (
         <div className="agent-message-in flex gap-3">
-            {/* 品牌官方棱镜头像：素雅中性灰阶，告别黄色星星 */}
+            {/* 品牌官方棱镜头像：素雅中性灰阶 */}
             <AssistantAvatar />
 
             <div className="min-w-0 flex-1">
                 {/* 顶部微信息：仅在有 prompt 或尺寸时展现极其克制的元数据 */}
                 {prompt || size ? (
-                    <div className="mb-2.5 flex items-center gap-2 text-xs text-stone-400 dark:text-stone-500">
+                    <div className="mb-2 flex items-center gap-2 text-xs text-stone-400 dark:text-stone-500">
                         {size ? (
                             <span className="rounded border border-stone-200/80 bg-stone-100/70 px-1.5 py-0.2 font-mono text-[10px] text-stone-500 dark:border-stone-800 dark:bg-stone-800/60 dark:text-stone-400">
                                 {size}
@@ -164,9 +163,9 @@ export function GenerationWaiting({ call, startedAt }: { call: AgentToolCall; st
                     </div>
                 ) : null}
 
-                {/* 卡片主体：彻底遵循 ChatGPT 极简标准 */}
+                {/* 卡片主体：彻底遵循无框标准，直接在背景中起伏流动 */}
                 <div
-                    className="grid max-w-[460px] gap-3"
+                    className="grid max-w-[420px] gap-3"
                     style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
                 >
                     {Array.from({ length: count }).map((_, index) => (

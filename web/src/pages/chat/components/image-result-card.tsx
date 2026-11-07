@@ -1,6 +1,6 @@
 import { App, Button, Tooltip } from "antd";
 import { saveAs } from "file-saver";
-import { Check, Columns2, Download, FolderPlus, ImageIcon, Layers, Maximize2, SlidersHorizontal, Sparkles } from "lucide-react";
+import { Check, Columns2, Download, FolderPlus, ImageIcon, Layers, Maximize2, SlidersHorizontal } from "lucide-react";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -75,13 +75,44 @@ export function ImageResultCard({
 
     const thumb = previewUrlFor(image.storageKey) || preview;
 
+    // 当图片尚未加载完成时：完全去除外框，波点直接在背景中流动渲染（彻底告别白色卡片框）
+    if (!loaded) {
+        return (
+            <div
+                className="relative flex aspect-square w-full flex-col justify-between overflow-hidden bg-transparent py-1 cursor-pointer"
+                onClick={() => openArtifact(image)}
+            >
+                {/* 隐藏的预加载图片 */}
+                {thumb ? (
+                    <img
+                        src={thumb}
+                        alt={image.prompt.slice(0, 40)}
+                        onLoad={() => setLoaded(true)}
+                        className="hidden"
+                    />
+                ) : null}
+
+                {/* 左上角干净的阶段文字，直接在背景中浮现 */}
+                <div className="flex items-center justify-between pb-1">
+                    <span className="agent-fade-in text-sm font-medium tracking-tight text-stone-700 dark:text-stone-300">
+                        {t("chat.waiting.phaseRender")}
+                    </span>
+                </div>
+
+                {/* 纯单色科技蓝波浪点阵，直接在背景中流动 */}
+                <div className="relative min-h-0 flex-1">
+                    <ChatGptDotMatrix aspect={1} />
+                </div>
+            </div>
+        );
+    }
+
+    // 图片加载完成：图片直接在背景中呈现（无外层白卡片包装框、无下挂工具栏框）
     return (
         <div
             className={cn(
-                "group relative cursor-pointer overflow-hidden rounded-2xl border transition-all duration-300",
-                selected
-                    ? "border-stone-800 ring-2 ring-stone-800/80 shadow-md dark:border-stone-200 dark:ring-stone-200/80"
-                    : "border-stone-200/90 bg-white/70 shadow-xs hover:-translate-y-0.5 hover:border-stone-300 hover:shadow-md dark:border-stone-800 dark:bg-stone-900/50 dark:hover:border-stone-700",
+                "group relative cursor-pointer overflow-hidden rounded-2xl shadow-xs transition-all duration-300 hover:shadow-md",
+                selected && "ring-2 ring-stone-800 dark:ring-stone-200",
             )}
             onClick={() => {
                 if (selectable) {
@@ -92,7 +123,7 @@ export function ImageResultCard({
             }}
             title={selectable ? (selected ? t("chat.compare.deselect") : t("chat.compare.select")) : t("chat.artifact.open")}
         >
-            {/* 多选圈 */}
+            {/* 多选勾选圈 */}
             {selectable || selected ? (
                 <button
                     type="button"
@@ -122,51 +153,60 @@ export function ImageResultCard({
                 </button>
             )}
 
-            <div className="relative flex aspect-square items-center justify-center overflow-hidden bg-stone-100/80 dark:bg-stone-950/40">
-                {thumb ? (
-                    <img
-                        src={thumb}
-                        alt={image.prompt.slice(0, 40)}
-                        onLoad={() => setLoaded(true)}
-                        className={cn(
-                            "h-full w-full object-cover transition-transform duration-500 ease-out group-hover:scale-[1.03]",
-                            loaded ? "agent-developing" : "opacity-0 scale-[0.97] blur-lg",
-                        )}
-                    />
-                ) : null}
+            {/* 图片本体：直接呈现，比例严谨 */}
+            <div className="relative flex aspect-square items-center justify-center overflow-hidden bg-stone-100/60 dark:bg-stone-900/40">
+                <img
+                    src={thumb}
+                    alt={image.prompt.slice(0, 40)}
+                    className="h-full w-full object-cover transition-transform duration-500 ease-out group-hover:scale-[1.02] agent-developing"
+                />
 
-                {/* 显现瞬间的掠影高光（ChatGPT DALL-E 标志性光泽扫掠动效） */}
-                {loaded ? (
-                    <div className="agent-shine-sweep pointer-events-none absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent dark:via-white/20" />
-                ) : null}
+                {/* 显现瞬间的掠影高光 */}
+                <div className="agent-shine-sweep pointer-events-none absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent dark:via-white/20" />
 
-                {!loaded ? (
-                    <div className="absolute inset-0 flex flex-col justify-between p-3.5 bg-white dark:bg-stone-900">
-                        <span className="text-[11px] font-medium text-stone-500 dark:text-stone-400">
-                            {t("chat.waiting.phaseRender")}
-                        </span>
-                        <div className="relative min-h-0 flex-1">
-                            <ChatGptDotMatrix aspect={1} />
-                        </div>
-                    </div>
-                ) : null}
+                {/* 右上角放大预览按钮 */}
                 <span className="absolute right-2 top-2 flex size-6.5 items-center justify-center rounded-full bg-black/45 text-white opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100 shadow-xs">
                     <Maximize2 className="size-3" />
                 </span>
-            </div>
-            <div className="flex items-center justify-between gap-1 px-2.5 py-1.5 border-t border-stone-100 dark:border-stone-800/60">
-                <span className="min-w-0 truncate font-mono text-[10px] tabular-nums text-stone-400 dark:text-stone-500">
-                    {image.width}×{image.height}
-                </span>
-                <div className="flex shrink-0 items-center" onClick={(event) => event.stopPropagation()}>
+
+                {/* 左下角微悬浮尺寸标签（无框，仅在 hover 时优雅微显） */}
+                {image.width && image.height ? (
+                    <span className="absolute bottom-2.5 left-2.5 rounded-full bg-black/45 px-2 py-0.5 font-mono text-[10px] tabular-nums text-white/90 opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100">
+                        {image.width}×{image.height}
+                    </span>
+                ) : null}
+
+                {/* 右下角悬浮玻璃拟态操作栏（直接悬浮在图片上，不占外部空间、不产生下挂框） */}
+                <div
+                    className="absolute bottom-2.5 right-2.5 flex items-center gap-0.5 rounded-full bg-black/55 px-1 py-0.5 text-white opacity-0 backdrop-blur-md transition-opacity duration-200 group-hover:opacity-100 shadow-md dark:bg-black/70"
+                    onClick={(event) => event.stopPropagation()}
+                >
                     <Tooltip title={t("chat.actions.download")}>
-                        <Button size="small" type="text" className="!size-7 !p-0" icon={<Download className="size-3.5" />} onClick={() => void download()} />
+                        <button
+                            type="button"
+                            className="flex size-6 items-center justify-center rounded-full text-white/80 transition hover:bg-white/20 hover:text-white"
+                            onClick={() => void download()}
+                        >
+                            <Download className="size-3.5" />
+                        </button>
                     </Tooltip>
                     <Tooltip title={t("chat.actions.addToAssets")}>
-                        <Button size="small" type="text" className="!size-7 !p-0" icon={<FolderPlus className="size-3.5" />} onClick={() => void saveToAssets()} />
+                        <button
+                            type="button"
+                            className="flex size-6 items-center justify-center rounded-full text-white/80 transition hover:bg-white/20 hover:text-white"
+                            onClick={() => void saveToAssets()}
+                        >
+                            <FolderPlus className="size-3.5" />
+                        </button>
                     </Tooltip>
                     <Tooltip title={t("chat.actions.fillWorkbench")}>
-                        <Button size="small" type="text" className="!size-7 !p-0" icon={<SlidersHorizontal className="size-3.5" />} onClick={fillWorkbench} />
+                        <button
+                            type="button"
+                            className="flex size-6 items-center justify-center rounded-full text-white/80 transition hover:bg-white/20 hover:text-white"
+                            onClick={fillWorkbench}
+                        >
+                            <SlidersHorizontal className="size-3.5" />
+                        </button>
                     </Tooltip>
                 </div>
             </div>
@@ -218,71 +258,77 @@ export function ImageResultGrid({ images }: { images: AgentImageRef[] }) {
                             <span className="font-medium text-[11px]">
                                 {t("chat.compare.selectedCount", { count: selectedIds.length, total: images.length })}
                             </span>
-                            <div className="flex items-center gap-1">
+                            <div className="flex items-center gap-1.5">
                                 <Button
                                     size="small"
                                     type="text"
-                                    className="!h-6 !px-1.5 !text-[11px]"
-                                    onClick={() => {
-                                        if (selectedIds.length === images.length) setSelectedIds([]);
-                                        else setSelectedIds(images.map((img) => img.id));
-                                    }}
+                                    className="!h-6 !px-2 text-xs"
+                                    onClick={() => setSelectedIds(images.map((img) => img.id))}
                                 >
-                                    {selectedIds.length === images.length ? t("chat.compare.clearSelection") : t("chat.compare.selectAll")}
+                                    {t("chat.compare.selectAll")}
                                 </Button>
                                 <Button
                                     size="small"
-                                    type="default"
-                                    className="!h-6 !px-2 !text-[11px]"
-                                    disabled={selectedIds.length < 2}
-                                    icon={<Columns2 className="size-3" />}
-                                    onClick={() => setCompareOpen(true)}
+                                    type="text"
+                                    className="!h-6 !px-2 text-xs"
+                                    onClick={() => {
+                                        setSelectedIds([]);
+                                        setSelecting(false);
+                                    }}
                                 >
-                                    {t("chat.compare.sideBySide")}
+                                    {t("chat.compare.clearSelection")}
                                 </Button>
                                 <Button
                                     size="small"
                                     type="primary"
-                                    className="!h-6 !px-2 !text-[11px]"
+                                    className="!h-6 !px-2.5 text-xs bg-stone-900 text-white hover:bg-stone-800 dark:bg-stone-100 dark:text-stone-900"
                                     disabled={selectedIds.length === 0}
                                     icon={<Layers className="size-3" />}
-                                    onClick={handleBatchReference}
+                                    onClick={() => setCompareOpen(true)}
                                 >
-                                    {t("chat.actions.batchReference")}
-                                </Button>
-                                <Button
-                                    size="small"
-                                    type="text"
-                                    className="!h-6 !px-1.5 !text-[11px]"
-                                    onClick={() => {
-                                        setSelecting(false);
-                                        setSelectedIds([]);
-                                    }}
-                                >
-                                    {t("common.cancel")}
+                                    {t("chat.actions.useAsReference")} ({selectedIds.length})
                                 </Button>
                             </div>
                         </>
                     ) : (
-                        <div className="ml-auto flex items-center gap-1">
-                            <Button
-                                size="small"
-                                type="text"
-                                className="!h-6 !px-1.5 !text-[11px] text-stone-400 hover:text-stone-700 dark:hover:text-stone-200"
-                                icon={<Columns2 className="size-3" />}
-                                onClick={() => {
-                                    setSelecting(true);
-                                    setSelectedIds(images.map((img) => img.id));
-                                }}
-                            >
-                                {t("chat.compare.selectImages")}
-                            </Button>
-                        </div>
+                        <>
+                            <span className="font-medium text-[11px] text-stone-400 dark:text-stone-500">
+                                {t("chat.tools.resultImages", { count: images.length, size: `${images[0]?.width || 1024}×${images[0]?.height || 1024}` })}
+                            </span>
+                            <div className="flex items-center gap-1.5">
+                                <Button
+                                    size="small"
+                                    type="text"
+                                    className="!h-6 !px-2 text-xs text-stone-600 dark:text-stone-300"
+                                    icon={<Columns2 className="size-3" />}
+                                    onClick={() => {
+                                        setSelecting(true);
+                                        setSelectedIds(images.map((img) => img.id));
+                                    }}
+                                >
+                                    {t("chat.compare.selectImages")}
+                                </Button>
+                                <Button
+                                    size="small"
+                                    type="text"
+                                    className="!h-6 !px-2 text-xs text-stone-600 dark:text-stone-300"
+                                    icon={<Layers className="size-3" />}
+                                    onClick={() => setCompareOpen(true)}
+                                >
+                                    {t("chat.compare.sideBySide")}
+                                </Button>
+                            </div>
+                        </>
                     )}
                 </div>
             ) : null}
 
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            <div
+                className="grid gap-3"
+                style={{
+                    gridTemplateColumns: images.length === 1 ? "minmax(0, 420px)" : "repeat(2, minmax(0, 1fr))",
+                }}
+            >
                 {images.map((image) => (
                     <ImageResultCard
                         key={image.id}
@@ -294,16 +340,14 @@ export function ImageResultGrid({ images }: { images: AgentImageRef[] }) {
                 ))}
             </div>
 
-            <ImageCompareModal
-                open={compareOpen}
-                images={compareImages}
-                onClose={() => setCompareOpen(false)}
-                onBatchReference={(batch) => {
-                    requestReferences(batch);
-                    setSelecting(false);
-                    setSelectedIds([]);
-                }}
-            />
+            {compareOpen ? (
+                <ImageCompareModal
+                    open={compareOpen}
+                    onClose={() => setCompareOpen(false)}
+                    images={compareImages}
+                    onBatchReference={handleBatchReference}
+                />
+            ) : null}
         </div>
     );
 }
