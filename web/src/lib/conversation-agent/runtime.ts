@@ -125,8 +125,11 @@ function invalidResult(tool: string, error: string): AgentToolResult {
 export const REFUSAL_PATTERN =
     /(无法|不能|不支持|不具备|没法|没有|未连接|临时聊天|切换到普通|暂时无法|不可用).{0,20}(执行|调用|使用|连接|具备)?(工具|生图|批量生图|图片生成|生成图片|功能|入口)|(?:暂时无法调用|等额度恢复后|额度恢复后|额度已用尽|达到限制|达到上限|额度不足)|resets in \d+\s*(?:minutes?|hours?|seconds?)|limit resets in|reached your .* limit|cannot execute|unable to execute|can't execute|don't have (the )?(ability|access).{0,20}tool|not able to (execute|call).{0,20}tool/i;
 const GENERATION_INTENT_PATTERN = /(生成|出图|画一|画个|画张|改图|修改|编辑|参考图|image|generate|edit|画布|节点|并排|排开)/i;
-const CORRECTION_TEXT =
-    "【系统纠错】你具备工具调用能力，工具由无限画布前端执行，绝对不要说「无法执行工具 / 后端不支持 / 临时聊天 / 未连接画布工具」。请直接按协议输出 ```tool 代码块（严格 JSON）。在画布中生成或排布图片时，调用 canvas_batch_generate_nodes（批量）或 canvas_create_image_node（单张）；在对话中生成调用 generate_image；修改已有图片调用 edit_image。";
+function getCorrectionText(isCanvas: boolean): string {
+    return isCanvas
+        ? "【系统纠错】你具备工具调用能力，工具由无限画布前端执行，绝对不要说「无法执行工具 / 处于临时聊天」。请直接按协议输出 ```tool 代码块（严格 JSON）。在画布中生成或排布图片时，调用 canvas_batch_generate_nodes（批量）或 canvas_create_image_node（单张）。"
+        : "【系统纠错】你具备工具调用能力，工具由无限画布前端执行，绝对不要说「无法执行工具 / 处于临时聊天」。当前处于 AI 对话页面，请直接按协议输出 ```tool 代码块调用 generate_image（支持 count 参数最多 12 张）或 edit_image，严禁调用 canvas_* 画布工具。";
+}
 
 const META_LABEL_PATTERN =
     /^(?:主角|主体|角色|风格|画风|比例|尺寸|画幅|设定|统一设定|种状态|状态|动作|表情|数量|模型|格式|背景|环境|特点|要求|说明|提示词|方案名称|设计要求|五种状态|四种状态|三种状态|不同状态)$/i;
@@ -238,6 +241,22 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
     /** 模型是否已经产出过工具调用；只有一次都没有时才兜底。 */
     let modelToolCallMade = false;
 
+    let totalImagesGenerated = 0;
+    const countImagesFromToolResult = (result: AgentToolResult): number => {
+        if (!result.ok) return 0;
+        if (result.tool === "generate_image" || result.tool === "edit_image") {
+            return typeof result.count === "number" ? result.count : (Array.isArray(result.images) ? result.images.length : 1);
+        }
+        if (result.tool === "canvas_batch_generate_nodes") {
+            return typeof result.count === "number" ? result.count : (Array.isArray(result.nodes) ? result.nodes.length : 1);
+        }
+        if (result.tool === "canvas_create_image_node") {
+            return 1;
+        }
+        return 0;
+    };
+    const requestedImageCount = intent.batchCount || (intentTool ? 1 : 0);
+
     const runIntentTool = async (prompt: string) => {
         const defaultSize = options.buildContext().defaultSize;
         const size = inferImageSizeFromPrompt(prompt, defaultSize);
@@ -280,6 +299,7 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
                 arguments: {
                     prompt,
                     size,
+                    count: 1,
                     ...(format ? { format } : {}),
                     ...(background ? { background } : {}),
                 },
@@ -288,6 +308,7 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
         options.onEvent?.({ type: "tool-start", call });
         const result = await options.executeTool(call, { signal: options.signal, references: options.references });
         options.onEvent?.({ type: "tool-end", call, result });
+        totalImagesGenerated += countImagesFromToolResult(result);
         newMessages.push({ id: nanoid(), role: "tool", call, result, text: serializeToolResult(call, result), createdAt: Date.now() });
         return result;
     };
@@ -345,6 +366,16 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
         const calls = [...turn.toolCalls, ...parsed.toolCalls];
         if (calls.length) modelToolCallMade = true;
 
+        if (
+            totalImagesGenerated >= requestedImageCount &&
+            requestedImageCount > 0 &&
+            calls.some((c) => c.tool === "generate_image" || c.tool === "edit_image" || c.tool === "canvas_batch_generate_nodes" || c.tool === "canvas_create_image_node")
+        ) {
+            // 所有请求的图片已全部生成完毕，大模型违规再次发起生图工具调用，触发熔断，停止生成多余图片并直接总结
+            ensureAssistantSummary(newMessages);
+            return { messages: newMessages, aborted: false, roundLimitReached: false };
+        }
+
         newMessages.push({ id: nanoid(), role: "assistant", text: cleanedDisplayText, raw: turn.content, promptBlocks: parsed.promptBlocks, createdAt: Date.now() });
 
         for (const item of invalid) {
@@ -352,11 +383,13 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
             newMessages.push({ id: nanoid(), role: "tool", call: item.call, result, text: serializeToolResult(item.call, result), createdAt: Date.now() });
         }
         if (!calls.length && !invalid.length) {
+            const hasCanvasTools = options.tools.some((t) => t.name === "canvas_batch_generate_nodes");
+            const isCanvasTarget = hasCanvasTools && (intent.isCanvas || options.buildContext().pageContext === "canvas");
             if (!correctionUsed && refusal && (GENERATION_INTENT_PATTERN.test(lastUserText) || intentTool !== null)) {
                 correctionUsed = true;
                 options.onEvent?.({ type: "correction-start", reason: "refusal" });
                 modelOnlyMessages.push({ role: "assistant", content: turn.content });
-                modelOnlyMessages.push({ role: "user", content: CORRECTION_TEXT });
+                modelOnlyMessages.push({ role: "user", content: getCorrectionText(isCanvasTarget) });
                 continue;
             }
             // 确定性兜底：模型一次工具都没调用（或推诿拒绝）时，按本地意图或推诿修复强制执行一次生成/改图，再让模型总结。
@@ -457,10 +490,16 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
                             subPrompts = subItems.map((item) => item.prompt);
                         }
                         if (subPrompts.length >= 1) {
-                            for (const subPrompt of subPrompts) {
-                                if (options.signal?.aborted) break;
-                                await runIntentTool(subPrompt);
-                            }
+                            await Promise.all(
+                                subPrompts.map(async (subPrompt) => {
+                                    if (options.signal?.aborted) return;
+                                    await runIntentTool(subPrompt);
+                                }),
+                            );
+                            modelOnlyMessages.push({
+                                role: "user",
+                                content: `【系统提示】所有要求的 ${subPrompts.length} 张图片已全部生成完毕并展示在界面中。请在本轮直接给出最终交付总结与设计说明，绝对不要再次调用任何生图工具！`,
+                            });
                             continue;
                         }
                     }
@@ -501,15 +540,69 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
                 tool: "canvas_batch_generate_nodes",
                 arguments: { tasks, layout: intent.layout || "horizontal", run: true },
             }];
+        } else if (!isCanvasTarget) {
+            // 在普通对话模式下，如果大模型误调用了 canvas_* 工具，自动解包并降级为 generate_image，彻底避免 execution_failed 错误与恶性重试循环
+            effectiveCalls = effectiveCalls.flatMap((call) => {
+                if (call.tool === "canvas_batch_generate_nodes") {
+                    const tasks = Array.isArray(call.arguments?.tasks) ? (call.arguments.tasks as Array<{ prompt?: string; size?: string; background?: string }>) : [];
+                    if (tasks.length > 0) {
+                        return tasks.map((task) => ({
+                            tool: "generate_image" as const,
+                            arguments: {
+                                prompt: String(task.prompt || "").trim(),
+                                size: task.size || "1024x1024",
+                                count: 1,
+                                ...(task.background ? { background: task.background } : {}),
+                            },
+                        }));
+                    }
+                } else if (call.tool === "canvas_create_image_node") {
+                    return [{
+                        tool: "generate_image" as const,
+                        arguments: {
+                            prompt: String(call.arguments?.prompt || "").trim(),
+                            size: String(call.arguments?.size || "1024x1024").trim(),
+                            count: 1,
+                            ...(call.arguments?.background ? { background: call.arguments.background } : {}),
+                        },
+                    }];
+                }
+                return [call];
+            });
         }
 
-        for (const call of effectiveCalls) {
-            if (options.signal?.aborted) return { messages: newMessages, aborted: true, roundLimitReached: false };
-            options.onEvent?.({ type: "tool-start", call });
-            const result = await options.executeTool(call, { signal: options.signal, references: options.references });
-            options.onEvent?.({ type: "tool-end", call, result });
-            newMessages.push({ id: nanoid(), role: "tool", call, result, text: serializeToolResult(call, result), createdAt: Date.now() });
-            if (result.ok === false && result.code === "canceled") return { messages: newMessages, aborted: true, roundLimitReached: false };
+        const isAllImageCalls = effectiveCalls.every((c) => c.tool === "generate_image" || c.tool === "edit_image");
+        if (isAllImageCalls && effectiveCalls.length > 1) {
+            effectiveCalls.forEach((call) => options.onEvent?.({ type: "tool-start", call }));
+            const executedResults = await Promise.all(
+                effectiveCalls.map(async (call) => {
+                    const result = await options.executeTool(call, { signal: options.signal, references: options.references });
+                    options.onEvent?.({ type: "tool-end", call, result });
+                    return { call, result };
+                }),
+            );
+            for (const item of executedResults) {
+                totalImagesGenerated += countImagesFromToolResult(item.result);
+                newMessages.push({ id: nanoid(), role: "tool", call: item.call, result: item.result, text: serializeToolResult(item.call, item.result), createdAt: Date.now() });
+                if (item.result.ok === false && item.result.code === "canceled") return { messages: newMessages, aborted: true, roundLimitReached: false };
+            }
+        } else {
+            for (const call of effectiveCalls) {
+                if (options.signal?.aborted) return { messages: newMessages, aborted: true, roundLimitReached: false };
+                options.onEvent?.({ type: "tool-start", call });
+                const result = await options.executeTool(call, { signal: options.signal, references: options.references });
+                options.onEvent?.({ type: "tool-end", call, result });
+                totalImagesGenerated += countImagesFromToolResult(result);
+                newMessages.push({ id: nanoid(), role: "tool", call, result, text: serializeToolResult(call, result), createdAt: Date.now() });
+                if (result.ok === false && result.code === "canceled") return { messages: newMessages, aborted: true, roundLimitReached: false };
+            }
+        }
+
+        if (totalImagesGenerated >= requestedImageCount && requestedImageCount > 0) {
+            modelOnlyMessages.push({
+                role: "user",
+                content: `【系统提示】用户要求的全部图片已成功生成完毕（共 ${totalImagesGenerated} 张）。请在此轮直接输出最终交付总结与设计说明，绝对不要再次调用任何生图工具！`,
+            });
         }
     }
     return { messages: newMessages, aborted: false, roundLimitReached: true };

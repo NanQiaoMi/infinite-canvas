@@ -300,25 +300,21 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
             } catch (err: unknown) {
                 const aborted = controller.signal.aborted;
                 const partial = useConversationAgentStore.getState().streamingText;
-                const isCurrentSession = useConversationAgentStore.getState().activeSessionId === sessionId;
                 if (aborted) {
-                    if (partial.trim() && isCurrentSession) {
+                    if (partial.trim()) {
                         appendMessages(sessionId, [{ id: nanoid(), role: "assistant", text: partial, promptBlocks: [], createdAt: Date.now() }]);
                     }
-                } else if (isCurrentSession) {
+                } else {
                     const raw = err instanceof Error ? err.message : String(err);
                     const errorMsg = isNetworkError(err) ? "网络连接异常，请重试" : raw;
                     appendMessages(sessionId, [{ id: nanoid(), role: "error", text: errorMsg, createdAt: Date.now() }]);
                     message.error(errorMsg);
                 }
             } finally {
-                const isCurrentSession = useConversationAgentStore.getState().activeSessionId === sessionId;
-                if (isCurrentSession) {
-                    setRunning(false);
-                    setRunningTool(null);
-                    setStreamingText("");
-                    controllerRef.current = null;
-                }
+                setRunning(false);
+                setRunningTool(null);
+                setStreamingText("");
+                controllerRef.current = null;
             }
         },
         [input, running, createSession, appendMessages, setStreamingText, setSteps, setRunning, buildContext, callModel, setRunningTool, message],
