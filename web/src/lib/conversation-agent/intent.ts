@@ -28,6 +28,10 @@ export type AgentIntent = {
     usageScene?: string;
     /** 期望生成的批量张数 */
     batchCount?: number;
+    /** 是否涉及画布节点创建与排布操作 */
+    isCanvas?: boolean;
+    /** 排布布局模式：horizontal (横向并排) / vertical (纵向并排) / grid (网格) */
+    layout?: "horizontal" | "vertical" | "grid";
 };
 
 export const CHAT_INTENT: AgentIntent = { kind: "chat", prompt: "", explicit: false, direct: false };
@@ -40,6 +44,9 @@ export const TRANSPARENT_INTENT_PATTERN = /透明底|透明背景|透明图|透�
 
 /** 任务拆解与批量生成意图关键词：命中时标记 decompose 为 true */
 export const DECOMPOSE_INTENT_PATTERN = /拆解|拆分|分解|分层|多图层|图层素材|成套|一套|组图|系列|多角度|不同风格|四格|九宫格|分步生成|批量生成|多素材|并排排开|在画布排开|分步/i;
+
+/** 画布节点生成与排布意图关键词：命中时标记 isCanvas 为 true */
+export const CANVAS_ACTION_PATTERN = /画布|节点|并排|排开|横排|横向排列|竖排|纵排|网格排列|并在画布/i;
 
 /** 画面要素类别：命中越多，越可能是一段完整的生图提示词。 */
 const VISUAL_CATEGORY_PATTERNS: RegExp[] = [
@@ -202,6 +209,8 @@ export function detectAgentIntent(text: string, options?: { hasReferences?: bool
     const isGif = GIF_INTENT_PATTERN.test(input);
     const isTransparent = TRANSPARENT_INTENT_PATTERN.test(input);
     const isDecompose = DECOMPOSE_INTENT_PATTERN.test(input);
+    const isCanvas = CANVAS_ACTION_PATTERN.test(input);
+    const layout = /并排|横排|横向/i.test(input) ? ("horizontal" as const) : /竖排|纵排|纵向/i.test(input) ? ("vertical" as const) : isCanvas ? ("grid" as const) : undefined;
     const usageScene = detectUsageScene(input);
     const batchCount = extractBatchCount(input);
     const colonBody = extractColonBody(input);
@@ -217,8 +226,8 @@ export function detectAgentIntent(text: string, options?: { hasReferences?: bool
         let prompt = colonBody ?? stripped;
         if (!prompt && countVisualCategories(input) >= 2 && input.length >= 24) prompt = input;
         prompt = sanitizeExtractedPrompt(prompt, input);
-        // 如果是拆解任务、或者有明确用途但描述较短，交给模型进行深度分析与拆解规划；若是详细提示词则直接执行
-        const direct = Boolean(colonBody && prompt) || (!isDecompose && (prompt.length >= 24 || countVisualCategories(prompt) >= 2));
+        // 如果是拆解任务、画布排布任务、或者有明确用途但描述较短，交给模型进行深度分析与拆解规划；若是详细提示词则直接执行
+        const direct = Boolean(colonBody && prompt) || (!isDecompose && !isCanvas && (prompt.length >= 24 || countVisualCategories(prompt) >= 2));
         return {
             kind: "generate_image",
             prompt,
@@ -227,6 +236,8 @@ export function detectAgentIntent(text: string, options?: { hasReferences?: bool
             ...(isGif ? { format: "gif" as const } : {}),
             ...(isTransparent ? { background: "transparent" as const } : {}),
             ...(isDecompose ? { decompose: true } : {}),
+            ...(isCanvas ? { isCanvas: true } : {}),
+            ...(layout ? { layout } : {}),
             ...(usageScene ? { usageScene } : {}),
             ...(batchCount ? { batchCount } : {}),
         };

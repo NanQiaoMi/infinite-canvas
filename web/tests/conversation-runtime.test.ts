@@ -35,6 +35,8 @@ function createRunner(options: {
     intent?: AgentIntent;
     references?: AgentImageRef[];
     messages?: AgentMessage[];
+    context?: Partial<AgentContextInput>;
+    tools?: AgentToolDefinition[];
 }) {
     const calls: string[][] = [];
     const toolCalls: AgentToolCall[] = [];
@@ -50,16 +52,25 @@ function createRunner(options: {
         if (options.toolResult) return options.toolResult;
         if (call.tool === "generate_image") return generateSuccess;
         if (call.tool === "edit_image") return editSuccess;
+        if (call.tool === "canvas_batch_generate_nodes") {
+            return {
+                tool: "canvas_batch_generate_nodes",
+                ok: true,
+                count: (call.arguments.items as unknown[])?.length ?? 1,
+                createdNodes: [],
+                layout: (call.arguments.layout as string) ?? "horizontal",
+            };
+        }
         return { tool: "apply_prompt", ok: true, target: "image", prompt: "苹果" };
     };
     const runtimeOptions: AgentRuntimeOptions = {
         locale: "zh",
         messages: options.messages ?? [userMessage],
-        tools: [
+        tools: options.tools ?? [
             { name: "generate_image", description: "生成图片", parameters: { type: "object", properties: { prompt: { type: "string" } }, required: ["prompt"] } },
             { name: "apply_prompt", description: "填入工作台", parameters: { type: "object", properties: { target: { type: "string" }, prompt: { type: "string" } }, required: ["target", "prompt"] } },
         ],
-        buildContext: () => context,
+        buildContext: () => ({ ...context, ...options.context }),
         callModel,
         executeTool,
         onEvent: (event) => options.events?.push(event),
@@ -366,5 +377,41 @@ describe("对话运行时", () => {
         expect(runner.toolCalls[0].tool).toBe("generate_image");
         expect(runner.toolCalls[0].arguments.background).toBe("transparent");
         expect(result.directToolResult?.ok).toBe(true);
+    });
+
+    test("画布批量生成指令识别出 isCanvas、layout 与数量", () => {
+        const intent = detectAgentIntent("在画布上批量生成4张不同风格的赛博朋克猫咪头像，并排排开");
+        expect(intent.isCanvas).toBe(true);
+        expect(intent.decompose).toBe(true);
+        expect(intent.layout).toBe("horizontal");
+        expect(intent.batchCount).toBe(4);
+    });
+
+    test("画布模式下模型未调工具且输出多个编号提示词时兜底调度 canvas_batch_generate_nodes", async () => {
+        const text = "在画布上批量生成4张不同风格的赛博朋克猫咪头像，并排排开";
+        const intent = detectAgentIntent(text);
+        const runner = createRunner({
+            messages: [{ id: "u1", role: "user", text, createdAt: 0 }],
+            turns: [
+                turn(`好的，为你规划4个不同风格的头像：
+1. 霓虹复古赛博猫咪头像，机械义眼，雨夜反光
+2. 废土机甲赛博猫咪头像，战损金属外壳
+3. 故障艺术电绘赛博猫咪头像，多重色彩偏移
+4. 暗黑极简线条赛博猫咪头像，金色发光轮廓`),
+                turn("已经在画布上成功生成4张头像节点。"),
+            ],
+            intent,
+            context: { pageContext: "canvas", toolChannel: "text" },
+            tools: [
+                { name: "generate_image", description: "生成图片", parameters: { type: "object", properties: { prompt: { type: "string" } }, required: ["prompt"] } },
+                { name: "canvas_batch_generate_nodes", description: "批量生成节点", parameters: { type: "object", properties: { tasks: { type: "array" } }, required: ["tasks"] } },
+            ],
+        });
+        const result = await runner.run();
+        expect(runner.toolCalls).toHaveLength(1);
+        expect(runner.toolCalls[0].tool).toBe("canvas_batch_generate_nodes");
+        expect((runner.toolCalls[0].arguments as { tasks: unknown[] }).tasks).toHaveLength(4);
+        expect(runner.toolCalls[0].arguments.layout).toBe("horizontal");
+        expect(result.messages.map((m) => m.role)).toEqual(["assistant", "tool", "assistant"]);
     });
 });

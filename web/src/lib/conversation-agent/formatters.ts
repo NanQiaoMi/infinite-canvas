@@ -4,6 +4,12 @@ import type { AgentToolCall } from "./types";
 
 export function getInitialUnderstandStepLabel(text: string, intent?: AgentIntent): string {
     const t = (key: string, options?: Record<string, unknown>) => i18n.t(`chat.${key}`, options);
+    if (intent?.isCanvas && intent?.decompose) {
+        return `拆解画布任务 · 规划多节点并排排布`;
+    }
+    if (intent?.isCanvas) {
+        return `分析画布需求 · 规划生图节点`;
+    }
     if (intent?.usageScene && intent?.decompose) {
         return `分析用途【${intent.usageScene}】· 拆解图层与规格`;
     }
