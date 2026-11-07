@@ -27,6 +27,7 @@ const app = createApp(config, db);
 const server = Bun.serve({
     port: config.port,
     maxRequestBodySize: config.maxBodyBytes + 1024 * 1024,
+    idleTimeout: Math.min(255, Math.max(30, Math.ceil(config.relayTimeoutMs / 1000))),
     fetch(req, bunServer) {
         return app.fetch(req, bunServer.requestIP(req)?.address ?? "unknown");
     },
