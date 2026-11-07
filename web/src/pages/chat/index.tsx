@@ -24,7 +24,6 @@ import { ArtifactPanel } from "./components/artifact-panel";
 import { CommandPalette } from "./components/command-palette";
 import { StepTrail, type AgentStep } from "./components/step-trail";
 import { GenerationWaiting, ThinkingLine } from "./components/generation-waiting";
-import { AssistantAvatar } from "./components/assistant-avatar";
 import { SmoothStreamText } from "./components/smooth-stream-text";
 
 const modelLabelOf = (option: string) => option.split("::").pop() || option;
@@ -495,7 +494,7 @@ export default function ChatPage() {
                 </div>
                 <div className="relative flex min-h-0 flex-1 flex-col">
                     <div ref={scrollRef} className="hover-scrollbar min-h-0 flex-1 overflow-y-auto">
-                        <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col gap-6 px-4 pb-12 pt-10 sm:px-6">
+                        <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col gap-8 px-4 pb-14 pt-8 sm:px-6">
                             {!activeSession || activeSession.messages.length === 0
                                 ? welcome
                                 : activeSession.messages.map((item, index) => (
@@ -503,12 +502,8 @@ export default function ChatPage() {
                                   ))}
                             {steps.length ? <StepTrail steps={steps} running={running} /> : null}
                             {running && streamingText ? (
-                                <div className="agent-message-in flex gap-3">
-                                    <AssistantAvatar />
-                                    <div className="min-w-0 flex-1">
-                                        <div className="mb-1 text-[11px] font-medium text-stone-400 dark:text-stone-500">{t("chat.streaming")}</div>
-                                        <SmoothStreamText rawText={streamingText} running={running} />
-                                    </div>
+                                <div className="agent-message-in w-full">
+                                    <SmoothStreamText rawText={streamingText} running={running} />
                                 </div>
                             ) : null}
                             {runningTool && (runningTool.tool === "generate_image" || runningTool.tool === "edit_image") ? (
@@ -520,9 +515,8 @@ export default function ChatPage() {
                                 </div>
                             ) : null}
                             {runningTool && runningTool.tool === "apply_prompt" ? (
-                                <div className="agent-fade-in flex gap-3">
-                                    <div className="w-7.5 shrink-0" />
-                                    <div className="flex items-center gap-2 rounded-xl border border-stone-200/80 bg-white/70 px-3 py-1.5 text-xs text-stone-500 shadow-xs dark:border-stone-800 dark:bg-stone-900/40 dark:text-stone-400">
+                                <div className="agent-fade-in w-full">
+                                    <div className="inline-flex items-center gap-2 rounded-xl border border-stone-200/80 bg-white/70 px-3 py-1.5 text-xs text-stone-500 shadow-xs dark:border-stone-800 dark:bg-stone-900/40 dark:text-stone-400">
                                         <span className="inline-block size-2 animate-pulse rounded-full bg-amber-500" />
                                         apply_prompt · {t("chat.tools.names.apply_prompt")}
                                     </div>

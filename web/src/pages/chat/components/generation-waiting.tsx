@@ -4,7 +4,6 @@ import { useTranslation } from "react-i18next";
 import type { AgentToolCall } from "@/lib/conversation-agent/types";
 import { cn } from "@/lib/utils";
 
-import { AssistantAvatar } from "./assistant-avatar";
 import { ChatGptDotMatrix } from "./chatgpt-dot-matrix";
 
 function parseAspect(size: unknown) {
@@ -142,43 +141,38 @@ export function GenerationWaiting({ call, startedAt }: { call: AgentToolCall; st
     const columns = useMemo(() => (count <= 1 ? 1 : 2), [count]);
 
     return (
-        <div className="agent-message-in flex gap-3">
-            {/* 品牌官方棱镜头像：素雅中性灰阶 */}
-            <AssistantAvatar />
-
-            <div className="min-w-0 flex-1">
-                {/* 顶部微信息：仅在有 prompt 或尺寸时展现极其克制的元数据 */}
-                {prompt || size ? (
-                    <div className="mb-2 flex items-center gap-2 text-xs text-stone-400 dark:text-stone-500">
-                        {size ? (
-                            <span className="rounded border border-stone-200/80 bg-stone-100/70 px-1.5 py-0.2 font-mono text-[10px] text-stone-500 dark:border-stone-800 dark:bg-stone-800/60 dark:text-stone-400">
-                                {size}
-                            </span>
-                        ) : null}
-                        {prompt ? (
-                            <span className="min-w-0 truncate" title={prompt}>
-                                {prompt}
-                            </span>
-                        ) : null}
-                    </div>
-                ) : null}
-
-                {/* 卡片主体：彻底遵循无框标准，直接在背景中起伏流动 */}
-                <div
-                    className="grid max-w-[420px] gap-3"
-                    style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
-                >
-                    {Array.from({ length: count }).map((_, index) => (
-                        <ChatGptImageWaitingCard
-                            key={index}
-                            index={index}
-                            total={count}
-                            aspect={aspect}
-                            isEdit={isEdit}
-                            elapsedSeconds={elapsedSeconds}
-                        />
-                    ))}
+        <div className="agent-message-in w-full space-y-2">
+            {/* 顶部微信息：仅在有 prompt 或尺寸时展现极其克制的元数据 */}
+            {prompt || size ? (
+                <div className="mb-2 flex items-center gap-2 text-xs text-stone-400 dark:text-stone-500">
+                    {size ? (
+                        <span className="rounded border border-stone-200/80 bg-stone-100/70 px-1.5 py-0.2 font-mono text-[10px] text-stone-500 dark:border-stone-800 dark:bg-stone-800/60 dark:text-stone-400">
+                            {size}
+                        </span>
+                    ) : null}
+                    {prompt ? (
+                        <span className="min-w-0 truncate" title={prompt}>
+                            {prompt}
+                        </span>
+                    ) : null}
                 </div>
+            ) : null}
+
+            {/* 卡片主体：彻底遵循无框标准，直接在背景中起伏流动 */}
+            <div
+                className="grid max-w-[420px] gap-3"
+                style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
+            >
+                {Array.from({ length: count }).map((_, index) => (
+                    <ChatGptImageWaitingCard
+                        key={index}
+                        index={index}
+                        total={count}
+                        aspect={aspect}
+                        isEdit={isEdit}
+                        elapsedSeconds={elapsedSeconds}
+                    />
+                ))}
             </div>
         </div>
     );
@@ -197,21 +191,18 @@ export function ThinkingLine({ startedAt }: { startedAt: number }) {
     const elapsedSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
 
     return (
-        <div className="agent-fade-in flex gap-3">
-            <AssistantAvatar />
-            <div className="flex flex-1 items-center gap-2 text-sm text-stone-500 dark:text-stone-400">
-                <span className="font-serif text-[13px] tracking-wide">
-                    {t("chat.thinking")}
-                </span>
-                <span className="flex items-center gap-1 text-stone-400 dark:text-stone-600">
-                    <span className="agent-dot" />
-                    <span className="agent-dot" />
-                    <span className="agent-dot" />
-                </span>
-                <span className="ml-auto font-mono text-[10px] tabular-nums text-stone-400 dark:text-stone-500">
-                    {t("chat.waiting.elapsed", { seconds: elapsedSeconds })}
-                </span>
-            </div>
+        <div className="agent-fade-in flex items-center gap-2 py-1 text-sm text-stone-500 dark:text-stone-400">
+            <span className="font-serif text-[13.5px] tracking-wide text-stone-500 dark:text-stone-400">
+                {t("chat.thinking")}
+            </span>
+            <span className="flex items-center gap-1 text-stone-400 dark:text-stone-600 opacity-70">
+                <span className="agent-dot" />
+                <span className="agent-dot" />
+                <span className="agent-dot" />
+            </span>
+            <span className="ml-auto font-mono text-[10px] tabular-nums text-stone-400 dark:text-stone-500">
+                {t("chat.waiting.elapsed", { seconds: elapsedSeconds })}
+            </span>
         </div>
     );
 }

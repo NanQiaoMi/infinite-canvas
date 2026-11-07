@@ -101,7 +101,7 @@ export function SmoothStreamText({ rawText, running, onComplete }: SmoothStreamT
 
     return (
         <div className="relative leading-relaxed">
-            <Streamdown className="agent-streamdown text-sm leading-7 text-stone-800 dark:text-stone-200">
+            <Streamdown className="agent-streamdown">
                 {visibleText}
             </Streamdown>
             {/* 丝滑尾随光标：输出中常亮/呼吸，完成时优雅隐退 */}

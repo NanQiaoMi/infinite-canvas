@@ -463,6 +463,14 @@
 
 .agent-streamdown {
     overflow-wrap: anywhere;
+    font-size: 15.5px;
+    line-height: 1.8;
+    color: #1f1e1d;
+    letter-spacing: -0.01em;
+}
+
+.dark .agent-streamdown {
+    color: #e8e6df;
 }
 
 .agent-streamdown > :first-child {
@@ -471,6 +479,185 @@
 
 .agent-streamdown > :last-child {
     margin-bottom: 0;
+}
+
+/* Claude 风格段落间距 */
+.agent-streamdown p {
+    margin-top: 0;
+    margin-bottom: 0.9em;
+    line-height: 1.8;
+}
+
+.agent-streamdown p:last-child {
+    margin-bottom: 0;
+}
+
+/* Claude 风格标题排版体系 */
+.agent-streamdown h1 {
+    font-size: 1.45rem;
+    font-weight: 600;
+    line-height: 1.35;
+    letter-spacing: -0.015em;
+    color: #141312;
+    margin-top: 1.8em;
+    margin-bottom: 0.65em;
+}
+
+.dark .agent-streamdown h1 {
+    color: #f5f4f0;
+}
+
+.agent-streamdown h2 {
+    font-size: 1.22rem;
+    font-weight: 600;
+    line-height: 1.4;
+    letter-spacing: -0.01em;
+    color: #141312;
+    margin-top: 1.55em;
+    margin-bottom: 0.55em;
+}
+
+.dark .agent-streamdown h2 {
+    color: #f5f4f0;
+}
+
+.agent-streamdown h3 {
+    font-size: 1.08rem;
+    font-weight: 600;
+    line-height: 1.45;
+    color: #1f1e1d;
+    margin-top: 1.35em;
+    margin-bottom: 0.45em;
+}
+
+.dark .agent-streamdown h3 {
+    color: #edece8;
+}
+
+.agent-streamdown h4,
+.agent-streamdown h5,
+.agent-streamdown h6 {
+    font-size: 1rem;
+    font-weight: 600;
+    line-height: 1.5;
+    color: #2e2b27;
+    margin-top: 1.15em;
+    margin-bottom: 0.35em;
+}
+
+.dark .agent-streamdown h4,
+.dark .agent-streamdown h5,
+.dark .agent-streamdown h6 {
+    color: #e2e0da;
+}
+
+/* Claude 风格引用块（标志性左侧细线与沉静灰阶） */
+.agent-streamdown blockquote {
+    margin-top: 0.6em;
+    margin-bottom: 0.85em;
+    padding-left: 1rem;
+    border-left: 2px solid #dcdad4;
+    color: #6b6965;
+    font-style: normal;
+}
+
+.dark .agent-streamdown blockquote {
+    border-left-color: #3d3a36;
+    color: #a6a39d;
+}
+
+.agent-streamdown blockquote > p {
+    margin-bottom: 0.35em;
+}
+
+.agent-streamdown blockquote > p:last-child {
+    margin-bottom: 0;
+}
+
+/* 强调与加粗 */
+.agent-streamdown strong,
+.agent-streamdown b {
+    font-weight: 600;
+    color: #141312;
+}
+
+.dark .agent-streamdown strong,
+.dark .agent-streamdown b {
+    color: #f5f4f0;
+}
+
+/* 列表系统 */
+.agent-streamdown ul {
+    list-style-type: disc;
+    margin-top: 0.45em;
+    margin-bottom: 0.85em;
+    padding-left: 1.35em;
+}
+
+.agent-streamdown ol {
+    list-style-type: decimal;
+    margin-top: 0.45em;
+    margin-bottom: 0.85em;
+    padding-left: 1.35em;
+}
+
+.agent-streamdown li {
+    margin-top: 0.25em;
+    margin-bottom: 0.3em;
+    line-height: 1.75;
+}
+
+.agent-streamdown li::marker {
+    color: #9c9993;
+}
+
+.dark .agent-streamdown li::marker {
+    color: #78756f;
+}
+
+/* 分割线 */
+.agent-streamdown hr {
+    border: none;
+    border-top: 1px solid #e7e5df;
+    margin: 1.6em 0;
+}
+
+.dark .agent-streamdown hr {
+    border-top-color: #2c2a27;
+}
+
+/* 表格排版 */
+.agent-streamdown table {
+    width: 100%;
+    margin-top: 0.85em;
+    margin-bottom: 1.15em;
+    border-collapse: collapse;
+    font-size: 0.92rem;
+    line-height: 1.6;
+}
+
+.agent-streamdown th {
+    padding: 0.55rem 0.85rem;
+    font-weight: 600;
+    text-align: left;
+    border-bottom: 2px solid #e5e3dc;
+    background: #f6f5f0;
+    color: #1f1e1d;
+}
+
+.dark .agent-streamdown th {
+    border-bottom-color: #383531;
+    background: #23211f;
+    color: #e8e6df;
+}
+
+.agent-streamdown td {
+    padding: 0.55rem 0.85rem;
+    border-bottom: 1px solid #ebe9e3;
+}
+
+.dark .agent-streamdown td {
+    border-bottom-color: #2c2a27;
 }
 
 .agent-streamdown [data-streamdown="code-block"] {

@@ -12,7 +12,6 @@ import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
 import { cn } from "@/lib/utils";
 
 import { ImageResultGrid } from "./image-result-card";
-import { AssistantAvatar } from "./assistant-avatar";
 
 function PromptCard({ text }: { text: string }) {
     const { t } = useTranslation();
@@ -127,31 +126,28 @@ function ToolMessage({ message }: { message: Extract<AgentMessage, { role: "tool
     const { t } = useTranslation();
     const [expanded, setExpanded] = useState(false);
     return (
-        <div className="agent-message-in flex gap-3">
-            <div className="w-7.5 shrink-0" />
-            <div className="min-w-0 flex-1">
-                <button
-                    type="button"
-                    className="flex w-full items-center gap-2.5 rounded-xl border border-stone-200/90 bg-white/70 px-3.5 py-2 text-left text-xs shadow-xs transition hover:bg-white hover:border-stone-300 dark:border-stone-800 dark:bg-stone-900/40 dark:hover:bg-stone-900/70 dark:hover:border-stone-700"
-                    onClick={() => setExpanded((value) => !value)}
-                >
-                    <span className={cn("flex size-4 items-center justify-center rounded-full text-[10px] font-bold font-mono", message.result.ok ? "bg-emerald-500/10 text-emerald-600 dark:bg-emerald-400/15 dark:text-emerald-400" : "bg-red-500/10 text-red-500")}>
-                        {message.result.ok ? "✓" : "×"}
-                    </span>
-                    <span className="shrink-0 font-medium text-stone-700 dark:text-stone-200">{toolLabel(message.call.tool, t)}</span>
-                    <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-stone-400 dark:text-stone-500">{toolArgsSummary(message.call)}</span>
-                    <span className="shrink-0 font-mono text-[10px] tabular-nums text-stone-400 dark:text-stone-500">{toolResultSummary(message.result, t)}</span>
-                    <ChevronDown className={cn("size-3.5 shrink-0 text-stone-400 transition-transform duration-200", expanded && "rotate-180")} />
-                </button>
-                <div className={cn("agent-collapse", expanded && "is-open")}>
-                    <div>
-                        <pre className="mt-1.5 max-h-56 overflow-auto rounded-xl border border-stone-200/80 bg-stone-50 px-3 py-2 font-mono text-[10.5px] leading-5 text-stone-500 hover-scrollbar dark:border-stone-800 dark:bg-stone-900/60 dark:text-stone-400">
-                            {JSON.stringify(message.call.arguments, null, 2)}
-                        </pre>
-                    </div>
+        <div className="agent-message-in w-full space-y-2">
+            <button
+                type="button"
+                className="flex w-full items-center gap-2.5 rounded-xl border border-stone-200/80 bg-white/60 px-3.5 py-2 text-left text-xs shadow-none transition hover:bg-white hover:border-stone-300 dark:border-stone-800 dark:bg-stone-900/40 dark:hover:bg-stone-900/70"
+                onClick={() => setExpanded((value) => !value)}
+            >
+                <span className={cn("flex size-4 items-center justify-center rounded-full text-[10px] font-bold font-mono", message.result.ok ? "bg-emerald-500/10 text-emerald-600 dark:bg-emerald-400/15 dark:text-emerald-400" : "bg-red-500/10 text-red-500")}>
+                    {message.result.ok ? "✓" : "×"}
+                </span>
+                <span className="shrink-0 font-medium text-stone-700 dark:text-stone-200">{toolLabel(message.call.tool, t)}</span>
+                <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-stone-400 dark:text-stone-500">{toolArgsSummary(message.call)}</span>
+                <span className="shrink-0 font-mono text-[10px] tabular-nums text-stone-400 dark:text-stone-500">{toolResultSummary(message.result, t)}</span>
+                <ChevronDown className={cn("size-3.5 shrink-0 text-stone-400 transition-transform duration-200", expanded && "rotate-180")} />
+            </button>
+            <div className={cn("agent-collapse", expanded && "is-open")}>
+                <div>
+                    <pre className="mt-1.5 max-h-56 overflow-auto rounded-xl border border-stone-200/80 bg-stone-50 px-3 py-2 font-mono text-[10.5px] leading-5 text-stone-500 hover-scrollbar dark:border-stone-800 dark:bg-stone-900/60 dark:text-stone-400">
+                        {JSON.stringify(message.call.arguments, null, 2)}
+                    </pre>
                 </div>
-                <ToolResultBody result={message.result} />
             </div>
+            <ToolResultBody result={message.result} />
         </div>
     );
 }
@@ -161,7 +157,7 @@ export function ChatMessage({ message, onRetry }: { message: AgentMessage; onRet
     if (message.role === "user") {
         return (
             <div className="agent-message-in flex flex-col items-end">
-                <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-tr-md bg-stone-200/85 px-4.5 py-3 text-sm leading-relaxed text-stone-900 shadow-[0_1px_2px_rgba(0,0,0,0.03)] dark:bg-stone-800 dark:text-stone-100">
+                <div className="max-w-[82%] whitespace-pre-wrap break-words rounded-2xl bg-[#f0eee6] px-4.5 py-2.5 text-[15px] leading-relaxed text-stone-900 shadow-none dark:bg-[#2b2926] dark:text-stone-100">
                     {message.text}
                 </div>
                 {message.attachments?.length ? <UserAttachments images={message.attachments} /> : null}
@@ -170,25 +166,25 @@ export function ChatMessage({ message, onRetry }: { message: AgentMessage; onRet
     }
     if (message.role === "assistant") {
         return (
-            <div className="agent-message-in flex gap-3">
-                <AssistantAvatar />
-                <div className="min-w-0 flex-1 space-y-2.5">
-                    {message.text ? <Streamdown className="agent-streamdown text-sm leading-7 text-stone-800 dark:text-stone-200">{message.text}</Streamdown> : null}
-                    {message.promptBlocks.length ? (
-                        <div className="max-w-xl space-y-2">
-                            {message.promptBlocks.map((text, index) => (
-                                <PromptCard key={`${message.id}:prompt:${index}`} text={text} />
-                            ))}
-                        </div>
-                    ) : null}
-                </div>
+            <div className="agent-message-in w-full space-y-3">
+                {message.text ? (
+                    <Streamdown className="agent-streamdown">
+                        {message.text}
+                    </Streamdown>
+                ) : null}
+                {message.promptBlocks.length ? (
+                    <div className="max-w-xl space-y-2 pt-1">
+                        {message.promptBlocks.map((text, index) => (
+                            <PromptCard key={`${message.id}:prompt:${index}`} text={text} />
+                        ))}
+                    </div>
+                ) : null}
             </div>
         );
     }
     if (message.role === "tool") return <ToolMessage message={message} />;
     return (
-        <div className="agent-message-in flex gap-3">
-            <div className="w-7.5 shrink-0" />
+        <div className="agent-message-in w-full">
             <div className="flex max-w-[85%] items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50/70 px-3.5 py-2.5 text-xs leading-5 text-amber-700 shadow-xs dark:border-amber-950 dark:bg-amber-950/20 dark:text-amber-300">
                 <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
                 <div className="min-w-0 flex-1 break-words">
