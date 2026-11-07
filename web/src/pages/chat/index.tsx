@@ -1,7 +1,7 @@
 import { App, Button, Drawer, Spin } from "antd";
 import { ArrowRight, ImageIcon, Menu, PenLine, Sparkles, WandSparkles } from "lucide-react";
 import { nanoid } from "nanoid";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import i18n from "@/i18n";
@@ -28,7 +28,7 @@ import { SmoothStreamText } from "./components/smooth-stream-text";
 
 const modelLabelOf = (option: string) => option.split("::").pop() || option;
 import { formatAgentToolStepLabel, getInitialUnderstandStepLabel } from "@/lib/conversation-agent/formatters";
-import { detectAgentIntent } from "@/lib/conversation-agent/intent";
+import { detectAgentIntent, type AgentIntent } from "@/lib/conversation-agent/intent";
 
 const NETWORK_ERROR_PATTERN = /network error|failed to fetch|load failed|networkerror|econnreset|socket hang up|fetch failed/i;
 const isNetworkError = (error: unknown) => NETWORK_ERROR_PATTERN.test(error instanceof Error ? error.message : String(error));
@@ -338,7 +338,6 @@ export default function ChatPage() {
                             setStreamingText("");
                             if (exitTimerRef.current) window.clearTimeout(exitTimerRef.current);
                             setExitingTool(null);
-                            setCompletedToolResult(null);
                             setRunningTool(event.call);
                             setSteps((current) => {
                                 const next = current.map((step) =>

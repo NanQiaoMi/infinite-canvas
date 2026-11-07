@@ -367,21 +367,25 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
                     if (intent.decompose || (intent.batchCount && intent.batchCount > 1) || parsed.promptBlocks.length > 1) {
                         const count = intent.batchCount || (parsed.promptBlocks.length > 1 ? parsed.promptBlocks.length : 4);
                         const layout = intent.layout || "horizontal";
-                        const historyPromptBlocks = [...options.messages].reverse().find((m) => m.role === "assistant" && Array.isArray(m.promptBlocks) && m.promptBlocks.length >= 2)?.promptBlocks;
+                        const prevAssistant = [...options.messages].reverse().find(
+                            (m): m is Extract<AgentMessage, { role: "assistant" }> =>
+                                m.role === "assistant" && Array.isArray(m.promptBlocks) && m.promptBlocks.length >= 2,
+                        );
+                        const historyPromptBlocks = prevAssistant?.promptBlocks;
                         let tasks: Array<{ prompt: string; title: string; size: string; background?: "transparent" }>;
                         if (parsed.promptBlocks.length >= 2) {
-                            tasks = parsed.promptBlocks.slice(0, count).map((p, idx) => ({
+                            tasks = parsed.promptBlocks.slice(0, count).map((p: string, idx: number) => ({
                                 prompt: p,
                                 title: `方案 ${idx + 1}`,
                                 size: inferImageSizeFromPrompt(p, "1024x1024"),
-                                ...(intent.background ? { background: intent.background } : {}),
+                                ...(intent.background === "transparent" ? { background: "transparent" as const } : {}),
                             }));
                         } else if (historyPromptBlocks && historyPromptBlocks.length >= 2) {
-                            tasks = historyPromptBlocks.slice(0, count).map((p, idx) => ({
+                            tasks = historyPromptBlocks.slice(0, count).map((p: string, idx: number) => ({
                                 prompt: p,
                                 title: `方案 ${idx + 1}`,
                                 size: inferImageSizeFromPrompt(p, "1024x1024"),
-                                ...(intent.background ? { background: intent.background } : {}),
+                                ...(intent.background === "transparent" ? { background: "transparent" as const } : {}),
                             }));
                         } else {
                             const subItems = extractNumberedPrompts(parsed.displayText, count, intent.prompt);
@@ -389,7 +393,7 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
                                 prompt: item.prompt,
                                 title: item.title,
                                 size: inferImageSizeFromPrompt(item.prompt, "1024x1024"),
-                                ...(intent.background ? { background: intent.background } : {}),
+                                ...(intent.background === "transparent" ? { background: "transparent" as const } : {}),
                             }));
                         }
                         const call: AgentToolCall = {
@@ -434,7 +438,11 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
                     const isBatchChat = (intent.decompose || (intent.batchCount && intent.batchCount > 1)) && intentTool === "generate_image";
                     if (isBatchChat) {
                         const count = intent.batchCount || (parsed.promptBlocks.length > 1 ? parsed.promptBlocks.length : 3);
-                        const historyPromptBlocks = [...options.messages].reverse().find((m) => m.role === "assistant" && Array.isArray(m.promptBlocks) && m.promptBlocks.length >= 2)?.promptBlocks;
+                        const prevAssistant = [...options.messages].reverse().find(
+                            (m): m is Extract<AgentMessage, { role: "assistant" }> =>
+                                m.role === "assistant" && Array.isArray(m.promptBlocks) && m.promptBlocks.length >= 2,
+                        );
+                        const historyPromptBlocks = prevAssistant?.promptBlocks;
                         let subPrompts: string[] = [];
                         if (parsed.promptBlocks.length >= 2) {
                             subPrompts = parsed.promptBlocks.slice(0, count);

@@ -7,6 +7,10 @@ description: Implemented changes that still need manual verification
 
 The current release needs manual verification in these areas:
 
+- AI 对话页面运行时稳定性与图片卡片渲染：
+  1. 页面正常加载无 ReferenceError：进入 `/chat` 页面或刷新时，控制台与页面绝不再弹出 `useMemo is not defined` 或任何 React 运行时引用错误；
+  2. 聊天历史图片卡片正常渲染：历史会话中包含已生成图片的结果卡片（`ImageResultCard`）时，自适应比例与按钮操作均能正常计算渲染，不发生白屏崩溃。
+
 - 批量生图提示词提炼、防误加表情包场景与设计稿继承验证：
   1. 萌宠生图不误加表情包场景：输入「生成一个大大撒娇的橘猫 不同状态的」，AI 助手不会自动注入「微信表情包」业务场景要求，仅作为高品质萌宠插画/摄影对待，除非用户明确输入「表情包」；
   2. 纯数量与动作指令干净剥离：输入「再生成一次，共5张」，系统精准提取 `batchCount: 5`，并彻底剥离「一次，共5张」等前缀，送入生图接口的提示词绝对不残留「一次，共5张，主角：...」等畸变前缀；
