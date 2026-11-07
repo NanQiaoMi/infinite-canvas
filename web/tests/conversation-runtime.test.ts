@@ -414,4 +414,45 @@ describe("对话运行时", () => {
         expect(runner.toolCalls[0].arguments.layout).toBe("horizontal");
         expect(result.messages.map((m) => m.role)).toEqual(["assistant", "tool", "assistant"]);
     });
+
+    test("复杂复合指令准确提取提示词、背景模式与套数数量", () => {
+        const text = "在画布上生成一套 3 个透明底游戏魔法药水图标（红色生命、蓝色魔法、绿色体力）";
+        const intent = detectAgentIntent(text);
+        expect(intent.prompt).toBe("游戏魔法药水图标（红色生命、蓝色魔法、绿色体力）");
+        expect(intent.background).toBe("transparent");
+        expect(intent.batchCount).toBe(3);
+        expect(intent.decompose).toBe(true);
+    });
+
+    test("普通对话 /chat 下拆解多素材请求在兜底时为每款素材调用 generate_image 并传入 transparent", async () => {
+        const text = "在画布上生成一套 3 个透明底游戏魔法药水图标（红色生命、蓝色魔法、绿色体力）";
+        const intent = detectAgentIntent(text);
+        const runner = createRunner({
+            messages: [{ id: "u1", role: "user", text, createdAt: 0 }],
+            turns: [
+                turn(`这套游戏魔法药水图标将采用统一的奇幻 RPG 道具设计语言：
+红色生命药水：红宝石色药液，生命恢复符文。
+蓝色魔法药水：幽蓝色药液，魔力流动与星芒特效。
+绿色体力药水：翠绿色药液，自然藤蔓与能量光效。
+统一采用 1:1 图标构图、透明背景。`),
+                turn("已经为你全部生成完成！"),
+            ],
+            intent,
+            context: { pageContext: "chat", toolChannel: "text" },
+            tools: [
+                { name: "generate_image", description: "生成图片", parameters: { type: "object", properties: { prompt: { type: "string" } }, required: ["prompt"] } },
+                { name: "apply_prompt", description: "填入工作台", parameters: { type: "object", properties: { target: { type: "string" }, prompt: { type: "string" } }, required: ["target", "prompt"] } },
+            ],
+        });
+        const result = await runner.run();
+        expect(runner.toolCalls).toHaveLength(3);
+        expect(runner.toolCalls.every((c) => c.tool === "generate_image")).toBe(true);
+        expect(runner.toolCalls.every((c) => c.arguments.background === "transparent")).toBe(true);
+        // 提示词必须准确包含对应药水，绝不能是 "，风格方案 1" 这种错词
+        expect(runner.toolCalls[0].arguments.prompt).toContain("红色生命药水");
+        expect(runner.toolCalls[0].arguments.prompt).not.toContain("风格方案");
+        expect(runner.toolCalls[1].arguments.prompt).toContain("蓝色魔法药水");
+        expect(runner.toolCalls[2].arguments.prompt).toContain("绿色体力药水");
+        expect(result.messages.map((m) => m.role)).toEqual(["assistant", "tool", "tool", "tool", "assistant"]);
+    });
 });

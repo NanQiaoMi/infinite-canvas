@@ -271,14 +271,14 @@ export default function ChatPage() {
             setStreamingText("");
             setTurnStartedAt(Date.now());
             if (stepsTimerRef.current) window.clearTimeout(stepsTimerRef.current);
-            const intent = detectAgentIntent(text, { hasReferences: Boolean(attachments?.length) });
+            const history = useConversationAgentStore.getState().sessions.find((session) => session.id === sessionId)?.messages ?? [];
+            const intent = detectAgentIntent(text, { hasReferences: Boolean(attachments?.length), history });
             const initialLabel = getInitialUnderstandStepLabel(text, intent);
             setSteps([{ id: "understand", kind: "understand", label: initialLabel, status: "running" }]);
             setRunning(true);
             const controller = new AbortController();
             controllerRef.current = controller;
             try {
-                const history = useConversationAgentStore.getState().sessions.find((session) => session.id === sessionId)?.messages ?? [];
                 const result = await runAgentTurn({
                     locale: agentLocaleOf(i18n.language),
                     messages: history,
@@ -353,12 +353,23 @@ export default function ChatPage() {
                     references: attachments,
                 });
                 const finalSteps = currentStepsRef.current.map((s) => (s.status === "running" ? { ...s, status: "done" as const } : s));
+                const lastAssistantIdx = result.messages.map((m) => m.role).lastIndexOf("assistant");
                 const messagesWithSteps = result.messages.map((msg, idx) => {
-                    if (msg.role === "assistant" && idx === result.messages.length - 1 && finalSteps.length > 0) {
+                    if (msg.role === "assistant" && idx === lastAssistantIdx && finalSteps.length > 0) {
                         return { ...msg, steps: finalSteps };
                     }
                     return msg;
                 });
+                if (lastAssistantIdx === -1 && finalSteps.length > 0) {
+                    messagesWithSteps.push({
+                        id: nanoid(),
+                        role: "assistant",
+                        text: "任务已完成。",
+                        steps: finalSteps,
+                        promptBlocks: [],
+                        createdAt: Date.now(),
+                    });
+                }
                 appendMessages(sessionId, messagesWithSteps);
                 if (result.roundLimitReached) appendMessages(sessionId, [{ id: nanoid(), role: "error", text: t("chat.errors.tooManyRounds"), createdAt: Date.now() }]);
             } catch (error) {
@@ -494,7 +505,7 @@ export default function ChatPage() {
 
     return (
         <div className="agent-page-in flex h-full min-h-0 bg-[#faf9f5] text-stone-900 dark:bg-[#1c1b19] dark:text-stone-100">
-            <aside className="hidden w-[252px] shrink-0 border-r border-stone-200/70 bg-[#f2efe8] lg:block dark:border-stone-800 dark:bg-[#171614]">{sessionList}</aside>
+            <aside className="hidden w-[276px] shrink-0 border-r border-stone-200/70 bg-[#f2efe8] lg:block dark:border-stone-800 dark:bg-[#171614]">{sessionList}</aside>
             <main className="flex min-w-0 flex-1 flex-col">
                 <div className="flex h-12 shrink-0 items-center gap-2 px-3 lg:hidden">
                     <Button size="small" type="text" icon={<Menu className="size-4" />} onClick={() => setListOpen(true)} />

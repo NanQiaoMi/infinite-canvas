@@ -154,7 +154,7 @@ function failure(tool: string, code: AgentToolErrorCode, error: string): AgentTo
 export async function executeCanvasAgentTool(call: AgentToolCall): Promise<AgentToolResult> {
     const canvasContext = useAgentStore.getState().canvasContext;
     if (!canvasContext) {
-        return failure(call.tool, "execution_failed", "当前未处于有效画布工程中，请先打开或进入画布页面");
+        return failure(call.tool, "execution_failed", "当前未处于无限画布工程中。请进入顶部导航「我的画布」打开任意画布，并在右侧画布助手中执行本指令。");
     }
 
     const definition = CANVAS_AGENT_TOOLS.find((t) => t.name === call.tool);

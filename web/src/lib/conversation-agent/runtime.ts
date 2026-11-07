@@ -63,28 +63,46 @@ const CORRECTION_TEXT =
     "【系统纠错】你具备工具调用能力，工具由无限画布前端执行，绝对不要说「无法执行工具 / 后端不支持 / 临时聊天 / 未连接画布工具」。请直接按协议输出 ```tool 代码块（严格 JSON）。在画布中生成或排布图片时，调用 canvas_batch_generate_nodes（批量）或 canvas_create_image_node（单张）；在对话中生成调用 generate_image；修改已有图片调用 edit_image。";
 
 function extractNumberedPrompts(text: string, count: number, basePrompt: string): Array<{ title: string; prompt: string }> {
+    const cleanBase = basePrompt.replace(/[（(][^）)]+[）)]/g, "").trim();
     const lines = text.split("\n");
     const items: Array<{ title: string; prompt: string }> = [];
-    const itemPattern = /^(?:[0-9]+[、.｜|\s]+|\*+\s*[0-9]+[、.｜|\s]+|\*+)?(?:(?:\d+[\s.、|｜]|风格\d+[:：]|方案\d+[:：])?\s*\**([^*：:\n]+)\**\s*[：:]\s*(.+))$/;
+    const itemPattern =
+        /^(?:[\d+一二三四五六七八九]+[\s.、|｜:：]+|[*•\-—~#]+\s*|[❤️💙💚💛💜🧡🤍🖤✨🎨📦🔍]+\s*)?(?:(?:方案|风格|图层|素材|项目|版本)?[\d+一二三四五六七八九]+[:：\s.、]?\s*)?[*]*([^*：:\n—\-]{2,20})[*]*\s*[：:—\-]\s*(.+)$/;
+
     for (const line of lines) {
         const trimmed = line.trim();
         const match = trimmed.match(itemPattern);
         if (match) {
-            const rawTitle = match[1].replace(/^\d+[\s.、|｜]+/, "").trim();
+            const rawTitle = match[1].replace(/^[\d+一二三四五六七八九]+[\s.、|｜]+/, "").trim();
             const detail = match[2].trim();
-            const prompt = basePrompt ? `${basePrompt}，${rawTitle}：${detail}` : `${rawTitle}：${detail}`;
-            items.push({ title: rawTitle || `素材 ${items.length + 1}`, prompt });
+            if (rawTitle && detail && detail.length >= 4) {
+                const prompt = cleanBase ? `${cleanBase}，${rawTitle}：${detail}` : `${rawTitle}：${detail}`;
+                items.push({ title: rawTitle || `素材 ${items.length + 1}`, prompt });
+            }
         }
         if (items.length >= count) break;
     }
     if (items.length >= 2) return items;
 
+    // 如果文本中未提取到编号项，但用户提示词中包含括号分项（如「红色生命、蓝色魔法、绿色体力」）
+    const parenMatch = basePrompt.match(/[（(]([^）)]+)[）)]/);
+    if (parenMatch) {
+        const parts = parenMatch[1].split(/[、,，\s/|｜]+/).map((s) => s.trim()).filter(Boolean);
+        if (parts.length >= 2) {
+            return parts.slice(0, count).map((part) => ({
+                title: part,
+                prompt: cleanBase ? `${cleanBase}，${part}：精致高光，细节清晰，独立单体` : part,
+            }));
+        }
+    }
+
     const result: Array<{ title: string; prompt: string }> = [];
     const targetCount = Math.max(2, Math.min(8, count || 4));
+    const prefix = cleanBase || basePrompt;
     for (let i = 0; i < targetCount; i += 1) {
         result.push({
             title: `方案 ${i + 1}`,
-            prompt: `${basePrompt}，风格方案 ${i + 1}`,
+            prompt: prefix ? `${prefix}，方案 ${i + 1}` : `设计方案 ${i + 1}`,
         });
     }
     return result;
@@ -94,7 +112,7 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
     const maxRounds = Math.max(1, options.maxRounds ?? 8);
     const lastUserText = [...options.messages].reverse().find((message) => message.role === "user")?.text ?? "";
     // 页面未显式传 intent 时，用最后一条 user 消息在本地自动识别：/chat 页面无需改动即可获得 direct 执行与兜底。
-    const intent = options.intent ?? detectAgentIntent(lastUserText, { hasReferences: (options.references?.length ?? 0) > 0 });
+    const intent = options.intent ?? detectAgentIntent(lastUserText, { hasReferences: (options.references?.length ?? 0) > 0, history: options.messages });
     /** 生成/改图意图对应的工具名；chat / apply_prompt 为 null。 */
     const intentTool = intent.kind === "generate_image" || intent.kind === "edit_image" ? intent.kind : null;
     const newMessages: AgentMessage[] = [];
@@ -137,7 +155,7 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
         if (result.code === "canceled") return { messages: newMessages, aborted: true, roundLimitReached: false, directToolResult: result };
         // 其他失败：把错误结果留给模型解释，不再注入「必须生成」指令，也不再兜底，避免死循环。
     } else if (intentTool) {
-        pendingDirective = buildIntentDirective(options.locale, intent);
+        pendingDirective = buildIntentDirective(options.locale, intent, options.buildContext(), options.tools);
     }
 
     for (let round = 0; round < maxRounds; round += 1) {
@@ -236,22 +254,65 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
                         }
                     }
                 } else {
+                    intentHandled = true;
                     const historyPrompt = lastAssistantPromptBlock(options.messages);
+                    // 在普通对话模式下，如果是拆解或批量生成任务，并发执行多张 generate_image
+                    const isBatchChat = (intent.decompose || (intent.batchCount && intent.batchCount > 1)) && intentTool === "generate_image";
+                    if (isBatchChat) {
+                        const count = intent.batchCount || (parsed.promptBlocks.length > 1 ? parsed.promptBlocks.length : 3);
+                        let subPrompts: string[] = [];
+                        if (parsed.promptBlocks.length >= 2) {
+                            subPrompts = parsed.promptBlocks.slice(0, count);
+                        } else {
+                            const subItems = extractNumberedPrompts(parsed.displayText, count, intent.prompt);
+                            subPrompts = subItems.map((item) => item.prompt);
+                        }
+                        if (subPrompts.length >= 1) {
+                            for (const subPrompt of subPrompts) {
+                                if (options.signal?.aborted) break;
+                                await runIntentTool(subPrompt);
+                            }
+                            continue;
+                        }
+                    }
+
                     const candidatePrompt = parsed.promptBlocks[0] || intent.prompt.trim() || historyPrompt;
                     const prompt = candidatePrompt.trim();
                     const hasReferenceForEdit = intentTool !== "edit_image" || (options.references ?? []).some((reference) => reference.storageKey);
                     if (prompt && hasReferenceForEdit) {
-                        intentHandled = true;
                         const result = await runIntentTool(prompt);
                         if (result.ok === false && result.code === "canceled") return { messages: newMessages, aborted: true, roundLimitReached: false };
                         continue;
                     }
                 }
             }
+            ensureAssistantSummary(newMessages);
             return { messages: newMessages, aborted: false, roundLimitReached: false };
         }
 
-        for (const call of calls.slice(0, 3)) {
+        const hasCanvasTools = options.tools.some((t) => t.name === "canvas_batch_generate_nodes");
+        const isCanvasTarget = hasCanvasTools && (intent.isCanvas || options.buildContext().pageContext === "canvas");
+        const isBatchIntent = Boolean(intent.decompose || (intent.batchCount && intent.batchCount > 1));
+
+        let effectiveCalls = calls.slice(0, 8);
+        if (isCanvasTarget && isBatchIntent && effectiveCalls.length === 1 && effectiveCalls[0].tool === "canvas_create_image_node") {
+            // 用户明确要求批量排布（如4张头像/成套图标），模型却误调了单节点工具，自动升级为 canvas_batch_generate_nodes
+            const count = intent.batchCount || 4;
+            const singlePrompt = String(effectiveCalls[0].arguments.prompt || intent.prompt || "").trim();
+            const subItems = extractNumberedPrompts(parsed.displayText, count, singlePrompt);
+            const tasks = subItems.map((item) => ({
+                prompt: item.prompt,
+                title: item.title,
+                size: inferImageSizeFromPrompt(item.prompt, "1024x1024"),
+                ...(intent.background ? { background: intent.background } : {}),
+            }));
+            effectiveCalls = [{
+                tool: "canvas_batch_generate_nodes",
+                arguments: { tasks, layout: intent.layout || "horizontal", run: true },
+            }];
+        }
+
+        for (const call of effectiveCalls) {
             if (options.signal?.aborted) return { messages: newMessages, aborted: true, roundLimitReached: false };
             options.onEvent?.({ type: "tool-start", call });
             const result = await options.executeTool(call, { signal: options.signal, references: options.references });
@@ -261,4 +322,19 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
         }
     }
     return { messages: newMessages, aborted: false, roundLimitReached: true };
+}
+
+function ensureAssistantSummary(messages: AgentMessage[]) {
+    const lastMsg = messages[messages.length - 1];
+    if (lastMsg && lastMsg.role === "tool") {
+        let summaryText = "已完成工具调用。";
+        if (lastMsg.call.tool === "canvas_batch_generate_nodes") {
+            summaryText = "已为您在画布上批量创建节点并排布，正在并行启动渲染。";
+        } else if (lastMsg.call.tool === "canvas_create_image_node") {
+            summaryText = "已为您在画布上创建生图节点并启动精细渲染。";
+        } else if (lastMsg.call.tool === "generate_image") {
+            summaryText = "图片生成已完成。";
+        }
+        messages.push({ id: nanoid(), role: "assistant", text: summaryText, promptBlocks: [], createdAt: Date.now() });
+    }
 }

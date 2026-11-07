@@ -56,16 +56,21 @@ export function ChatSessionList({ sessions, activeSessionId, onSelect, onCreate,
                     <SquarePen className="size-4 text-stone-500 dark:text-stone-400" />
                     {t("chat.newSession")}
                 </button>
-                <div className="mt-5 px-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-stone-400/90 dark:text-stone-500">{t("chat.sidebar.recents")}</div>
+                <div className="mt-5 mb-1.5 px-2.5 text-[11px] font-medium tracking-wider text-stone-500/90 dark:text-stone-400">{t("chat.sidebar.recents")}</div>
             </div>
-            <div className="hover-scrollbar min-h-0 flex-1 space-y-px overflow-y-auto px-2 pb-3">
+            <div className="hover-scrollbar min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2.5 pb-3">
                 {sessions.length === 0 ? <div className="px-2 py-6 text-center text-xs text-stone-400 dark:text-stone-500">{t("chat.sidebar.empty")}</div> : null}
                 {sessions.map((session) => {
                     const active = session.id === activeSessionId;
                     return (
-                        <div key={session.id} className={cn("group flex items-center gap-1 rounded-lg px-2 py-2 transition-colors", active ? "bg-black/[.06] dark:bg-white/[.08]" : "hover:bg-black/[.04] dark:hover:bg-white/[.05]")}>
-                            <button type="button" className={cn("min-w-0 flex-1 truncate text-left text-[13px] leading-5", active ? "text-stone-900 dark:text-stone-100" : "text-stone-600 dark:text-stone-300")} onClick={() => onSelect(session.id)}>
-                                {session.title || t("chat.untitled")}
+                        <div key={session.id} className={cn("group flex items-center gap-1 rounded-lg px-2.5 py-2 transition-colors", active ? "bg-black/[.06] dark:bg-white/[.08]" : "hover:bg-black/[.04] dark:hover:bg-white/[.05]")}>
+                            <button
+                                type="button"
+                                className={cn("min-w-0 flex-1 text-left text-[13px] leading-5", active ? "font-medium text-stone-900 dark:text-stone-100" : "text-stone-600 dark:text-stone-300")}
+                                onClick={() => onSelect(session.id)}
+                                title={session.title || t("chat.untitled")}
+                            >
+                                <span className="block truncate">{session.title || t("chat.untitled")}</span>
                             </button>
                             <Dropdown
                                 trigger={["click"]}

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { nativeToolCallsToAgent, parseAgentOutput, serializeToolResult, stripForStreaming, validateArguments } from "@/lib/conversation-agent/protocol";
 import { buildIntentDirective } from "@/lib/conversation-agent/system-prompt";
+import { detectAgentIntent } from "@/lib/conversation-agent/intent";
 
 describe("对话输出协议", () => {
     test("普通文本不产生工具调用", () => {
@@ -221,5 +222,91 @@ describe("对话输出协议", () => {
         expect(directiveZh).toContain("画布任务·强约束指令");
         expect(directiveZh).toContain("canvas_batch_generate_nodes");
         expect(directiveZh).toContain('"layout": "horizontal"');
+    });
+
+    test("普通对话 /chat 环境下提到「在画布上...」不派发画布工具指令，而是引导常规生图并在末尾提示", () => {
+        const directiveChat = buildIntentDirective(
+            "zh",
+            {
+                kind: "generate_image",
+                prompt: "游戏魔法药水图标（红色生命、蓝色魔法、绿色体力）",
+                isCanvas: true,
+                decompose: true,
+                background: "transparent",
+                batchCount: 3,
+                explicit: true,
+                direct: false,
+            },
+            {
+                imageModels: ["gpt-image-2"],
+                defaultImageModel: "gpt-image-2",
+                defaultSize: "1024x1024",
+                defaultQuality: "auto",
+                defaultCount: "1",
+                pageContext: "chat",
+                toolChannel: "text",
+            },
+            [
+                { name: "generate_image", description: "生成图片", parameters: {} },
+                { name: "apply_prompt", description: "填入工作台", parameters: {} },
+            ],
+        );
+        expect(directiveChat).not.toContain("canvas_batch_generate_nodes");
+        expect(directiveChat).toContain("generate_image");
+        expect(directiveChat).toContain('"background": "transparent"');
+        expect(directiveChat).toContain("前往「我的画布」自由排布");
+    });
+
+    test("解析输出支持围栏头部工具名声明与扁平参数结构（canvas_batch_generate_nodes / canvas_create_image_node）", () => {
+        const textWithHeaderTool = `好的，正在为您批量生成：
+\`\`\`tool canvas_batch_generate_nodes
+{
+  "tasks": [
+    {"prompt": "赛博朋克霓虹猫咪头像", "title": "霓虹猫咪", "size": "1024x1024"},
+    {"prompt": "赛博朋克机械猫咪头像", "title": "机械猫咪", "size": "1024x1024"}
+  ],
+  "layout": "horizontal",
+  "run": true
+}
+\`\`\`
+已全部提交画布排布。`;
+        const result1 = parseAgentOutput(textWithHeaderTool);
+        expect(result1.toolCalls).toHaveLength(1);
+        expect(result1.toolCalls[0].tool).toBe("canvas_batch_generate_nodes");
+        expect(Array.isArray((result1.toolCalls[0].arguments as { tasks?: unknown }).tasks)).toBe(true);
+        expect(result1.displayText).not.toContain("```tool");
+        expect(result1.displayText).toContain("已全部提交画布排布。");
+
+        const textWithFlatArgs = `正在为您创建节点：
+\`\`\`tool:canvas_create_image_node
+{
+  "prompt": "一只戴墨镜的搞怪柴犬",
+  "size": "768x1024",
+  "title": "柴犬立绘"
+}
+\`\`\``;
+        const result2 = parseAgentOutput(textWithFlatArgs);
+        expect(result2.toolCalls).toHaveLength(1);
+        expect(result2.toolCalls[0].tool).toBe("canvas_create_image_node");
+        expect((result2.toolCalls[0].arguments as { prompt?: string }).prompt).toBe("一只戴墨镜的搞怪柴犬");
+        expect((result2.toolCalls[0].arguments as { size?: string }).size).toBe("768x1024");
+    });
+
+    test("会话上下文意图继承：延续上一轮动图提问与海报素材拆解", () => {
+        const gifFollowUp = detectAgentIntent("邪魅坏笑：一看就没憋好事", {
+            history: [
+                { role: "user", text: "帮我做个猫咪动图" },
+                { role: "assistant", text: "你想要单张魔性猫咪表情包，还是四格连续动作表情包？" },
+            ],
+        });
+        expect(gifFollowUp.kind).toBe("generate_image");
+        expect(gifFollowUp.format).toBe("gif");
+        expect(gifFollowUp.usageScene).toBe("微信表情包");
+        expect(gifFollowUp.prompt).toContain("邪魅坏笑");
+
+        const posterAsset = detectAgentIntent("帮我生成海报素材");
+        expect(posterAsset.kind).toBe("generate_image");
+        expect(posterAsset.decompose).toBe(true);
+        expect(posterAsset.prompt).toContain("海报设计素材");
     });
 });
