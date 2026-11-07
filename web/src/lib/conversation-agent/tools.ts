@@ -5,7 +5,9 @@ import { quotaExhausted, useQuotaStore } from "@/stores/use-quota-store";
 import { selectableModelsByCapability, useConfigStore } from "@/stores/use-config-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
 import { useAgentStore } from "@/stores/use-agent-store";
+import { useImageTaskStore } from "@/stores/use-image-task-store";
 import { requestEdit, requestGeneration } from "@/services/api/image";
+import type { ImageTaskResult } from "@/services/api/image-queue";
 import { getImageBlob, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import type { ReferenceImage } from "@/types/image";
 
@@ -158,16 +160,39 @@ async function executeGenerateImage(call: AgentToolCall, context: { signal: Abor
         ...(typeof args.quality === "string" ? { quality: args.quality } : {}),
         ...(typeof args.background === "string" ? { background: args.background } : {}),
     };
+    let currentTaskId: string | undefined;
     try {
+        const onProgress = (task: ImageTaskResult) => {
+            currentTaskId = task.task_id;
+            if (task.task_id) {
+                useImageTaskStore.getState().registerActiveTask({
+                    taskId: task.task_id,
+                    source: "chat",
+                    prompt,
+                    model: IMAGE_MODEL_LABEL(modelOption),
+                    size: generationConfig.size,
+                    createdAt: Date.now(),
+                    status: task.status,
+                    queuePosition: task.queue_position,
+                    estimatedWaitSeconds: task.estimated_wait_seconds,
+                    progress: task.progress,
+                    durationSeconds: task.duration_seconds,
+                });
+            }
+        };
         const requestOptions = isGif
             ? {
                   signal: context.signal,
                   outputFormat: "gif" as const,
                   frameCount: Math.min(16, Math.max(2, Math.round(Number(args.frame_count) || 9))),
                   frameDurationMs: Math.min(1000, Math.max(50, Math.round(Number(args.frame_duration_ms) || 200))),
+                  onProgress,
               }
-            : { signal: context.signal };
+            : { signal: context.signal, onProgress };
         const generated = await requestGeneration(generationConfig, prompt, requestOptions);
+        if (currentTaskId) {
+            useImageTaskStore.getState().completeActiveTask(currentTaskId, "succeeded");
+        }
         if (!generated.length) return failure("generate_image", "execution_failed", t("toolErrors.noImageReturned") as string);
         const stored = await Promise.all(generated.map((image) => uploadImage(image.dataUrl)));
         await useQuotaStore.getState().refresh().catch(() => undefined);
@@ -190,6 +215,9 @@ async function executeGenerateImage(call: AgentToolCall, context: { signal: Abor
             quota: imageQuotaSnapshot(),
         };
     } catch (error) {
+        if (currentTaskId) {
+            useImageTaskStore.getState().completeActiveTask(currentTaskId, context.signal.aborted ? "cancelled" : "failed", error instanceof Error ? error.message : String(error));
+        }
         if (context.signal.aborted) return cancelFailure("generate_image");
         return quotaFailureIfExhausted("generate_image", error);
     }
@@ -216,7 +244,26 @@ async function executeEditImage(call: AgentToolCall, context: { signal: AbortSig
         ...(typeof args.quality === "string" ? { quality: args.quality } : {}),
         ...(typeof args.background === "string" ? { background: args.background } : {}),
     };
+    let currentTaskId: string | undefined;
     try {
+        const onProgress = (task: ImageTaskResult) => {
+            currentTaskId = task.task_id;
+            if (task.task_id) {
+                useImageTaskStore.getState().registerActiveTask({
+                    taskId: task.task_id,
+                    source: "chat",
+                    prompt,
+                    model: IMAGE_MODEL_LABEL(modelOption),
+                    size: generationConfig.size,
+                    createdAt: Date.now(),
+                    status: task.status,
+                    queuePosition: task.queue_position,
+                    estimatedWaitSeconds: task.estimated_wait_seconds,
+                    progress: task.progress,
+                    durationSeconds: task.duration_seconds,
+                });
+            }
+        };
         const references: ReferenceImage[] = await Promise.all(
             candidates.map(async (reference) => {
                 const url = await resolveImageUrl(reference.storageKey);
@@ -224,7 +271,10 @@ async function executeEditImage(call: AgentToolCall, context: { signal: AbortSig
                 return { id: reference.id, name: `${reference.id}.png`, type: blob?.type || "image/png", dataUrl: url, storageKey: reference.storageKey };
             }),
         );
-        const generated = await requestEdit(generationConfig, prompt, references, { signal: context.signal });
+        const generated = await requestEdit(generationConfig, prompt, references, { signal: context.signal, onProgress });
+        if (currentTaskId) {
+            useImageTaskStore.getState().completeActiveTask(currentTaskId, "succeeded");
+        }
         if (!generated.length) return failure("edit_image", "execution_failed", t("toolErrors.noImageReturned") as string);
         const stored = await Promise.all(generated.map((image) => uploadImage(image.dataUrl)));
         await useQuotaStore.getState().refresh().catch(() => undefined);
@@ -238,6 +288,9 @@ async function executeEditImage(call: AgentToolCall, context: { signal: AbortSig
         }));
         return { tool: "edit_image", ok: true, images, model: IMAGE_MODEL_LABEL(modelOption), size: generationConfig.size, count: images.length, quota: imageQuotaSnapshot() };
     } catch (error) {
+        if (currentTaskId) {
+            useImageTaskStore.getState().completeActiveTask(currentTaskId, context.signal.aborted ? "cancelled" : "failed", error instanceof Error ? error.message : String(error));
+        }
         if (context.signal.aborted) return cancelFailure("edit_image");
         return quotaFailureIfExhausted("edit_image", error);
     }

@@ -39,9 +39,9 @@ export default function ChatPage() {
     const hydrated = useConversationAgentStore((state) => state.hydrated);
     const sessions = useConversationAgentStore((state) => state.sessions);
     const activeSessionId = useConversationAgentStore((state) => state.activeSessionId);
-    const streamingText = useConversationAgentStore((state) => state.streamingText);
-    const running = useConversationAgentStore((state) => state.running);
-    const runningTool = useConversationAgentStore((state) => state.runningTool);
+    const sessionRuns = useConversationAgentStore((state) => state.sessionRuns);
+    const setSessionRun = useConversationAgentStore((state) => state.setSessionRun);
+    const clearSessionRun = useConversationAgentStore((state) => state.clearSessionRun);
     const launchContext = useConversationAgentStore((state) => state.launchContext);
     const pendingReference = useConversationAgentStore((state) => state.pendingReference);
     const pendingReferences = useConversationAgentStore((state) => state.pendingReferences);
@@ -55,9 +55,6 @@ export default function ChatPage() {
     const renameSession = useConversationAgentStore((state) => state.renameSession);
     const setActiveSession = useConversationAgentStore((state) => state.setActiveSession);
     const appendMessages = useConversationAgentStore((state) => state.appendMessages);
-    const setStreamingText = useConversationAgentStore((state) => state.setStreamingText);
-    const setRunning = useConversationAgentStore((state) => state.setRunning);
-    const setRunningTool = useConversationAgentStore((state) => state.setRunningTool);
     const setLaunchContext = useConversationAgentStore((state) => state.setLaunchContext);
     const textModel = useConfigStore((state) => state.config.textModel);
     const quotaStatus = useQuotaStore((state) => state.status);
@@ -65,30 +62,24 @@ export default function ChatPage() {
     const quotaHint = imageUsage && imageUsage.dailyLimit > 0 ? t("chat.quotaHint", { used: imageUsage.dailyUsed, limit: imageUsage.dailyLimit }) : "";
     const [input, setInput] = useState("");
     const [references, setReferences] = useState<AgentImageRef[]>([]);
-    const [turnStartedAt, setTurnStartedAt] = useState(0);
     const [paletteOpen, setPaletteOpen] = useState(false);
-    const [steps, setStepsState] = useState<AgentStep[]>([]);
-    const currentStepsRef = useRef<AgentStep[]>([]);
-    const setSteps = useCallback((action: AgentStep[] | ((current: AgentStep[]) => AgentStep[])) => {
-        setStepsState((prev) => {
-            const next = typeof action === "function" ? action(prev) : action;
-            currentStepsRef.current = next;
-            return next;
-        });
-    }, []);
-    const [exitingTool, setExitingTool] = useState<AgentToolCall | null>(null);
-    const [completedToolResults, setCompletedToolResults] = useState<Array<{ id: string; call: AgentToolCall; result: AgentToolResult }>>([]);
-    const exitTimerRef = useRef<number | null>(null);
-    const stepsTimerRef = useRef<number | null>(null);
-    const stepSeqRef = useRef(0);
-    const lastToolStepRef = useRef<string | null>(null);
     const [pageContext, setPageContext] = useState<string | undefined>(undefined);
-    const [runningIntent, setRunningIntent] = useState<AgentIntent | null>(null);
     const [listOpen, setListOpen] = useState(false);
-    const controllerRef = useRef<AbortController | null>(null);
+
+    const controllersRef = useRef<Map<string, AbortController>>(new Map());
     const scrollRef = useRef<HTMLDivElement | null>(null);
     const chatSessions = useMemo(() => sessions.filter((session) => session.scope !== "canvas"), [sessions]);
     const activeSession = chatSessions.find((session) => session.id === activeSessionId) ?? chatSessions[0] ?? null;
+
+    // 当前活跃对话的独立执行状态切片，彻底消除跨对话交叉污染
+    const activeRun = activeSession?.id ? sessionRuns[activeSession.id] : undefined;
+    const running = activeRun?.running ?? false;
+    const streamingText = activeRun?.streamingText ?? "";
+    const runningTool = activeRun?.runningTool ?? null;
+    const steps = activeRun?.steps ?? [];
+    const completedToolResults = activeRun?.completedToolResults ?? [];
+    const turnStartedAt = activeRun?.turnStartedAt ?? 0;
+    const runningIntent = activeRun?.intent ?? null;
 
     useEffect(() => {
         void hydrate();
@@ -120,22 +111,8 @@ export default function ChatPage() {
         if (!node) return;
         const currentActiveId = activeSession?.id ?? null;
         const changed = lastSessionRef.current !== undefined && lastSessionRef.current !== currentActiveId;
-        const previousSessionId = lastSessionRef.current;
         lastSessionRef.current = currentActiveId;
-        if (changed && previousSessionId) {
-            if (controllerRef.current) {
-                controllerRef.current.abort();
-                controllerRef.current = null;
-            }
-            if (stepsTimerRef.current) window.clearTimeout(stepsTimerRef.current);
-            if (exitTimerRef.current) window.clearTimeout(exitTimerRef.current);
-            setRunning(false);
-            setStreamingText("");
-            setRunningTool(null);
-            setCompletedToolResults([]);
-            setExitingTool(null);
-            setStepsState([]);
-            setRunningIntent(null);
+        if (changed) {
             setReferences([]);
             node.scrollTop = node.scrollHeight;
             return;
@@ -143,7 +120,7 @@ export default function ChatPage() {
         if (node.scrollHeight - node.scrollTop - node.clientHeight < 160) {
             node.scrollTo({ top: node.scrollHeight, behavior: "smooth" });
         }
-    }, [activeSessionId, activeSession?.messages.length, runningTool]);
+    }, [activeSession?.id, activeSession?.messages.length, runningTool]);
 
     useLayoutEffect(() => {
         const node = scrollRef.current;
@@ -283,23 +260,45 @@ export default function ChatPage() {
             }
             let sessionId = activeSession?.id;
             if (!sessionId) sessionId = createSession({ scope: "chat" });
-            lastSessionRef.current = sessionId;
+            const targetSessionId = sessionId;
+            const turnId = `turn_${nanoid()}`;
             const attachments = references.length ? references : undefined;
-            appendMessages(sessionId, [{ id: nanoid(), role: "user", text, attachments, createdAt: Date.now() }]);
+
+            appendMessages(targetSessionId, [
+                {
+                    id: nanoid(),
+                    threadId: targetSessionId,
+                    turnId,
+                    itemId: nanoid(),
+                    role: "user",
+                    text,
+                    attachments,
+                    createdAt: Date.now(),
+                },
+            ]);
             setReferences([]);
             setInput("");
-            setStreamingText("");
-            setCompletedToolResults([]);
-            setTurnStartedAt(Date.now());
-            if (stepsTimerRef.current) window.clearTimeout(stepsTimerRef.current);
-            const history = useConversationAgentStore.getState().sessions.find((session) => session.id === sessionId)?.messages ?? [];
+
+            const history = useConversationAgentStore.getState().sessions.find((session) => session.id === targetSessionId)?.messages ?? [];
             const intent = detectAgentIntent(text, { hasReferences: Boolean(attachments?.length), history });
-            setRunningIntent(intent);
             const initialLabel = getInitialUnderstandStepLabel(text, intent);
-            setSteps([{ id: "understand", kind: "understand", label: initialLabel, status: "running" }]);
-            setRunning(true);
+
+            setSessionRun(targetSessionId, {
+                running: true,
+                streamingText: "",
+                runningTool: null,
+                steps: [{ id: "understand", kind: "understand", label: initialLabel, status: "running" }],
+                completedToolResults: [],
+                turnStartedAt: Date.now(),
+                intent,
+                turnId,
+            });
+
             const controller = new AbortController();
-            controllerRef.current = controller;
+            controllersRef.current.set(targetSessionId, controller);
+            let stepSeq = 0;
+            let lastToolStepId: string | null = null;
+
             try {
                 const result = await runAgentTurn({
                     locale: agentLocaleOf(i18n.language),
@@ -310,74 +309,93 @@ export default function ChatPage() {
                     executeTool: (call, context) => executeAgentTool(call, context),
                     onEvent: (event: AgentEvent) => {
                         if (event.type === "assistant-stream") {
-                            setStreamingText(event.text);
-                            if (event.text.trim()) {
-                                setSteps((current) => {
-                                    const hasTool = current.some((step) => step.kind === "tool");
-                                    const isActionIntent = intent.kind === "generate_image" || intent.kind === "edit_image";
-                                    // 若本轮为生图动作且工具尚未运行，说明是大模型前置寒暄，此时不提前创建「组织回复内容」步骤
-                                    if (isActionIntent && !hasTool) return current;
-
-                                    const next = current.map((step) =>
+                            setSessionRun(targetSessionId, (prev) => {
+                                const hasTool = prev.steps.some((step) => step.kind === "tool");
+                                const isActionIntent = intent.kind === "generate_image" || intent.kind === "edit_image";
+                                let nextSteps = prev.steps;
+                                if (!isActionIntent || hasTool) {
+                                    nextSteps = prev.steps.map((step) =>
                                         (step.status === "running" && step.kind === "understand") || step.status === "correction"
                                             ? { ...step, status: "done" as const }
                                             : step,
                                     );
-                                    if (!next.some((step) => step.status === "running")) {
-                                        next.push({
-                                            id: `respond-${next.length}`,
-                                            kind: hasTool ? "summarize" : "respond",
-                                            label: hasTool ? t("chat.steps.summarize") : t("chat.steps.respond"),
-                                            status: "running",
-                                        });
+                                    if (!nextSteps.some((step) => step.status === "running")) {
+                                        nextSteps = [
+                                            ...nextSteps,
+                                            {
+                                                id: `respond-${nextSteps.length}`,
+                                                kind: hasTool ? "summarize" : "respond",
+                                                label: hasTool ? t("chat.steps.summarize") : t("chat.steps.respond"),
+                                                status: "running",
+                                            },
+                                        ];
                                     }
-                                    return next;
-                                });
-                            }
+                                }
+                                return { ...prev, streamingText: event.text, steps: nextSteps };
+                            });
                         } else if (event.type === "tool-start") {
-                            setStreamingText("");
-                            if (exitTimerRef.current) window.clearTimeout(exitTimerRef.current);
-                            setExitingTool(null);
-                            setRunningTool(event.call);
-                            setSteps((current) => {
-                                const next = current.map((step) =>
+                            stepSeq += 1;
+                            const stepId = `tool-${stepSeq}`;
+                            lastToolStepId = stepId;
+                            setSessionRun(targetSessionId, (prev) => {
+                                const nextSteps = prev.steps.map((step) =>
                                     step.status === "running" || step.status === "correction" || step.status === "waiting-retry"
                                         ? { ...step, status: "done" as const }
                                         : step,
                                 );
-                                stepSeqRef.current += 1;
-                                const stepId = `tool-${stepSeqRef.current}`;
-                                lastToolStepRef.current = stepId;
-                                return [...next, { id: stepId, kind: "tool" as const, label: formatAgentToolStepLabel(event.call), status: "running" as const }];
+                                return {
+                                    ...prev,
+                                    streamingText: "",
+                                    runningTool: event.call,
+                                    steps: [...nextSteps, { id: stepId, kind: "tool" as const, label: formatAgentToolStepLabel(event.call), status: "running" as const }],
+                                };
                             });
                         } else if (event.type === "correction-start") {
-                            setSteps((current) => {
-                                const next = current.map((step) => (step.status === "running" ? { ...step, status: "done" as const } : step));
-                                stepSeqRef.current += 1;
-                                return [
-                                    ...next,
-                                    {
-                                        id: `correction-${stepSeqRef.current}`,
-                                        kind: "correction" as const,
-                                        label: t("chat.steps.correctionLabel"),
-                                        status: "correction" as const,
-                                    },
-                                ];
+                            stepSeq += 1;
+                            setSessionRun(targetSessionId, (prev) => {
+                                const nextSteps = prev.steps.map((step) => (step.status === "running" ? { ...step, status: "done" as const } : step));
+                                return {
+                                    ...prev,
+                                    steps: [
+                                        ...nextSteps,
+                                        {
+                                            id: `correction-${stepSeq}`,
+                                            kind: "correction" as const,
+                                            label: t("chat.steps.correctionLabel"),
+                                            status: "correction" as const,
+                                        },
+                                    ],
+                                };
                             });
                         } else if (event.type === "tool-end") {
-                            setRunningTool(null);
-                            setSteps((current) => current.map((step) => (step.id === lastToolStepRef.current && step.status === "running" ? { ...step, status: "done" as const } : step)));
-                            lastToolStepRef.current = null;
-                            if (event.call.tool === "generate_image" || event.call.tool === "edit_image") {
-                                setCompletedToolResults((prev) => [...prev, { id: nanoid(), call: event.call, result: event.result }]);
-                            }
+                            setSessionRun(targetSessionId, (prev) => {
+                                const nextSteps = prev.steps.map((step) => (step.id === lastToolStepId && step.status === "running" ? { ...step, status: "done" as const } : step));
+                                lastToolStepId = null;
+                                const isImageTool = event.call.tool === "generate_image" || event.call.tool === "edit_image";
+                                const completed = isImageTool
+                                    ? [...prev.completedToolResults, { id: nanoid(), call: event.call, result: event.result }]
+                                    : prev.completedToolResults;
+                                return {
+                                    ...prev,
+                                    runningTool: null,
+                                    steps: nextSteps,
+                                    completedToolResults: completed,
+                                };
+                            });
                         }
                     },
                     signal: controller.signal,
                     references: attachments,
                 });
-                const finalSteps = currentStepsRef.current.map((s) => (s.status === "running" ? { ...s, status: "done" as const } : s));
-                let messagesWithSteps = [...result.messages];
+
+                const currentRun = useConversationAgentStore.getState().sessionRuns[targetSessionId];
+                const finalSteps = (currentRun?.steps || []).map((s) => (s.status === "running" ? { ...s, status: "done" as const } : s));
+                let messagesWithSteps = [...result.messages].map((m) => ({
+                    ...m,
+                    threadId: targetSessionId,
+                    turnId,
+                    itemId: m.id,
+                }));
                 if (finalSteps.length > 0) {
                     const firstToolIdx = messagesWithSteps.findIndex((m) => m.role === "tool");
                     const firstAssistantIdx = messagesWithSteps.findIndex((m) => m.role === "assistant");
@@ -385,6 +403,9 @@ export default function ChatPage() {
                     if (firstToolIdx !== -1 && (firstAssistantIdx === -1 || firstToolIdx < firstAssistantIdx)) {
                         messagesWithSteps.unshift({
                             id: nanoid(),
+                            threadId: targetSessionId,
+                            turnId,
+                            itemId: nanoid(),
                             role: "assistant",
                             text: "",
                             steps: finalSteps,
@@ -398,6 +419,9 @@ export default function ChatPage() {
                     } else {
                         messagesWithSteps.unshift({
                             id: nanoid(),
+                            threadId: targetSessionId,
+                            turnId,
+                            itemId: nanoid(),
                             role: "assistant",
                             text: "",
                             steps: finalSteps,
@@ -406,40 +430,69 @@ export default function ChatPage() {
                         });
                     }
                 }
-                appendMessages(sessionId, messagesWithSteps);
-                if (result.roundLimitReached) appendMessages(sessionId, [{ id: nanoid(), role: "error", text: t("chat.errors.tooManyRounds"), createdAt: Date.now() }]);
+                appendMessages(targetSessionId, messagesWithSteps);
+                if (result.roundLimitReached) {
+                    appendMessages(targetSessionId, [
+                        {
+                            id: nanoid(),
+                            threadId: targetSessionId,
+                            turnId,
+                            itemId: nanoid(),
+                            role: "error",
+                            text: t("chat.errors.tooManyRounds"),
+                            createdAt: Date.now(),
+                        },
+                    ]);
+                }
             } catch (error) {
                 const aborted = controller.signal.aborted;
-                const partial = useConversationAgentStore.getState().streamingText;
-                const isCurrentSession = useConversationAgentStore.getState().activeSessionId === sessionId;
+                const currentRun = useConversationAgentStore.getState().sessionRuns[targetSessionId];
+                const partial = currentRun?.streamingText || "";
                 if (aborted) {
-                    if (partial.trim() && isCurrentSession) appendMessages(sessionId, [{ id: nanoid(), role: "assistant", text: partial, promptBlocks: [], createdAt: Date.now() }]);
-                } else if (isCurrentSession) {
+                    if (partial.trim()) {
+                        appendMessages(targetSessionId, [
+                            {
+                                id: nanoid(),
+                                threadId: targetSessionId,
+                                turnId,
+                                itemId: nanoid(),
+                                role: "assistant",
+                                text: partial,
+                                promptBlocks: [],
+                                createdAt: Date.now(),
+                            },
+                        ]);
+                    }
+                } else {
                     const raw = error instanceof Error ? error.message : String(error);
-                    appendMessages(sessionId, [{ id: nanoid(), role: "error", text: isNetworkError(error) ? t("chat.errors.network") : raw, createdAt: Date.now() }]);
+                    appendMessages(targetSessionId, [
+                        {
+                            id: nanoid(),
+                            threadId: targetSessionId,
+                            turnId,
+                            itemId: nanoid(),
+                            role: "error",
+                            text: isNetworkError(error) ? t("chat.errors.network") : raw,
+                            createdAt: Date.now(),
+                        },
+                    ]);
                 }
             } finally {
-                const isCurrentSession = useConversationAgentStore.getState().activeSessionId === sessionId;
-                if (isCurrentSession) {
-                    setRunning(false);
-                    setRunningTool(null);
-                    setRunningIntent(null);
-                    setCompletedToolResults([]);
-                    setExitingTool(null);
-                    setStreamingText("");
-                    controllerRef.current = null;
-                    setSteps([]);
-                    if (stepsTimerRef.current) window.clearTimeout(stepsTimerRef.current);
-                    setTurnStartedAt(0);
-                }
+                clearSessionRun(targetSessionId);
+                controllersRef.current.delete(targetSessionId);
                 useQuotaStore.getState().scheduleRefresh();
             }
         },
-        [appendMessages, buildContext, callModel, createSession, input, references, setRunning, setRunningTool, setStreamingText, t],
+        [activeSession?.id, appendMessages, buildContext, callModel, clearSessionRun, createSession, input, references, setSessionRun, t],
     );
 
     const stop = () => {
-        controllerRef.current?.abort();
+        if (!activeSession?.id) return;
+        const controller = controllersRef.current.get(activeSession.id);
+        if (controller) {
+            controller.abort();
+            controllersRef.current.delete(activeSession.id);
+        }
     };
 
     const addReferenceFiles = async (files: File[]) => {
@@ -482,6 +535,18 @@ export default function ChatPage() {
         setListOpen(false);
     };
 
+    const handleDeleteSession = useCallback(
+        (id: string) => {
+            const controller = controllersRef.current.get(id);
+            if (controller) {
+                controller.abort();
+                controllersRef.current.delete(id);
+            }
+            deleteSession(id);
+        },
+        [deleteSession],
+    );
+
     const sessionList = (
         <ChatSessionList
             sessions={chatSessions}
@@ -493,7 +558,7 @@ export default function ChatPage() {
                 setListOpen(false);
             }}
             onCreate={createAndClose}
-            onDelete={deleteSession}
+            onDelete={handleDeleteSession}
             onRename={renameSession}
         />
     );

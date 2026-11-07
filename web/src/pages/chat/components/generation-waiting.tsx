@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import type { AgentToolCall } from "@/lib/conversation-agent/types";
 import { cn } from "@/lib/utils";
+import { useImageTaskStore, type PersistedImageTask } from "@/stores/use-image-task-store";
 
 import { ChatGptDotMatrix } from "./chatgpt-dot-matrix";
 
@@ -41,18 +42,28 @@ function ChatGptImageWaitingCard({
     aspect,
     isEdit,
     elapsedSeconds,
+    task,
 }: {
     index: number;
     total: number;
     aspect: number;
     isEdit: boolean;
     elapsedSeconds: number;
+    task?: PersistedImageTask;
 }) {
     const { t } = useTranslation();
-    const progress = estimateProgress(elapsedSeconds, index);
+    const isQueued = task?.status === "queued";
+    const serverProgressPct = typeof task?.progress === "number" ? Math.round(task.progress * 100) : undefined;
+    const progress = serverProgressPct !== undefined ? serverProgressPct : estimateProgress(elapsedSeconds, index);
 
-    // 阶段文字演变（纯净文本，无多余装饰图标）
+    // 阶段文字演变
     const phase = useMemo(() => {
+        if (isQueued) {
+            return `排队等待中 · 前方还有 ${task?.queuePosition || 1} 人`;
+        }
+        if (task?.status === "processing") {
+            return t("workbench.processing", "正在绘制中...");
+        }
         if (isEdit) {
             if (elapsedSeconds < 1.6) return t("chat.waiting.thinking");
             if (elapsedSeconds < 7) return t("chat.waiting.phaseEditSketch");
@@ -63,9 +74,9 @@ function ChatGptImageWaitingCard({
         if (elapsedSeconds < 7) return t("chat.waiting.phaseSketch");
         if (elapsedSeconds < 14) return t("chat.waiting.phaseDetails");
         return t("chat.waiting.phaseRender");
-    }, [elapsedSeconds, isEdit, t]);
+    }, [elapsedSeconds, isEdit, isQueued, task?.queuePosition, task?.status, t]);
 
-    const isEarlyThinking = elapsedSeconds < 1.5;
+    const isEarlyThinking = !isQueued && !task?.status && elapsedSeconds < 1.5;
 
     return (
         <div
@@ -111,11 +122,17 @@ function ChatGptImageWaitingCard({
                         <ChatGptDotMatrix aspect={aspect} />
                     </div>
 
-                    {/* 右下角极简百分比 */}
+                    {/* 右下角极简百分比 / 排队预计 */}
                     <div className="flex items-center justify-end pt-1">
-                        <div className="rounded-full border border-stone-300/80 bg-white/80 px-2.5 py-0.5 font-mono text-xs font-semibold tabular-nums text-blue-600 shadow-xs backdrop-blur-sm dark:border-stone-700/80 dark:bg-stone-850/80 dark:text-blue-400">
-                            {progress}%
-                        </div>
+                        {isQueued ? (
+                            <div className="rounded-full border border-amber-300/80 bg-amber-50/80 px-2.5 py-0.5 font-mono text-xs font-semibold tabular-nums text-amber-700 shadow-xs backdrop-blur-sm dark:border-amber-700/80 dark:bg-amber-950/80 dark:text-amber-300">
+                                约 {task?.estimatedWaitSeconds ?? 45}s
+                            </div>
+                        ) : (
+                            <div className="rounded-full border border-stone-300/80 bg-white/80 px-2.5 py-0.5 font-mono text-xs font-semibold tabular-nums text-blue-600 shadow-xs backdrop-blur-sm dark:border-stone-700/80 dark:bg-stone-850/80 dark:text-blue-400">
+                                {progress}%
+                            </div>
+                        )}
                     </div>
                 </div>
             )}
@@ -125,6 +142,10 @@ function ChatGptImageWaitingCard({
 
 export function GenerationWaiting({ call, startedAt }: { call: AgentToolCall; startedAt: number }) {
     const [elapsedMs, setElapsedMs] = useState(() => Date.now() - startedAt);
+    const activeTasks = useImageTaskStore((state) => state.activeTasks);
+    const activeChatTask = useMemo(() => {
+        return Object.values(activeTasks).find((t) => t.source === "chat" && (t.status === "queued" || t.status === "processing"));
+    }, [activeTasks]);
 
     useEffect(() => {
         setElapsedMs(Date.now() - startedAt);
@@ -133,12 +154,12 @@ export function GenerationWaiting({ call, startedAt }: { call: AgentToolCall; st
     }, [startedAt]);
 
     const elapsedSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
-    const count = Math.max(1, Math.min(4, Number(call.arguments.count) || 1));
+    const count = Math.max(1, Math.min(12, Number(call.arguments.count) || 1));
     const aspect = parseAspect(call.arguments.size);
     const isEdit = call.tool === "edit_image";
     const prompt = typeof call.arguments.prompt === "string" ? call.arguments.prompt : "";
     const size = typeof call.arguments.size === "string" ? call.arguments.size : "";
-    const columns = useMemo(() => (count <= 1 ? 1 : 2), [count]);
+    const columns = useMemo(() => (count <= 1 ? 1 : count <= 4 ? 2 : 3), [count]);
 
     return (
         <div className="agent-message-in w-full space-y-2">
@@ -171,6 +192,7 @@ export function GenerationWaiting({ call, startedAt }: { call: AgentToolCall; st
                         aspect={aspect}
                         isEdit={isEdit}
                         elapsedSeconds={elapsedSeconds}
+                        task={activeChatTask}
                     />
                 ))}
             </div>

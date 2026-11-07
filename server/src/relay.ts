@@ -227,7 +227,7 @@ async function parseRequestInfo(method: string, target: URL, bodyBytes: Uint8Arr
     }
 
     let units = 1;
-    if (!counted) units = 0;
+    if (!counted || path.includes("/tasks/") || path.includes("/queue/")) units = 0;
     else if (capability === "image") units = Math.max(1, Math.min(15, Math.floor(Math.abs(requestedCount) || 1)));
     return { capability, units, model };
 }

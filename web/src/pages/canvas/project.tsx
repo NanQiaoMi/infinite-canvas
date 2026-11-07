@@ -6,6 +6,8 @@ import { saveAs } from "file-saver";
 import { useTranslation } from "react-i18next";
 
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
+import { useImageTaskStore } from "@/stores/use-image-task-store";
+import type { ImageTaskResult } from "@/services/api/image-queue";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { createVideoGenerationTask, isVideoTaskFailed, storeGeneratedVideo, waitForVideoGenerationTask } from "@/services/api/video";
 import { defaultConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
@@ -2345,9 +2347,49 @@ function InfiniteCanvasPage() {
                     const fullPrompt = (builtinPanel.promptPrefix || "") + scene;
                     const context = await hydrateNodeGenerationContext(buildNodeGenerationContext(nodeId, nodesRef.current, connectionsRef.current, fullPrompt));
                     const refs = context.referenceImages;
+                    let currentTaskId: string | undefined;
+                    const onProgress = (task: ImageTaskResult) => {
+                        currentTaskId = task.task_id;
+                        setNodes((prev) =>
+                            prev.map((n) =>
+                                n.id === nodeId
+                                    ? {
+                                          ...n,
+                                          metadata: {
+                                              ...n.metadata,
+                                              taskId: task.task_id,
+                                              queuePosition: task.queue_position,
+                                              estimatedWaitSeconds: task.estimated_wait_seconds,
+                                              progress: task.progress,
+                                              phase: task.status === "queued" ? "queued" : "processing",
+                                          },
+                                      }
+                                    : n,
+                            ),
+                        );
+                        if (task.task_id && id) {
+                            useImageTaskStore.getState().registerActiveTask({
+                                taskId: task.task_id,
+                                source: "canvas",
+                                prompt: scene,
+                                model: generationConfig.model,
+                                createdAt: Date.now(),
+                                status: task.status,
+                                queuePosition: task.queue_position,
+                                estimatedWaitSeconds: task.estimated_wait_seconds,
+                                progress: task.progress,
+                                durationSeconds: task.duration_seconds,
+                                nodeId,
+                                canvasProjectId: id,
+                            });
+                        }
+                    };
                     const image = refs.length
-                        ? await requestEdit({ ...generationConfig, count: "1" }, context.prompt, refs, { signal: controller.signal }).then((items) => items[0])
-                        : await requestGeneration({ ...generationConfig, count: "1" }, context.prompt, { signal: controller.signal }).then((items) => items[0]);
+                        ? await requestEdit({ ...generationConfig, count: "1" }, context.prompt, refs, { signal: controller.signal, onProgress }).then((items) => items[0])
+                        : await requestGeneration({ ...generationConfig, count: "1" }, context.prompt, { signal: controller.signal, onProgress }).then((items) => items[0]);
+                    if (currentTaskId) {
+                        useImageTaskStore.getState().completeActiveTask(currentTaskId, "succeeded");
+                    }
                     const uploaded = await uploadImage(image.dataUrl, { signal: controller.signal });
                     setNodes((prev) =>
                         prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, ...imageMetadata(uploaded), prompt: scene, model: generationConfig.model, status: NODE_STATUS_SUCCESS, errorDetails: undefined } } : node)),
@@ -2472,10 +2514,50 @@ function InfiniteCanvasPage() {
                     let firstError = "";
                     await Promise.all(
                         imageIds.map(async (imageId) => {
+                            let currentTaskId: string | undefined;
                             try {
+                                const onProgress = (task: ImageTaskResult) => {
+                                    currentTaskId = task.task_id;
+                                    setNodes((prev) =>
+                                        prev.map((n) =>
+                                            n.id === rootId
+                                                ? {
+                                                      ...n,
+                                                      metadata: {
+                                                          ...n.metadata,
+                                                          taskId: task.task_id,
+                                                          queuePosition: task.queue_position,
+                                                          estimatedWaitSeconds: task.estimated_wait_seconds,
+                                                          progress: task.progress,
+                                                          phase: task.status === "queued" ? "queued" : "processing",
+                                                      },
+                                                  }
+                                                : n,
+                                        ),
+                                    );
+                                    if (task.task_id && id) {
+                                        useImageTaskStore.getState().registerActiveTask({
+                                            taskId: task.task_id,
+                                            source: "canvas",
+                                            prompt: effectivePrompt,
+                                            model: generationConfig.model,
+                                            createdAt: Date.now(),
+                                            status: task.status,
+                                            queuePosition: task.queue_position,
+                                            estimatedWaitSeconds: task.estimated_wait_seconds,
+                                            progress: task.progress,
+                                            durationSeconds: task.duration_seconds,
+                                            nodeId: rootId,
+                                            canvasProjectId: id,
+                                        });
+                                    }
+                                };
                                 const image = referenceImages.length
-                                    ? await requestEdit({ ...generationConfig, count: "1" }, effectivePrompt, referenceImages, { signal: controller.signal }).then((items) => items[0])
-                                    : await requestGeneration({ ...generationConfig, count: "1" }, effectivePrompt, { signal: controller.signal }).then((items) => items[0]);
+                                    ? await requestEdit({ ...generationConfig, count: "1" }, effectivePrompt, referenceImages, { signal: controller.signal, onProgress }).then((items) => items[0])
+                                    : await requestGeneration({ ...generationConfig, count: "1" }, effectivePrompt, { signal: controller.signal, onProgress }).then((items) => items[0]);
+                                if (currentTaskId) {
+                                    useImageTaskStore.getState().completeActiveTask(currentTaskId, "succeeded");
+                                }
                                 const uploaded = await uploadImage(image.dataUrl, { signal: controller.signal });
                                 const imageSize = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
                                 const item: CanvasNodeImage = { id: imageId, status: NODE_STATUS_SUCCESS, content: uploaded.url, storageKey: uploaded.storageKey, naturalWidth: uploaded.width, naturalHeight: uploaded.height, bytes: uploaded.bytes, mimeType: uploaded.mimeType };
@@ -2844,9 +2926,50 @@ function InfiniteCanvasPage() {
                     return;
                 }
 
+                let currentTaskId: string | undefined;
+                const onProgress = (task: ImageTaskResult) => {
+                    currentTaskId = task.task_id;
+                    setNodes((prev) =>
+                        prev.map((item) =>
+                            item.id === node.id
+                                ? {
+                                      ...item,
+                                      metadata: {
+                                          ...item.metadata,
+                                          taskId: task.task_id,
+                                          queuePosition: task.queue_position,
+                                          estimatedWaitSeconds: task.estimated_wait_seconds,
+                                          progress: task.progress,
+                                          phase: task.status === "queued" ? "queued" : "processing",
+                                      },
+                                  }
+                                : item,
+                        ),
+                    );
+                    if (task.task_id && id) {
+                        useImageTaskStore.getState().registerActiveTask({
+                            taskId: task.task_id,
+                            source: "canvas",
+                            prompt,
+                            model: generationConfig.model,
+                            createdAt: Date.now(),
+                            status: task.status,
+                            queuePosition: task.queue_position,
+                            estimatedWaitSeconds: task.estimated_wait_seconds,
+                            progress: task.progress,
+                            durationSeconds: task.duration_seconds,
+                            nodeId: node.id,
+                            canvasProjectId: id,
+                        });
+                    }
+                };
+
                 const image = useReferenceImages
-                    ? await requestEdit(generationConfig, prompt, retryImages, { signal: controller.signal }).then((items) => items[0])
-                    : await requestGeneration(generationConfig, prompt, { signal: controller.signal }).then((items) => items[0]);
+                    ? await requestEdit(generationConfig, prompt, retryImages, { signal: controller.signal, onProgress }).then((items) => items[0])
+                    : await requestGeneration(generationConfig, prompt, { signal: controller.signal, onProgress }).then((items) => items[0]);
+                if (currentTaskId) {
+                    useImageTaskStore.getState().completeActiveTask(currentTaskId, "succeeded");
+                }
                 const uploadedImage = await uploadImage(image.dataUrl, { signal: controller.signal });
                 const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
                 const retryImage: CanvasNodeImage = {

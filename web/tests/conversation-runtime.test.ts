@@ -504,8 +504,90 @@ describe("对话运行时", () => {
         const { formatSessionTitle } = await import("@/stores/use-conversation-agent-store");
         expect(formatSessionTitle("在画布上批量生成4张不同风格的赛博朋克猫咪头像，并排排开")).toBe("4张不同风格的赛博朋克猫咪头像，并排...");
         expect(formatSessionTitle("生成png透明图片：一个红苹果")).toBe("一个红苹果");
+        expect(formatSessionTitle("生成png透明图片：一个红苹果，高光")).toBe("一个红苹果，高光");
         expect(formatSessionTitle("帮我生成海报素材")).toBe("海报素材");
+        expect(formatSessionTitle("生成图片：苹果产品海报")).toBe("苹果产品海报");
         expect(formatSessionTitle("你好你能干什么")).toBe("你好你能干什么");
+    });
+
+    test("多会话独立隔离 (Multi-Session Isolation)：后台会话执行不污染前台，结果精准归属 threadId", async () => {
+        const { useConversationAgentStore } = await import("@/stores/use-conversation-agent-store");
+        const store = useConversationAgentStore.getState();
+
+        // 创建两个独立会话（首个会话放入消息，避免空会话被复用）
+        const sessionA = store.createSession({ scope: "chat" });
+        store.appendMessages(sessionA, [{ id: "u1", role: "user", text: "生成设计稿", createdAt: 1 }]);
+        const sessionB = store.createSession({ scope: "chat" });
+        expect(sessionA).not.toBe(sessionB);
+
+        // 当前活跃在会话 A
+        store.setActiveSession(sessionA);
+        expect(useConversationAgentStore.getState().activeSessionId).toBe(sessionA);
+
+        // 会话 A 启动执行
+        store.setSessionRun(sessionA, {
+            running: true,
+            streamingText: "正在为您构思设计稿...",
+            runningTool: { tool: "generate_image", arguments: { prompt: "设计稿1" } },
+            steps: [{ id: "step1", kind: "understand", label: "分析创作需求", status: "done" }],
+            completedToolResults: [],
+            turnStartedAt: Date.now(),
+            intent: null,
+            turnId: "turn_a_1",
+        });
+
+        // 会话 A 的状态在当前活跃界面生效
+        expect(useConversationAgentStore.getState().running).toBe(true);
+        expect(useConversationAgentStore.getState().streamingText).toBe("正在为您构思设计稿...");
+        expect(useConversationAgentStore.getState().runningTool?.tool).toBe("generate_image");
+
+        // 用户切换到会话 B（不打断会话 A）
+        store.setActiveSession(sessionB);
+        expect(useConversationAgentStore.getState().activeSessionId).toBe(sessionB);
+
+        // 切换后，会话 B 的活跃视图必须处于干净状态，绝对不泄露会话 A 的步骤与流式文字！
+        expect(useConversationAgentStore.getState().running).toBe(false);
+        expect(useConversationAgentStore.getState().streamingText).toBe("");
+        expect(useConversationAgentStore.getState().runningTool).toBe(null);
+
+        // 会话 A 在后台继续更新步骤和工具
+        store.setSessionRun(sessionA, (prev) => ({
+            ...prev,
+            streamingText: "正在为您画第二张图...",
+            steps: [...prev.steps, { id: "step2", kind: "tool", label: "生成图片 · 方案 2", status: "running" }],
+        }));
+
+        // 会话 B 的前台视图仍然保持干净隔离，不受会话 A 后台推进的影响
+        expect(useConversationAgentStore.getState().running).toBe(false);
+        expect(useConversationAgentStore.getState().streamingText).toBe("");
+
+        // 会话 A 任务完成并归属消息，附带明确的 threadId、turnId 与 itemId
+        store.appendMessages(sessionA, [
+            {
+                id: "msg_a_res",
+                threadId: sessionA,
+                turnId: "turn_a_1",
+                itemId: "msg_a_res",
+                role: "assistant",
+                text: "三张设计稿已生成完成！",
+                promptBlocks: [],
+                createdAt: Date.now(),
+            },
+        ]);
+        store.clearSessionRun(sessionA);
+
+        // 检查会话 A 历史：消息精准进入会话 A，并携带 threadId
+        const updatedA = useConversationAgentStore.getState().sessions.find((s) => s.id === sessionA);
+        expect(updatedA?.messages.some((m) => m.id === "msg_a_res")).toBe(true);
+        expect(updatedA?.messages.find((m) => m.id === "msg_a_res")?.threadId).toBe(sessionA);
+
+        // 检查会话 B 历史：未受任何交叉污染！
+        const updatedB = useConversationAgentStore.getState().sessions.find((s) => s.id === sessionB);
+        expect(updatedB?.messages.length).toBe(0);
+
+        // 切回会话 A，状态正常
+        store.setActiveSession(sessionA);
+        expect(useConversationAgentStore.getState().running).toBe(false);
     });
 
     test("toModelMessages 自动剔除历史中的生图套话总结，防止模型在下一轮复读", async () => {

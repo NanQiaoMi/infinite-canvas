@@ -1,6 +1,6 @@
-import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, Clapperboard, ClipboardPaste, Download, FolderPlus, History, ImagePlus, LoaderCircle, Maximize2, PenLine, Plus, SlidersHorizontal, Sparkles, SquarePen, Trash2, Upload } from "lucide-react";
+import { Activity, ArrowLeft, ArrowRight, BookOpen, CheckSquare, Clapperboard, ClipboardPaste, Clock, Download, FolderPlus, History, ImagePlus, LoaderCircle, Maximize2, PenLine, Plus, SlidersHorizontal, Sparkles, SquarePen, Trash2, Upload } from "lucide-react";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { App, Button, Checkbox, Drawer, Empty, Image, Input, InputNumber, Modal, Switch, Tag, Tooltip, Typography } from "antd";
+import { App, Button, Checkbox, Drawer, Empty, Image, Input, InputNumber, Modal, Progress, Switch, Tag, Tooltip, Typography } from "antd";
 import localforage from "localforage";
 import { saveAs } from "file-saver";
 import { useTranslation } from "react-i18next";
@@ -22,6 +22,8 @@ import { deleteStoredImages, ensureImagePreview, getImagePreviewRevision, previe
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
 import { useConversationAgentStore } from "@/stores/use-conversation-agent-store";
+import { useImageTaskStore } from "@/stores/use-image-task-store";
+import type { ImageTaskResult } from "@/services/api/image-queue";
 import { useQuotaStore } from "@/stores/use-quota-store";
 import type { ReferenceImage } from "@/types/image";
 import i18n from "@/i18n";
@@ -42,6 +44,12 @@ type GenerationResult = {
     status: "pending" | "success" | "failed";
     image?: GeneratedImage;
     error?: string;
+    taskId?: string;
+    phase?: "queued" | "processing";
+    queuePosition?: number;
+    estimatedWaitSeconds?: number;
+    progress?: number;
+    durationSeconds?: number;
 };
 
 type GenerationLog = {
@@ -107,6 +115,63 @@ export default function ImagePage() {
     const setLaunchContext = useConversationAgentStore((state) => state.setLaunchContext);
     const processedCommandRef = useRef(0);
     const agentTaskIdRef = useRef<string | undefined>(undefined);
+    const activeControllersRef = useRef<Record<number, AbortController>>({});
+    const queueStatus = useImageTaskStore((state) => state.queueStatus);
+
+    useEffect(() => {
+        useImageTaskStore.getState().refreshQueueStatus(effectiveConfig);
+        const timer = setInterval(() => {
+            useImageTaskStore.getState().refreshQueueStatus(effectiveConfig);
+        }, 15000);
+        return () => clearInterval(timer);
+    }, [effectiveConfig.baseUrl, effectiveConfig.apiKey]);
+
+    // 页面刷新 / 重新进入时恢复未完成的后台生成任务
+    useEffect(() => {
+        const workbenchTasks = useImageTaskStore.getState().getTasksBySource("workbench");
+        if (!workbenchTasks.length) return;
+        setResults(
+            workbenchTasks.map((task) => ({
+                id: task.taskId,
+                status: "pending",
+                taskId: task.taskId,
+                phase: task.status === "queued" ? "queued" : "processing",
+                queuePosition: task.queuePosition,
+                estimatedWaitSeconds: task.estimatedWaitSeconds,
+                progress: task.progress,
+                durationSeconds: task.durationSeconds,
+            })),
+        );
+        setRunning(true);
+        setStartedAt(Date.now());
+        workbenchTasks.forEach(async (task, idx) => {
+            const snapshot = {
+                text: task.prompt,
+                config: { ...effectiveConfig, model: task.model, count: "1" },
+                references: [],
+            };
+            try {
+                const img = await runGenerationSlot(idx, snapshot, task.taskId);
+                if (img) {
+                    saveLog(
+                        buildLog({
+                            prompt: snapshot.text,
+                            model: task.model,
+                            config: { ...snapshot.config, count: "1" },
+                            references: snapshot.references,
+                            durationMs: 0,
+                            successCount: 1,
+                            failCount: 0,
+                            status: "success",
+                            images: [img],
+                        }),
+                    );
+                }
+            } catch {
+                // error handled in runGenerationSlot
+            }
+        });
+    }, []);
 
     const model = effectiveConfig.imageModel || effectiveConfig.model;
     const canGenerate = Boolean(prompt.trim());
@@ -361,23 +426,122 @@ export default function ImagePage() {
         return { text, config: { ...effectiveConfig, model, count: "1" }, references: [...references] };
     };
 
-    const runGenerationSlot = async (index: number, snapshot: { text: string; config: AiConfig; references: ReferenceImage[] }) => {
+    const runGenerationSlot = async (
+        index: number,
+        snapshot: { text: string; config: AiConfig; references: ReferenceImage[] },
+        existingTaskId?: string,
+    ) => {
         const itemStartedAt = performance.now();
+        let currentTaskId: string | undefined = existingTaskId;
+        const controller = new AbortController();
+        activeControllersRef.current[index] = controller;
+
         try {
-            const gifWanted = snapshot.config.imageFormat === "gif" && /gpt-image-2\.6/i.test(snapshot.config.model || snapshot.config.imageModel) && !snapshot.references.length;
+            const onProgress = (task: ImageTaskResult) => {
+                currentTaskId = task.task_id;
+                setResults((value) =>
+                    updateResultAt(value, index, {
+                        taskId: task.task_id,
+                        phase: task.status === "queued" ? "queued" : "processing",
+                        queuePosition: task.queue_position,
+                        estimatedWaitSeconds: task.estimated_wait_seconds,
+                        progress: task.progress,
+                        durationSeconds: task.duration_seconds,
+                    }),
+                );
+                if (task.task_id) {
+                    useImageTaskStore.getState().registerActiveTask({
+                        taskId: task.task_id,
+                        source: "workbench",
+                        prompt: snapshot.text,
+                        model: snapshot.config.model || snapshot.config.imageModel,
+                        size: snapshot.config.size,
+                        createdAt: Date.now(),
+                        status: task.status,
+                        queuePosition: task.queue_position,
+                        estimatedWaitSeconds: task.estimated_wait_seconds,
+                        progress: task.progress,
+                        durationSeconds: task.duration_seconds,
+                        slotIndex: index,
+                    });
+                }
+            };
+
+            const gifWanted =
+                snapshot.config.imageFormat === "gif" &&
+                /gpt-image-2\.6/i.test(snapshot.config.model || snapshot.config.imageModel) &&
+                !snapshot.references.length;
+
+            const requestOpts = {
+                signal: controller.signal,
+                onProgress,
+                recoveryTaskId: existingTaskId,
+                ...(gifWanted
+                    ? {
+                          outputFormat: "gif" as const,
+                          frameCount: Math.min(16, Math.max(2, Math.round(Number(snapshot.config.gifFrames) || 9))),
+                          frameDurationMs: Math.min(1000, Math.max(50, Math.round((Number(snapshot.config.gifFrameDuration) || 200) / 10) * 10)),
+                      }
+                    : {}),
+            };
+
             const result = snapshot.references.length
-                ? await requestEdit(snapshot.config, snapshot.text, snapshot.references)
-                : await requestGeneration(snapshot.config, snapshot.text, gifWanted ? { outputFormat: "gif", frameCount: Math.min(16, Math.max(2, Math.round(Number(snapshot.config.gifFrames) || 9))), frameDurationMs: Math.min(1000, Math.max(50, Math.round((Number(snapshot.config.gifFrameDuration) || 200) / 10) * 10)) } : undefined);
+                ? await requestEdit(snapshot.config, snapshot.text, snapshot.references, requestOpts)
+                : await requestGeneration(snapshot.config, snapshot.text, requestOpts);
+
             const image = result[0];
             if (!image) throw new Error(t("imageWorkbench.missingResult"));
             const stored = await uploadImage(image.dataUrl);
-            const nextImage: GeneratedImage = { id: image.id, dataUrl: stored.url, ...(stored.storageKey ? { storageKey: stored.storageKey } : {}), durationMs: performance.now() - itemStartedAt, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType };
+            const nextImage: GeneratedImage = {
+                id: image.id,
+                dataUrl: stored.url,
+                ...(stored.storageKey ? { storageKey: stored.storageKey } : {}),
+                durationMs: performance.now() - itemStartedAt,
+                width: stored.width,
+                height: stored.height,
+                bytes: stored.bytes,
+                mimeType: stored.mimeType,
+            };
+            if (currentTaskId) {
+                useImageTaskStore.getState().completeActiveTask(currentTaskId, "succeeded", undefined, stored.url);
+            }
             setResults((value) => updateResultAt(value, index, { status: "success", image: nextImage }));
             return nextImage;
         } catch (error) {
-            setResults((value) => updateResultAt(value, index, { status: "failed", error: error instanceof Error ? error.message : t("workbench.generationFailed") }));
+            if (currentTaskId) {
+                useImageTaskStore.getState().completeActiveTask(
+                    currentTaskId,
+                    controller.signal.aborted ? "cancelled" : "failed",
+                    error instanceof Error ? error.message : String(error),
+                );
+            }
+            setResults((value) =>
+                updateResultAt(value, index, {
+                    status: "failed",
+                    error: error instanceof Error ? error.message : t("workbench.generationFailed"),
+                }),
+            );
             throw error;
+        } finally {
+            delete activeControllersRef.current[index];
         }
+    };
+
+    const cancelResultSlot = (index: number) => {
+        const item = results[index];
+        const controller = activeControllersRef.current[index];
+        if (controller) {
+            controller.abort();
+        }
+        if (item?.taskId) {
+            useImageTaskStore.getState().cancelTask(effectiveConfig, item.taskId);
+        }
+        setResults((value) =>
+            updateResultAt(value, index, {
+                status: "failed",
+                error: t("workbench.taskCanceled", "任务已取消"),
+            }),
+        );
     };
 
     const retryResult = async (index: number) => {
@@ -571,8 +735,14 @@ export default function ImagePage() {
 
                     <div className="thin-scrollbar px-5 py-5 lg:min-h-0 lg:overflow-y-auto">
                         <div className="mb-4 flex items-center justify-between gap-3">
-                            <div>
+                            <div className="flex items-center gap-2.5">
                                 <h2 className="text-sm font-semibold tracking-tight text-stone-950 dark:text-stone-100">{t("workbench.results")}</h2>
+                                {queueStatus ? (
+                                    <span className="inline-flex items-center gap-1.5 rounded-full border border-stone-200/80 bg-stone-100/70 px-2 py-0.5 text-[11px] text-stone-500 dark:border-stone-800 dark:bg-stone-800/60 dark:text-stone-400">
+                                        <Activity className="size-3 text-stone-400" />
+                                        <span>系统队列: {queueStatus.active_tasks} 生成中 · {queueStatus.queued_tasks} 排队</span>
+                                    </span>
+                                ) : null}
                             </div>
                             {running ? (
                                 <span className="rounded-full border border-stone-200/90 bg-white/70 px-2.5 py-0.5 text-[11px] tabular-nums text-stone-500 shadow-2xs backdrop-blur-xs dark:border-stone-700/80 dark:bg-stone-800/70 dark:text-stone-400">
@@ -588,7 +758,14 @@ export default function ImagePage() {
                                     ) : result.status === "failed" ? (
                                         <FailedImageCard key={result.id} error={result.error || t("workbench.generationFailed")} onRetry={() => retryResult(index)} />
                                     ) : (
-                                        <PendingImageCard key={result.id} />
+                                        <PendingImageCard
+                                            key={result.id}
+                                            phase={result.phase}
+                                            queuePosition={result.queuePosition}
+                                            estimatedWaitSeconds={result.estimatedWaitSeconds}
+                                            progress={result.progress}
+                                            onCancel={() => cancelResultSlot(index)}
+                                        />
                                     ),
                                 )}
                             </div>
@@ -831,16 +1008,75 @@ function ResultImageCard({
     );
 }
 
-function PendingImageCard() {
+function PendingImageCard({
+    phase,
+    queuePosition,
+    estimatedWaitSeconds,
+    progress,
+    onCancel,
+}: {
+    phase?: "queued" | "processing";
+    queuePosition?: number;
+    estimatedWaitSeconds?: number;
+    progress?: number;
+    onCancel?: () => void;
+}) {
     const { t } = useTranslation();
+    const isQueued = phase === "queued";
+    const pct = Math.min(100, Math.max(0, Math.round((progress ?? 0) * 100)));
+
     return (
-        <div className="relative aspect-square overflow-hidden rounded-2xl border border-stone-200/80 bg-stone-100/40 shadow-xs dark:border-stone-800 dark:bg-stone-900/40">
-            <div className="agent-shimmer absolute inset-0" />
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2.5 text-xs text-stone-500 dark:text-stone-400">
-                <div className="relative flex size-9 items-center justify-center rounded-xl border border-stone-200/70 bg-white/80 shadow-xs backdrop-blur-sm dark:border-stone-700/70 dark:bg-stone-800/80">
-                    <LoaderCircle className="size-4.5 animate-spin text-stone-700 dark:text-stone-200" />
-                </div>
-                <span className="font-medium tracking-tight">{t("workbench.generating")}</span>
+        <div className="relative aspect-square overflow-hidden rounded-2xl border border-stone-200/80 bg-stone-100/40 shadow-xs dark:border-stone-800 dark:bg-stone-900/40 flex flex-col justify-between p-4">
+            <div className="agent-shimmer absolute inset-0 pointer-events-none" />
+
+            {/* Top Status */}
+            <div className="relative z-10 flex items-center justify-between">
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-stone-200/80 bg-white/80 px-2.5 py-0.5 text-[11px] font-medium text-stone-600 shadow-2xs backdrop-blur-xs dark:border-stone-700/80 dark:bg-stone-800/80 dark:text-stone-300">
+                    <span className={cn("size-2 rounded-full", isQueued ? "bg-amber-500 animate-pulse" : "bg-blue-500 animate-pulse")} />
+                    {isQueued ? t("workbench.queued", "排队等待中") : t("workbench.processing", "正在绘制中...")}
+                </span>
+                {onCancel ? (
+                    <Button size="small" type="text" danger className="!h-6 !px-2 !text-[11px]" onClick={onCancel}>
+                        {t("workbench.cancelTask", "取消任务")}
+                    </Button>
+                ) : null}
+            </div>
+
+            {/* Center Content */}
+            <div className="relative z-10 flex flex-col items-center justify-center gap-2.5 text-center">
+                {isQueued ? (
+                    <div className="flex flex-col items-center gap-2">
+                        <div className="relative flex size-10 items-center justify-center rounded-2xl border border-amber-200/80 bg-amber-50/80 text-amber-600 shadow-xs dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-400">
+                            <Clock className="size-5 animate-spin" style={{ animationDuration: "6s" }} />
+                        </div>
+                        <div className="space-y-0.5">
+                            <div className="text-xs font-semibold text-stone-800 dark:text-stone-200">
+                                {t("workbench.queuePosition", "前方还有 {{count}} 人", { count: queuePosition || 1 })}
+                            </div>
+                            <div className="text-[11px] text-stone-400 dark:text-stone-500">
+                                {t("workbench.queueEstimate", "预计等待约 {{seconds}} 秒", { seconds: estimatedWaitSeconds ?? 45 })}
+                            </div>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="flex flex-col items-center gap-2.5 w-full px-4">
+                        <div className="relative flex size-10 items-center justify-center rounded-2xl border border-blue-200/80 bg-blue-50/80 text-blue-600 shadow-xs dark:border-blue-900/50 dark:bg-blue-950/40 dark:text-blue-400">
+                            <Sparkles className="size-5 animate-pulse" />
+                        </div>
+                        <div className="w-full space-y-1.5">
+                            <div className="flex items-center justify-between text-xs text-stone-600 dark:text-stone-300">
+                                <span>{t("workbench.drawing", "正在绘制中...")}</span>
+                                <span className="font-mono font-semibold tabular-nums text-blue-600 dark:text-blue-400">{pct}%</span>
+                            </div>
+                            <Progress percent={pct} size="small" showInfo={false} strokeColor={{ "0%": "#3b82f6", "100%": "#60a5fa" }} />
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            {/* Bottom Hint */}
+            <div className="relative z-10 text-center text-[10px] text-stone-400 dark:text-stone-500">
+                {isQueued ? t("workbench.queueHint", "已进入全局并发排队，请稍候…") : t("workbench.renderHint", "高精度神经网络渲染中…")}
             </div>
         </div>
     );
