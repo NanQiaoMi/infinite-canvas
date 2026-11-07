@@ -109,20 +109,8 @@ export function createRelayHandler(deps: RelayDeps) {
             eventId = reservation.eventId;
         }
 
-        let upstream: Response;
-        try {
-            upstream = await fetchUpstream(req, target, channel, method, bodyBytes, deps.config);
-        } catch (error) {
-            if (eventId !== null) settleQuota(deps.db, eventId, policy.refundOnFailure ? "released" : "committed", null);
-            if (error instanceof HttpError) throw error;
-            if (req.signal.aborted) return new Response(null, { status: 499 });
-            const message = error instanceof Error ? error.message : "unknown error";
-            log.warn("upstream request failed", { endpoint: target.pathname, message });
-            throw new HttpError(502, "upstream_unreachable", `上游接口不可达：${message}`);
-        }
-
-        // 当上游不支持 /v1/responses（返回 404）时，自动降级并转换为标准的 /v1/chat/completions
-        if (upstream.status === 404 && target.pathname.endsWith("/responses") && method === "POST" && bodyBytes) {
+        const tryResponsesFallback = async (originalError?: unknown): Promise<Response | null> => {
+            if (!target.pathname.endsWith("/responses") || method !== "POST" || !bodyBytes) return null;
             try {
                 const fallbackTarget = new URL(target.toString().replace(/\/responses$/, "/chat/completions"));
                 const parsedBody = JSON.parse(new TextDecoder().decode(bodyBytes)) as Record<string, unknown>;
@@ -130,13 +118,38 @@ export function createRelayHandler(deps: RelayDeps) {
                 const chatBodyBytes = new TextEncoder().encode(JSON.stringify(chatBody));
                 const fallbackResponse = await fetchUpstream(req, fallbackTarget, channel, method, chatBodyBytes, deps.config);
                 if (fallbackResponse.status >= 200 && fallbackResponse.status < 300) {
-                    await upstream.body?.cancel().catch(() => undefined);
-                    upstream = await adaptChatCompletionsResponse(fallbackResponse, Boolean(parsedBody.stream));
-                } else {
-                    await fallbackResponse.body?.cancel().catch(() => undefined);
+                    return await adaptChatCompletionsResponse(fallbackResponse, Boolean(parsedBody.stream));
                 }
+                await fallbackResponse.body?.cancel().catch(() => undefined);
             } catch (fallbackError) {
-                log.warn("responses fallback to chat/completions failed", { error: String(fallbackError) });
+                log.warn("responses fallback to chat/completions failed", { error: String(fallbackError), originalError: String(originalError) });
+            }
+            return null;
+        };
+
+        let upstream: Response;
+        try {
+            upstream = await fetchUpstream(req, target, channel, method, bodyBytes, deps.config);
+        } catch (error) {
+            const fallback = await tryResponsesFallback(error);
+            if (fallback) {
+                upstream = fallback;
+            } else {
+                if (eventId !== null) settleQuota(deps.db, eventId, policy.refundOnFailure ? "released" : "committed", null);
+                if (error instanceof HttpError) throw error;
+                if (req.signal.aborted) return new Response(null, { status: 499 });
+                const message = error instanceof Error ? error.message : "unknown error";
+                log.warn("upstream request failed", { endpoint: target.pathname, message });
+                throw new HttpError(502, "upstream_unreachable", `上游接口不可达：${message}`);
+            }
+        }
+
+        // 当上游不支持 /v1/responses（返回 404/405/500/502 等异常）时，自动降级并转换为标准的 /v1/chat/completions
+        if (upstream.status >= 400 && target.pathname.endsWith("/responses") && method === "POST" && bodyBytes) {
+            const fallback = await tryResponsesFallback();
+            if (fallback) {
+                await upstream.body?.cancel().catch(() => undefined);
+                upstream = fallback;
             }
         }
 

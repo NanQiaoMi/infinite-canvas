@@ -485,9 +485,22 @@ describe("对话运行时", () => {
         const currentEchoFirst = "已生成一张竖版海报素材，采用冷色系。好的，为你绘制新的猫咪。";
         expect(stripEchoedPrefix(currentEchoFirst, prevFirstSentence)).toBe("好的，为你绘制新的猫咪。");
 
+        // 多行前置换行复读命中测试（如上一轮先说生成成功，第二句才是海报素材，当前轮直接从第二句复读）
+        const prevMultiLine = "生成成功\n\n已生成一张竖版海报素材，尺寸为 1086 x 1448，使用 GPT Image 2.6。";
+        const currEchoSecond = "已生成一张竖版海报素材，尺寸为 1086 x 1448，使用 GPT Image 2.6。正在为您画一只可爱的猫咪。";
+        expect(stripEchoedPrefix(currEchoSecond, prevMultiLine)).toBe("正在为您画一只可爱的猫咪。");
+
         // 无复读时原样返回
         const normalText = "好的，为您构思如下画面：";
         expect(stripEchoedPrefix(normalText, prev)).toBe(normalText);
+    });
+
+    test("formatSessionTitle 智能提炼会话标题并平滑省略", async () => {
+        const { formatSessionTitle } = await import("@/stores/use-conversation-agent-store");
+        expect(formatSessionTitle("在画布上批量生成4张不同风格的赛博朋克猫咪头像，并排排开")).toBe("4张不同风格的赛博朋克猫咪头像，并排...");
+        expect(formatSessionTitle("生成png透明图片：一个红苹果")).toBe("一个红苹果");
+        expect(formatSessionTitle("帮我生成海报素材")).toBe("海报素材");
+        expect(formatSessionTitle("你好你能干什么")).toBe("你好你能干什么");
     });
 
     test("toModelMessages 自动剔除历史中的生图套话总结，防止模型在下一轮复读", async () => {
