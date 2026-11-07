@@ -173,7 +173,8 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
             setInput("");
             setStreamingText("");
 
-            const intent = detectAgentIntent(text);
+            const history = useConversationAgentStore.getState().sessions.find((s) => s.id === sessionId)?.messages ?? [];
+            const intent = detectAgentIntent(text, { history });
             const initialLabel = getInitialUnderstandStepLabel(text, intent);
             setSteps([{ id: "understand", kind: "understand", label: initialLabel, status: "running" }]);
             setRunning(true);
@@ -182,7 +183,6 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
             controllerRef.current = controller;
 
             try {
-                const history = useConversationAgentStore.getState().sessions.find((s) => s.id === sessionId)?.messages ?? [];
                 const result = await runAgentTurn({
                     locale: agentLocaleOf("zh-CN"),
                     messages: history,
@@ -239,12 +239,21 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
 
                 const finalSteps = currentStepsRef.current.map((s) => (s.status === "running" ? { ...s, status: "done" as const } : s));
                 if (result.messages.length) {
-                    appendMessages(
-                        sessionId,
-                        result.messages.map((m, idx) =>
-                            m.role === "assistant" && idx === result.messages.length - 1 && finalSteps.length > 0 ? { ...m, steps: finalSteps } : m,
-                        ),
+                    const lastAssistantIdx = result.messages.map((m) => m.role).lastIndexOf("assistant");
+                    const messagesToAppend = result.messages.map((m, idx) =>
+                        m.role === "assistant" && idx === lastAssistantIdx && finalSteps.length > 0 ? { ...m, steps: finalSteps } : m,
                     );
+                    if (lastAssistantIdx === -1 && finalSteps.length > 0) {
+                        messagesToAppend.push({
+                            id: nanoid(),
+                            role: "assistant",
+                            text: "已完成画布操作指令。",
+                            steps: finalSteps,
+                            promptBlocks: [],
+                            createdAt: Date.now(),
+                        });
+                    }
+                    appendMessages(sessionId, messagesToAppend);
                 }
                 if (result.roundLimitReached) {
                     appendMessages(sessionId, [{ id: nanoid(), role: "error", text: "已达最大循环轮次，任务中止", createdAt: Date.now() }]);

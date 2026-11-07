@@ -7,29 +7,52 @@ export type ParsedAgentOutput = {
     invalidCalls: Array<{ call: AgentToolCall; error: string }>;
 };
 
-const BLOCK_PATTERN = "```(tool|prompt)[ \\t]*\\r?\\n([\\s\\S]*?)```";
+const BLOCK_PATTERN = "```(tool|prompt)(?:[:\\s-]([a-zA-Z0-9_]+))?[ \\t]*\\r?\\n([\\s\\S]*?)```";
 const FENCED_BLOCK_RE = /(```[\s\S]*?```)/g;
 const COMPLETE_BLOCK_RE = new RegExp(BLOCK_PATTERN, "gi");
-const OPEN_BLOCK_RE = /```(?:tool|prompt)/gi;
+const OPEN_BLOCK_RE = /```(?:tool|prompt)(?:[:\s-][a-zA-Z0-9_]+)?/gi;
 
-function parseToolBlock(body: string): { ok: true; call: AgentToolCall } | { ok: false; call: AgentToolCall; error: string } {
+function parseToolBlock(body: string, headerTool?: string): { ok: true; call: AgentToolCall } | { ok: false; call: AgentToolCall; error: string } {
+    let trimmed = body.trim();
+    let inferredTool = (headerTool || "").trim();
+
+    // 支持首行是工具名（如 ```tool\ncanvas_batch_generate_nodes\n{...}```）
+    const firstLineMatch = trimmed.match(/^([a-zA-Z0-9_]+)\s*\r?\n([\s\S]+)$/);
+    if (firstLineMatch && (firstLineMatch[1].startsWith("canvas_") || firstLineMatch[1].includes("image") || firstLineMatch[1].includes("prompt"))) {
+        inferredTool = inferredTool || firstLineMatch[1];
+        trimmed = firstLineMatch[2].trim();
+    }
+
     let value: unknown;
     try {
-        value = JSON.parse(body.trim());
+        value = JSON.parse(trimmed);
     } catch {
-        return { ok: false, call: { tool: "", arguments: {} }, error: "工具调用 JSON 解析失败" };
+        return { ok: false, call: { tool: inferredTool, arguments: {} }, error: "工具调用 JSON 解析失败" };
     }
     if (!value || typeof value !== "object" || Array.isArray(value)) {
-        return { ok: false, call: { tool: "", arguments: {} }, error: "工具调用必须是 JSON 对象" };
+        return { ok: false, call: { tool: inferredTool, arguments: {} }, error: "工具调用必须是 JSON 对象" };
     }
     const record = value as Record<string, unknown>;
-    const tool = typeof record.tool === "string" ? record.tool.trim() : "";
-    if (!tool) return { ok: false, call: { tool: "", arguments: {} }, error: "工具调用缺少 tool 字段" };
-    const rawArgs = record.arguments;
-    if (rawArgs !== undefined && rawArgs !== null && (typeof rawArgs !== "object" || Array.isArray(rawArgs))) {
-        return { ok: false, call: { tool, arguments: {} }, error: "工具参数 arguments 必须是对象" };
+    let tool = typeof record.tool === "string" ? record.tool.trim() : inferredTool;
+    if (!tool) {
+        if (Array.isArray(record.tasks)) {
+            tool = "canvas_batch_generate_nodes";
+        } else if (typeof record.prompt === "string") {
+            tool = "generate_image";
+        } else {
+            return { ok: false, call: { tool: "", arguments: {} }, error: "工具调用缺少 tool 字段" };
+        }
     }
-    return { ok: true, call: { tool, arguments: (rawArgs as Record<string, unknown> | undefined) ?? {} } };
+
+    let args: Record<string, unknown> = {};
+    if (record.arguments && typeof record.arguments === "object" && !Array.isArray(record.arguments)) {
+        args = record.arguments as Record<string, unknown>;
+    } else {
+        // 允许扁平参数结构：除 tool 外所有字段均视作入参
+        const { tool: _ignored, ...rest } = record;
+        args = rest;
+    }
+    return { ok: true, call: { tool, arguments: args } };
 }
 
 /**
@@ -71,13 +94,13 @@ export function parseAgentOutput(raw: string): ParsedAgentOutput {
     const promptBlocks: string[] = [];
     const invalidCalls: Array<{ call: AgentToolCall; error: string }> = [];
     const displayText = raw
-        .replace(new RegExp(BLOCK_PATTERN, "gi"), (_match, type: string, body: string) => {
+        .replace(new RegExp(BLOCK_PATTERN, "gi"), (_match, type: string, headerTool: string | undefined, body: string) => {
             if (type.toLowerCase() === "prompt") {
                 const text = body.trim();
                 if (text) promptBlocks.push(text);
                 return "";
             }
-            const parsed = parseToolBlock(body);
+            const parsed = parseToolBlock(body, headerTool);
             if (parsed.ok) toolCalls.push(parsed.call);
             else invalidCalls.push({ call: parsed.call, error: parsed.error });
             return "";

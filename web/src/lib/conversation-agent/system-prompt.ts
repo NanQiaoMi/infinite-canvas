@@ -155,7 +155,17 @@ const ZH_PROMPT = `你是「无限画布」内置的 AI 创作助手，运行在
 ## 无限画布操作专区（当工具列表中包含 canvas_* 工具时）
 当你处于无限画布中时，你可以通过内置工具直接操作画布节点与批量生成：
 1. 单节点生图：用户要求在画布上生成图片时，调用 canvas_create_image_node 工具，系统会自动在画布空位创建节点并立即启动生成。
+示例：
+\`\`\`tool
+{"tool":"canvas_create_image_node","arguments":{"prompt":"机甲战士正面立绘，超清细节，金属机械质感","size":"768x1024","title":"核心机甲","run":true}}
+\`\`\`
+
 2. 批量生成与海报拆解：当用户要求批量生成多张图、拆解海报为多个素材、生成系列图标时，在思考中规划好各图层，调用 canvas_batch_generate_nodes 工具，系统会按网格或横向将多个节点自动排开并同时启动生成。
+示例：
+\`\`\`tool
+{"tool":"canvas_batch_generate_nodes","arguments":{"tasks":[{"prompt":"赛博朋克猫咪头像1，霓虹发光义眼","title":"霓虹猫咪","size":"1024x1024"},{"prompt":"赛博朋克猫咪头像2，机械改造齿轮","title":"机械猫咪","size":"1024x1024"},{"prompt":"赛博朋克猫咪头像3，雨夜黑客护目镜","title":"黑客猫咪","size":"1024x1024"},{"prompt":"赛博朋克猫咪头像4，全息幻彩科技光晕","title":"全息猫咪","size":"1024x1024"}],"layout":"horizontal","run":true}}
+\`\`\`
+
 3. 节点操作：
    - 查看画布节点与连线：调用 canvas_get_context；
    - 记录灵感便签：调用 canvas_create_text_node；
@@ -302,7 +312,12 @@ export function buildSystemPrompt(options: { locale: AgentLocale; context: Agent
  * 本地意图判定为「生成/改图」但不是高置信度直接执行时，在首轮模型调用前注入的强约束指令，
  * 避免模型把完整提示词当成聊天点评，或者只回复文字不调用工具。
  */
-export function buildIntentDirective(locale: AgentLocale, intent: AgentIntent) {
+export function buildIntentDirective(
+    locale: AgentLocale,
+    intent: AgentIntent,
+    context?: AgentContextInput,
+    tools?: AgentToolDefinition[],
+) {
     const isEdit = intent.kind === "edit_image";
     const tool = isEdit ? "edit_image" : "generate_image";
     const prompt = intent.prompt.trim();
@@ -313,8 +328,12 @@ export function buildIntentDirective(locale: AgentLocale, intent: AgentIntent) {
     const usageScene = intent.usageScene;
     const batchCount = intent.batchCount;
 
+    const hasCanvasTools = tools ? tools.some((t) => t.name.startsWith("canvas_")) : true;
+    const isCanvasEnv = context ? context.pageContext === "canvas" : intent.isCanvas;
+    const allowCanvasTool = Boolean(intent.isCanvas && isCanvasEnv && hasCanvasTools);
+
     if (locale === "zh") {
-        if (intent.isCanvas) {
+        if (allowCanvasTool) {
             const countDesc = batchCount ? `${batchCount} 个` : "多个";
             const layout = intent.layout || "horizontal";
             const isBatch = intent.decompose || (batchCount && batchCount > 1);
@@ -364,10 +383,18 @@ export function buildIntentDirective(locale: AgentLocale, intent: AgentIntent) {
 
         if (isDecompose) {
             const countDesc = batchCount ? `${batchCount} 个` : "2-3 个核心独立";
-            lines.push(`5) 拆分任务/成套素材生成（任务拆解）：将任务拆解为 ${countDesc}图层素材（如主体、背景、微标或系列变体）。在普通对话中输出多个 tool 代码块并发或连续出图；在画布页面中优先调用 canvas_batch_generate_nodes 自动排布生成。`);
+            if (allowCanvasTool) {
+                lines.push(`5) 拆分任务/成套素材生成（任务拆解）：将任务拆解为 ${countDesc}图层素材（如主体、背景、微标或系列变体），在画布中优先调用 canvas_batch_generate_nodes 自动排布生成。`);
+            } else {
+                lines.push(`5) 拆分任务/成套素材生成（任务拆解）：将任务拆解为 ${countDesc}图层素材（如主体、背景、微标或系列变体），直接在当前对话中输出多个 tool 代码块并发调用 generate_image 出图。`);
+            }
         }
 
-        lines.push(`6) 交付总结：生成完成后用 1-3 句专业语言总结做出的设计决策（尺寸、风格、图层逻辑），并给出下一步微调或衍生建议。`);
+        if (intent.isCanvas && !allowCanvasTool) {
+            lines.push(`6) 交付总结：生成完成后用 1-3 句专业语言总结各素材设计；请在末尾温馨提示用户：各款素材已在当前对话生成完毕，可在卡片点击「加入资产」或前往「我的画布」自由排布创作。`);
+        } else {
+            lines.push(`6) 交付总结：生成完成后用 1-3 句专业语言总结做出的设计决策（尺寸、风格、图层逻辑），并给出下一步微调或衍生建议。`);
+        }
         return lines.join("\n");
     }
 

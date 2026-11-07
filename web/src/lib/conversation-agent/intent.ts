@@ -43,7 +43,8 @@ export const GIF_INTENT_PATTERN = /动图|动态图|动态表情包|动效表情
 export const TRANSPARENT_INTENT_PATTERN = /透明底|透明背景|透明图|透明png|png透明|transparent\s*(background|png)?/i;
 
 /** 任务拆解与批量生成意图关键词：命中时标记 decompose 为 true */
-export const DECOMPOSE_INTENT_PATTERN = /拆解|拆分|分解|分层|多图层|图层素材|成套|一套|组图|系列|多角度|不同风格|四格|九宫格|分步生成|批量生成|多素材|并排排开|在画布排开|分步/i;
+export const DECOMPOSE_INTENT_PATTERN =
+    /拆解|拆分|分解|分层|多图层|图层素材|成套|一套|组图|系列|多角度|不同风格|四格|九宫格|分步生成|批量生成|多素材|海报素材|设计素材|游戏素材|各类素材|系列素材|素材套件|套件|并排排开|在画布排开|分步/i;
 
 /** 画布节点生成与排布意图关键词：命中时标记 isCanvas 为 true */
 export const CANVAS_ACTION_PATTERN = /画布|节点|并排|排开|横排|横向排列|竖排|纵排|网格排列|并在画布/i;
@@ -119,11 +120,11 @@ const COLON_GENERATE_PATTERN =
 
 /** 开头的客套/连接词，提取正文时先去掉。 */
 const LEADING_FILLER_PATTERN =
-    /^(?:请|麻烦|帮我|帮忙|给我|再|重新|继续|然后|现在|直接|我想|想要|打算|能不能帮我|可以帮我|能帮我|帮我做一张|帮我生成一张|帮我画一张|帮我设计一张)+[\s，,。.!！、]*/;
+    /^(?:请|麻烦|帮我|帮忙|给我|再|重新|继续|然后|现在|直接|我想|想要|打算|能不能帮我|可以帮我|能帮我|在画布上?|在画板上?|在无限画布上?)+[\s，,。.!！、]*/;
 
 /** 生成类指令词 + 量词/对象词，提取正文时去掉。 */
 const LEADING_GENERATE_PATTERN =
-    /^(?:生成|创建|绘制|画|出图|出|做|来|制作|换|设计|搞|整|安排|弄)\s*(?:一?\s*[张幅个组份版套]|几\s*[张幅个套]|\d+\s*[张幅个套]|[一二两三四五六七八九几]\s*[张幅个套])?\s*(?:图片|图像|照片|插画|海报|头像|壁纸|封面|图|画|作品|动图|动态图|动态表情包|表情包|gif|透明图|透明底|透明图片|透明png|png透明|png透明图片|png透明图|素材)?\s*[：:，,。.!！、\s]*/i;
+    /^(?:(?:在画布上?|在画板上?|在无限画布上?)\s*)?(?:批量)?(?:生成|创建|绘制|画|出图|出|做|来|制作|换|设计|搞|整|安排|弄)\s*(?:一套\s*(?:\d+|[一二两三四五六七八九])\s*[个张幅]|一套|一组|一?\s*[张幅个组份版套]|几\s*[张幅个套]|\d+\s*[张幅个套]|[一二两三四五六七八九几]\s*[张幅个套])?\s*(?:(?:透明底|透明背景|透明图|透明png|png透明|png透明图片|png透明图)?\s*(?:图片|图像|照片|插画|海报|头像|壁纸|封面|图|画|作品|动图|动态图|动态表情包|表情包|gif|素材|图标))?\s*[：:，,。.!！、\s]*/i;
 
 /** 指代型文本：这类内容不能当作提示词，交给运行时用历史 promptBlocks 兜底。 */
 const REFERENCE_PROMPT_PATTERN = /(提示词|这张图|那张图|这个|那个|上面|上述|刚才|之前|参考图)/i;
@@ -169,26 +170,37 @@ function detectUsageScene(text: string): string | undefined {
     return undefined;
 }
 
-/** 指代型文本：仅当其中没有任何画面要素时才清空，避免把冒号后显式给出的完整提示词误删。 */
+/** 指代型文本：仅当纯为指令词且没有任何具体主体时才清空，避免误删包含画面的提示词。 */
 function sanitizeExtractedPrompt(prompt: string, input: string) {
     if (!prompt) return "";
     if (REFERENCE_PROMPT_PATTERN.test(prompt) && countVisualCategories(prompt) === 0) return "";
-    if (prompt === input && countVisualCategories(prompt) === 0) return "";
+    if (prompt === input && countVisualCategories(prompt) === 0 && prompt.length < 16) return "";
     return prompt;
 }
 
-/** 去掉「帮我生成一张…」这类指令前缀，得到提示词正文。 */
+/** 去掉「帮我生成一张…」「在画布上生成一套3个…」这类指令前缀，得到干净提示词正文。 */
 function stripInstructionPrefix(text: string) {
-    const trimmed = text.trim().replace(LEADING_FILLER_PATTERN, "").trim();
-    const stripped = trimmed.replace(LEADING_GENERATE_PATTERN, "").replace(LEADING_EN_PATTERN, "").trim();
-    return stripped.replace(/^[，,。.!！、：:\s]+/, "").trim();
+    let trimmed = text.trim().replace(LEADING_FILLER_PATTERN, "").trim();
+    trimmed = trimmed.replace(LEADING_GENERATE_PATTERN, "").replace(LEADING_EN_PATTERN, "").trim();
+    trimmed = trimmed.replace(/^(?:透明底|透明背景|透明图|透明png|png透明|png透明图片|png透明图)+[\s，,。.!！、]*/i, "").trim();
+    const stripped = trimmed.replace(/^[，,。.!！、：:\s]+/, "").trim();
+    if ((stripped === "素材" || !stripped) && /海报/i.test(text)) {
+        return "海报设计素材（主体核心元素、装饰边框与纹样）";
+    }
+    if ((stripped === "素材" || !stripped) && /游戏/i.test(text)) {
+        return "游戏道具素材";
+    }
+    return stripped;
 }
 
 /**
  * 判定用户本轮意图。
- * 判定顺序：元指令 → 否定 → 填入工作台 → 改图 → 纯用法咨询 → 显式生成/拆解 → 提示词相关 → 独立完整提示词 → 聊天。
+ * 判定顺序：元指令 → 否定 → 填入工作台 → 改图 → 纯用法咨询 → 显式生成/拆解 → 上下文延续 → 独立完整提示词 → 聊天。
  */
-export function detectAgentIntent(text: string, options?: { hasReferences?: boolean }): AgentIntent {
+export function detectAgentIntent(
+    text: string,
+    options?: { hasReferences?: boolean; history?: Array<{ role: string; text?: string; promptBlocks?: string[] }> },
+): AgentIntent {
     const input = text.trim();
     if (!input) return CHAT_INTENT;
 
@@ -206,12 +218,26 @@ export function detectAgentIntent(text: string, options?: { hasReferences?: bool
         return { kind: "edit_image", prompt: input, explicit: true, direct: true };
     }
 
-    const isGif = GIF_INTENT_PATTERN.test(input);
-    const isTransparent = TRANSPARENT_INTENT_PATTERN.test(input);
-    const isDecompose = DECOMPOSE_INTENT_PATTERN.test(input);
+    // 历史会话上下文继承检测（例如多轮会话中模型询问偏好，用户后续作答）
+    const recentMessages = options?.history ? [...options.history].slice(-4) : [];
+    const historyGifContext = recentMessages.some(
+        (m) =>
+            (m.role === "assistant" && /想要单张.*还是四格|动图|动态表情包|\bgif\b/i.test(m.text || "")) ||
+            (m.role === "user" && GIF_INTENT_PATTERN.test(m.text || "")),
+    );
+    const historyTransparentContext = recentMessages.some(
+        (m) => m.role === "user" && TRANSPARENT_INTENT_PATTERN.test(m.text || ""),
+    );
+    const historyDecomposeContext = recentMessages.some(
+        (m) => m.role === "user" && DECOMPOSE_INTENT_PATTERN.test(m.text || ""),
+    );
+
+    const isGif = GIF_INTENT_PATTERN.test(input) || historyGifContext;
+    const isTransparent = TRANSPARENT_INTENT_PATTERN.test(input) || historyTransparentContext;
+    const isDecompose = DECOMPOSE_INTENT_PATTERN.test(input) || historyDecomposeContext;
     const isCanvas = CANVAS_ACTION_PATTERN.test(input);
     const layout = /并排|横排|横向/i.test(input) ? ("horizontal" as const) : /竖排|纵排|纵向/i.test(input) ? ("vertical" as const) : isCanvas ? ("grid" as const) : undefined;
-    const usageScene = detectUsageScene(input);
+    const usageScene = detectUsageScene(input) || (historyGifContext ? "微信表情包" : undefined);
     const batchCount = extractBatchCount(input);
     const colonBody = extractColonBody(input);
 
@@ -240,6 +266,18 @@ export function detectAgentIntent(text: string, options?: { hasReferences?: bool
             ...(layout ? { layout } : {}),
             ...(usageScene ? { usageScene } : {}),
             ...(batchCount ? { batchCount } : {}),
+        };
+    }
+
+    // ⑦ 延续上下文的偏好答复（例如针对动图/表情包的简短神态回复「邪魅坏笑：一看就没憋好事」）
+    if (historyGifContext && !SMALL_TALK_PATTERN.test(input) && input.length >= 2) {
+        return {
+            kind: "generate_image",
+            prompt: `一只超级搞怪的魔性表情包，${input}，循环动态动作`,
+            explicit: true,
+            direct: false,
+            format: "gif",
+            usageScene: "微信表情包",
         };
     }
 
