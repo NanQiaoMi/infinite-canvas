@@ -80,46 +80,20 @@ export function ImageResultCard({
     };
 
     const thumb = previewUrlFor(image.storageKey) || preview;
+    const aspect = useMemo(() => {
+        if (image.width && image.height && image.width > 0 && image.height > 0) {
+            return Math.min(2.5, Math.max(0.4, image.width / image.height));
+        }
+        return 1;
+    }, [image.width, image.height]);
 
-    // 当图片尚未加载完成时：完全去除外框，波点直接在背景中流动渲染（彻底告别白色卡片框）
-    if (!loaded) {
-        return (
-            <div
-                className="relative flex aspect-square w-full flex-col justify-between overflow-hidden bg-transparent py-1 cursor-pointer"
-                onClick={() => openArtifact(image)}
-            >
-                {/* 隐藏的预加载图片 */}
-                {thumb ? (
-                    <img
-                        src={thumb}
-                        alt={image.prompt.slice(0, 40)}
-                        onLoad={() => setLoaded(true)}
-                        className="hidden"
-                    />
-                ) : null}
-
-                {/* 左上角干净的阶段文字，直接在背景中浮现 */}
-                <div className="flex items-center justify-between pb-1">
-                    <span className="agent-fade-in text-sm font-medium tracking-tight text-stone-700 dark:text-stone-300">
-                        {t("chat.waiting.phaseRender")}
-                    </span>
-                </div>
-
-                {/* 纯单色科技蓝波浪点阵，直接在背景中流动 */}
-                <div className="relative min-h-0 flex-1">
-                    <ChatGptDotMatrix aspect={1} />
-                </div>
-            </div>
-        );
-    }
-
-    // 图片加载完成：图片直接在背景中呈现（无外层白卡片包装框、无下挂工具栏框）
     return (
         <div
             className={cn(
                 "group relative cursor-pointer overflow-hidden rounded-2xl shadow-xs transition-all duration-300 hover:shadow-md",
                 selected && "ring-2 ring-stone-800 dark:ring-stone-200",
             )}
+            style={{ aspectRatio: String(aspect) }}
             onClick={() => {
                 if (selectable) {
                     onToggleSelect?.();
@@ -159,13 +133,36 @@ export function ImageResultCard({
                 </button>
             )}
 
-            {/* 图片本体：直接呈现，比例严谨 */}
-            <div className="relative flex aspect-square items-center justify-center overflow-hidden bg-stone-100/60 dark:bg-stone-900/40">
-                <img
-                    src={thumb}
-                    alt={image.prompt.slice(0, 40)}
-                    className="h-full w-full object-cover transition-transform duration-500 ease-out group-hover:scale-[1.02] agent-developing"
-                />
+            {/* 图片本体：保持与生成规格完全一致的画幅比例，无多余二次形变 */}
+            <div
+                className="relative flex h-full w-full items-center justify-center overflow-hidden bg-stone-100/60 dark:bg-stone-900/40"
+                style={{ aspectRatio: String(aspect) }}
+            >
+                {thumb ? (
+                    <img
+                        src={thumb}
+                        alt={image.prompt.slice(0, 40)}
+                        onLoad={() => setLoaded(true)}
+                        className={cn(
+                            "h-full w-full object-cover transition-opacity duration-300 ease-out group-hover:scale-[1.02] agent-developing",
+                            loaded ? "opacity-100" : "opacity-0",
+                        )}
+                    />
+                ) : null}
+
+                {/* 加载未完成时的点阵占位，比例严格一致，杜绝二次形变闪烁 */}
+                {!loaded ? (
+                    <div className="absolute inset-0 flex flex-col justify-between py-1 bg-transparent">
+                        <div className="flex items-center justify-between pb-1 px-1">
+                            <span className="agent-fade-in text-sm font-medium tracking-tight text-stone-700 dark:text-stone-300">
+                                {t("chat.waiting.phaseRender")}
+                            </span>
+                        </div>
+                        <div className="relative min-h-0 flex-1">
+                            <ChatGptDotMatrix aspect={aspect} />
+                        </div>
+                    </div>
+                ) : null}
 
                 {/* 动图 GIF 徽章 */}
                 {isGif ? (

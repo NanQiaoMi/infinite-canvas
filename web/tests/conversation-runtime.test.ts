@@ -455,4 +455,54 @@ describe("对话运行时", () => {
         expect(runner.toolCalls[2].arguments.prompt).toContain("绿色体力药水");
         expect(result.messages.map((m) => m.role)).toEqual(["assistant", "tool", "tool", "tool", "assistant"]);
     });
+
+    test("isBoilerplateSummary 正确识别后置生图套话与固定确认短语", async () => {
+        const { isBoilerplateSummary } = await import("@/lib/conversation-agent/runtime");
+        expect(isBoilerplateSummary("已完成工具调用。")).toBe(true);
+        expect(isBoilerplateSummary("图片生成已完成。")).toBe(true);
+        expect(isBoilerplateSummary("任务已完成。")).toBe(true);
+        expect(isBoilerplateSummary("生成成功")).toBe(true);
+        expect(isBoilerplateSummary("已为您在画布上创建生图节点并启动精细渲染。")).toBe(true);
+        expect(isBoilerplateSummary("已为您在画布上批量创建节点并排布，正在并行启动渲染。")).toBe(true);
+        expect(isBoilerplateSummary("已完成画布操作指令。")).toBe(true);
+        expect(isBoilerplateSummary("已生成一张竖版海报素材，尺寸为 1086 x 1448，使用 GPT Image 2.6")).toBe(true);
+        expect(isBoilerplateSummary("生成成功\n\n已为您生成一张图片，尺寸为 1024x1024。")).toBe(true);
+
+        // 真实构思、分析或回答必须保留，不被误判为套话
+        expect(isBoilerplateSummary("好的，为您构思如下画面：一只可爱的橘猫坐在阳光下……")).toBe(false);
+        expect(isBoilerplateSummary("这套游戏魔法药水图标将采用统一的奇幻 RPG 道具设计语言")).toBe(false);
+        expect(isBoilerplateSummary("在输入框里描述画面并发送，就会生成图片。")).toBe(false);
+    });
+
+    test("stripEchoedPrefix 正确剥离大模型复读上一轮回答的前缀", async () => {
+        const { stripEchoedPrefix } = await import("@/lib/conversation-agent/runtime");
+        const prev = "已生成一张竖版海报素材，尺寸为 1086 x 1448，使用 GPT Image 2.6";
+        const currentWithEcho = "已生成一张竖版海报素材，尺寸为 1086 x 1448，使用 GPT Image 2.6。现在为您构思赛博朋克猫咪头像：";
+        expect(stripEchoedPrefix(currentWithEcho, prev)).toBe("现在为您构思赛博朋克猫咪头像：");
+
+        // 首句匹配测试
+        const prevFirstSentence = "已生成一张竖版海报素材，采用冷色系。";
+        const currentEchoFirst = "已生成一张竖版海报素材，采用冷色系。好的，为你绘制新的猫咪。";
+        expect(stripEchoedPrefix(currentEchoFirst, prevFirstSentence)).toBe("好的，为你绘制新的猫咪。");
+
+        // 无复读时原样返回
+        const normalText = "好的，为您构思如下画面：";
+        expect(stripEchoedPrefix(normalText, prev)).toBe(normalText);
+    });
+
+    test("toModelMessages 自动剔除历史中的生图套话总结，防止模型在下一轮复读", async () => {
+        const { toModelMessages } = await import("@/lib/conversation-agent/runtime");
+        const history: AgentMessage[] = [
+            { id: "u1", role: "user", text: "帮我生成海报素材", createdAt: 1 },
+            { id: "a1", role: "assistant", text: "好的，为您构思如下海报画面……", promptBlocks: [], createdAt: 2 },
+            { id: "t1", role: "tool", text: "<tool_result>ok</tool_result>", call: { tool: "generate_image", arguments: {} }, result: { tool: "generate_image", ok: true }, createdAt: 3 },
+            { id: "a2", role: "assistant", text: "已生成一张竖版海报素材，尺寸为 1086 x 1448，使用 GPT Image 2.6", promptBlocks: [], createdAt: 4 },
+            { id: "u2", role: "user", text: "换成赛博朋克风格", createdAt: 5 },
+        ];
+        const modelMsgs = toModelMessages(history);
+        // a2 必须被过滤掉，不能传给大模型；a1（构思）必须保留
+        expect(modelMsgs.some((m) => m.content.includes("已生成一张竖版海报素材"))).toBe(false);
+        expect(modelMsgs.some((m) => m.content.includes("好的，为您构思如下海报画面"))).toBe(true);
+        expect(modelMsgs.map((m) => m.role)).toEqual(["user", "assistant", "user", "user"]);
+    });
 });
