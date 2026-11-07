@@ -27,7 +27,8 @@ import { requestConversationTurn } from "@/services/api/image";
 import { runAgentTurn } from "@/lib/conversation-agent/runtime";
 import { ALL_AGENT_TOOLS, executeAgentTool } from "@/lib/conversation-agent/tools";
 import { agentLocaleOf } from "@/lib/conversation-agent/system-prompt";
-import { formatAgentToolStepLabel } from "@/lib/conversation-agent/formatters";
+import { formatAgentToolStepLabel, getInitialUnderstandStepLabel } from "@/lib/conversation-agent/formatters";
+import { detectAgentIntent } from "@/lib/conversation-agent/intent";
 import type { AgentEvent, AgentStep, AgentToolCall } from "@/lib/conversation-agent/types";
 import { nativeToolCallsToAgent } from "@/lib/conversation-agent/protocol";
 import { ChatMessage } from "@/pages/chat/components/chat-message";
@@ -152,7 +153,8 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
             setInput("");
             setStreamingText("");
 
-            const initialLabel = `理解画布指令 · "${text.slice(0, 24)}"`;
+            const intent = detectAgentIntent(text);
+            const initialLabel = getInitialUnderstandStepLabel(text, intent);
             setSteps([{ id: "understand", kind: "understand", label: initialLabel, status: "running" }]);
             setRunning(true);
 

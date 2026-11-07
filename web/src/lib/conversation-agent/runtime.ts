@@ -145,10 +145,11 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
                 continue;
             }
             // 确定性兜底：模型一次工具都没调用时，按本地意图强制执行一次生成/改图，再让模型总结。
-            // prompt 只取意图提取结果或历史提示词卡片，绝不拿指令原文（如「用这个提示词生成图片」）去生图。
+            // 优先采用模型在当前轮次构思的 promptBlocks，其次采用意图提取结果或历史提示词卡片。
             if (!intentHandled && !modelToolCallMade && intentTool) {
                 const historyPrompt = lastAssistantPromptBlock(options.messages);
-                const prompt = (intent.prompt.trim() || historyPrompt).trim();
+                const candidatePrompt = parsed.promptBlocks[0] || intent.prompt.trim() || historyPrompt;
+                const prompt = candidatePrompt.trim();
                 const hasReferenceForEdit = intentTool !== "edit_image" || (options.references ?? []).some((reference) => reference.storageKey);
                 if (prompt && hasReferenceForEdit) {
                     intentHandled = true;
