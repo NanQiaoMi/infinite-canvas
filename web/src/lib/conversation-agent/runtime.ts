@@ -1,7 +1,7 @@
 import { nanoid } from "nanoid";
 
 import { inferImageSizeFromPrompt } from "./aspect-ratio";
-import { detectAgentIntent, type AgentIntent } from "./intent";
+import { detectAgentIntent, findLastGenerationPrompt, type AgentIntent } from "./intent";
 import { parseAgentOutput, serializeToolResult, stripForStreaming } from "./protocol";
 import { buildIntentDirective, buildSystemPrompt } from "./system-prompt";
 import type { AgentContextInput, AgentEvent, AgentImageRef, AgentMessage, AgentModelCall, AgentModelMessage, AgentToolCall, AgentToolDefinition, AgentToolExecutor, AgentToolResult, AgentTurnResult } from "./types";
@@ -79,15 +79,6 @@ export function toModelMessages(messages: AgentMessage[]): AgentModelMessage[] {
 
 function invalidResult(tool: string, error: string): AgentToolResult {
     return { tool, ok: false, code: "invalid_args", error };
-}
-
-/** 历史里最近一条 assistant 消息产出的提示词卡片，用于「再生成一版」这类续作请求的兜底。 */
-function lastAssistantPromptBlock(messages: AgentMessage[]) {
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-        const message = messages[index];
-        if (message.role === "assistant" && message.promptBlocks.length) return message.promptBlocks[0];
-    }
-    return "";
 }
 
 /**
@@ -221,7 +212,14 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
         if (options.signal?.aborted) return { messages: newMessages, aborted: true, roundLimitReached: false };
 
         const parsed = parseAgentOutput(turn.content);
-        const cleanedDisplayText = stripEchoedPrefix(parsed.displayText, lastAssistantText);
+        const refusal = REFUSAL_PATTERN.test(parsed.displayText);
+        let cleanedDisplayText = stripEchoedPrefix(parsed.displayText, lastAssistantText);
+        if (refusal) {
+            // 剥离大模型推诿拒绝的陈述（如「临时聊天/无法调用工具」），避免残留在对话流中
+            cleanedDisplayText = cleanedDisplayText
+                .replace(/.*(?:临时聊天|切换到普通|无法调用|后端不支持|不能执行工具).*$/gm, "")
+                .trim();
+        }
         const invalid: Array<{ call: AgentToolCall; error: string }> = [
             ...(turn.toolCallErrors || []).map((item) => ({ call: { tool: item.tool, arguments: {} }, error: item.error })),
             ...parsed.invalidCalls,
@@ -236,7 +234,6 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
             newMessages.push({ id: nanoid(), role: "tool", call: item.call, result, text: serializeToolResult(item.call, result), createdAt: Date.now() });
         }
         if (!calls.length && !invalid.length) {
-            const refusal = REFUSAL_PATTERN.test(parsed.displayText);
             if (!correctionUsed && refusal && GENERATION_INTENT_PATTERN.test(lastUserText)) {
                 correctionUsed = true;
                 options.onEvent?.({ type: "correction-start", reason: "refusal" });
@@ -282,7 +279,7 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
                         if (result.ok === false && result.code === "canceled") return { messages: newMessages, aborted: true, roundLimitReached: false };
                         continue;
                     } else {
-                        const historyPrompt = lastAssistantPromptBlock(options.messages);
+                        const historyPrompt = findLastGenerationPrompt(options.messages);
                         const candidatePrompt = parsed.promptBlocks[0] || intent.prompt.trim() || historyPrompt;
                         const prompt = candidatePrompt.trim();
                         if (prompt) {
@@ -307,7 +304,7 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
                     }
                 } else {
                     intentHandled = true;
-                    const historyPrompt = lastAssistantPromptBlock(options.messages);
+                    const historyPrompt = findLastGenerationPrompt(options.messages);
                     // 在普通对话模式下，如果是拆解或批量生成任务，并发执行多张 generate_image
                     const isBatchChat = (intent.decompose || (intent.batchCount && intent.batchCount > 1)) && intentTool === "generate_image";
                     if (isBatchChat) {

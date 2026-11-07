@@ -120,6 +120,20 @@ export default function ChatPage() {
         const changed = lastSessionRef.current !== activeSessionId;
         lastSessionRef.current = activeSessionId;
         if (changed) {
+            if (controllerRef.current) {
+                controllerRef.current.abort();
+                controllerRef.current = null;
+            }
+            if (stepsTimerRef.current) window.clearTimeout(stepsTimerRef.current);
+            if (exitTimerRef.current) window.clearTimeout(exitTimerRef.current);
+            setRunning(false);
+            setStreamingText("");
+            setRunningTool(null);
+            setCompletedToolResult(null);
+            setExitingTool(null);
+            setStepsState([]);
+            setRunningIntent(null);
+            setReferences([]);
             node.scrollTop = node.scrollHeight;
             return;
         }
@@ -394,23 +408,27 @@ export default function ChatPage() {
             } catch (error) {
                 const aborted = controller.signal.aborted;
                 const partial = useConversationAgentStore.getState().streamingText;
+                const isCurrentSession = useConversationAgentStore.getState().activeSessionId === sessionId;
                 if (aborted) {
-                    if (partial.trim()) appendMessages(sessionId, [{ id: nanoid(), role: "assistant", text: partial, promptBlocks: [], createdAt: Date.now() }]);
-                } else {
+                    if (partial.trim() && isCurrentSession) appendMessages(sessionId, [{ id: nanoid(), role: "assistant", text: partial, promptBlocks: [], createdAt: Date.now() }]);
+                } else if (isCurrentSession) {
                     const raw = error instanceof Error ? error.message : String(error);
                     appendMessages(sessionId, [{ id: nanoid(), role: "error", text: isNetworkError(error) ? t("chat.errors.network") : raw, createdAt: Date.now() }]);
                 }
             } finally {
-                setRunning(false);
-                setRunningTool(null);
-                setRunningIntent(null);
-                setCompletedToolResult(null);
-                setExitingTool(null);
-                setStreamingText("");
-                controllerRef.current = null;
-                setSteps([]);
-                if (stepsTimerRef.current) window.clearTimeout(stepsTimerRef.current);
-                setTurnStartedAt(0);
+                const isCurrentSession = useConversationAgentStore.getState().activeSessionId === sessionId;
+                if (isCurrentSession) {
+                    setRunning(false);
+                    setRunningTool(null);
+                    setRunningIntent(null);
+                    setCompletedToolResult(null);
+                    setExitingTool(null);
+                    setStreamingText("");
+                    controllerRef.current = null;
+                    setSteps([]);
+                    if (stepsTimerRef.current) window.clearTimeout(stepsTimerRef.current);
+                    setTurnStartedAt(0);
+                }
                 useQuotaStore.getState().scheduleRefresh();
             }
         },

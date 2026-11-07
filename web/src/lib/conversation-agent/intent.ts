@@ -60,15 +60,15 @@ const VISUAL_CATEGORY_PATTERNS: RegExp[] = [
     // 色彩
     /色彩|色调|配色|color|palette|tone/i,
     // 人物主体
-    /少女|女孩|女性|男生|男孩|人物|肖像|角色|woman|girl|man|boy|portrait|character/i,
+    /少女|女孩|女性|男生|男孩|人物|肖像|角色|神仙|神话|西游记|古典|孙悟空|猪八戒|唐僧|沙僧|沙和尚|哪吒|二郎神|白骨精|牛魔王|法术|仙侠|武侠|机甲|精灵|妖怪|woman|girl|man|boy|portrait|character/i,
     // 服装
-    /水手服|校服|JK|连衣裙|百褶裙|服装|穿搭|outfit|uniform|dress/i,
+    /水手服|校服|JK|连衣裙|百褶裙|服装|穿搭|毛衣|outfit|uniform|dress/i,
     // 场景/背景
-    /背景|场景|校园|樱花|街道|城市|森林|天空|海边|室内|房间|scene|background|street|forest|sky/i,
+    /背景|场景|校园|樱花|街道|城市|森林|天空|海边|室内|房间|车厢|地铁|公交|列车|火车|高铁|站台|车站|马路|公路|商场|广场|建筑|桥梁|走廊|客车|scene|background|street|forest|sky/i,
     // 表情姿态
-    /回眸|微笑|姿态|动作|看向|镜头前|pose|smile|looking/i,
-    // 画质细节
-    /细节|纹理|皮肤|画质|高清|超清|8k|4k|detail|texture|high quality|sharp/i,
+    /回眸|微笑|姿态|动作|看向|镜头前|拥挤|站立|坐着|通勤|pose|smile|looking/i,
+    // 画质细节与视觉文字
+    /细节|纹理|皮肤|画质|高清|超清|8k|4k|滚动屏|电子屏|显示屏|标示|标识|警告|标志|海报|贴纸|文字|字体|牌匾|灯牌|霓虹灯|标语|反光|透光|投影|玻璃|detail|texture|high quality|sharp/i,
     // 负面约束
     /避免|不要|负面|avoid/i,
 ];
@@ -179,7 +179,7 @@ function sanitizeExtractedPrompt(prompt: string, input: string) {
 }
 
 /** 去掉「帮我生成一张…」「在画布上生成一套3个…」这类指令前缀，得到干净提示词正文。 */
-function stripInstructionPrefix(text: string) {
+export function stripInstructionPrefix(text: string) {
     let trimmed = text.trim().replace(LEADING_FILLER_PATTERN, "").trim();
     trimmed = trimmed.replace(LEADING_GENERATE_PATTERN, "").replace(LEADING_EN_PATTERN, "").trim();
     trimmed = trimmed.replace(/^(?:透明底|透明背景|透明图|透明png|png透明|png透明图片|png透明图)+[\s，,。.!！、]*/i, "").trim();
@@ -193,13 +193,60 @@ function stripInstructionPrefix(text: string) {
     return stripped;
 }
 
+/** 提取续作/增补中的微调要求（如从「换个姿势再来一个」中提取「换个姿势」） */
+function extractFollowUpModification(input: string): string {
+    return input
+        .replace(/(?:再|另外再?|重新|接着|继续)?(?:生成|画|来|做|出|整|搞)?\s*(?:一?[个张幅组套版]|几[个张幅]|同款)?$/i, "")
+        .replace(/^[，,。.!！、：:\s]+|[，,。.!！、：:\s]+$/g, "")
+        .trim();
+}
+
+/** 延续上一轮生成的追问/增补指令：如「再生成一个」「再来一张」「换个姿势再来一个」「不改变她原来的脸，再来一张」 */
+const FOLLOW_UP_PATTERN =
+    /(?:再|另外再?|重新|接着|继续|换[个一]|换种|换套|换身|按[照这个]?风格再?|延续[这个]?风格再?)(?:生成|画|来|做|出|整|搞)?\s*(?:一?[个张幅组套版]|几[个张幅]|同款)?|不改变.*再来|换个.*再[来画生成]|延续.*再[来画生成]|按.*风格.*再/i;
+
+/** 追溯历史会话中最近一次的生成提示词，用于「再生成一个」「换个姿势再来一张」等延续生成意图 */
+export function findLastGenerationPrompt(history?: Array<{ role: string; text?: string; call?: AgentToolCall; promptBlocks?: string[] }>): string {
+    if (!history || !history.length) return "";
+    for (let index = history.length - 1; index >= 0; index -= 1) {
+        const item = history[index];
+        if (item.call && typeof item.call === "object") {
+            const call = item.call;
+            if (call.tool === "generate_image" || call.tool === "edit_image" || call.tool === "canvas_create_image_node") {
+                const prompt = typeof call.arguments?.prompt === "string" ? call.arguments.prompt.trim() : "";
+                if (prompt) return prompt;
+            }
+            if (call.tool === "canvas_batch_generate_nodes" && Array.isArray(call.arguments?.tasks)) {
+                const first = call.arguments.tasks[0];
+                if (first && typeof first.prompt === "string" && first.prompt.trim()) {
+                    return first.prompt.trim();
+                }
+            }
+        }
+        if (item.role === "assistant" && Array.isArray(item.promptBlocks) && item.promptBlocks.length) {
+            const p = String(item.promptBlocks[0] || "").trim();
+            if (p) return p;
+        }
+        if (item.role === "user" && item.text) {
+            if (REFERENCE_PROMPT_PATTERN.test(item.text) || FOLLOW_UP_PATTERN.test(item.text) || PURE_INQUIRY_PATTERN.test(item.text)) {
+                continue;
+            }
+            const stripped = stripInstructionPrefix(item.text);
+            if (stripped.length >= 8 && (countVisualCategories(stripped) >= 1 || stripped.length >= 16)) {
+                return stripped;
+            }
+        }
+    }
+    return "";
+}
+
 /**
  * 判定用户本轮意图。
- * 判定顺序：元指令 → 否定 → 填入工作台 → 改图 → 纯用法咨询 → 显式生成/拆解 → 上下文延续 → 独立完整提示词 → 聊天。
+ * 判定顺序：元指令 → 否定 → 填入工作台 → 改图 → 纯用法咨询 → 延续上一轮生成 → 显式生成/拆解 → 上下文延续 → 独立完整提示词 → 聊天。
  */
 export function detectAgentIntent(
     text: string,
-    options?: { hasReferences?: boolean; history?: Array<{ role: string; text?: string; promptBlocks?: string[] }> },
+    options?: { hasReferences?: boolean; history?: Array<{ role: string; text?: string; call?: AgentToolCall; promptBlocks?: string[] }> },
 ): AgentIntent {
     const input = text.trim();
     if (!input) return CHAT_INTENT;
@@ -246,7 +293,26 @@ export function detectAgentIntent(
         return CHAT_INTENT;
     }
 
-    // ⑥ 显式生成/创作/设计/拆解动作 → 生成图片
+    // ⑥ 续作/增补上一轮生成（例如「再生成一个」「再来一张」「换个姿势再来一个」）
+    const isFollowUp = FOLLOW_UP_PATTERN.test(input) || /^(再来|再出|换一版|换个风格|换个姿势)$/.test(input);
+    const previousPrompt = findLastGenerationPrompt(options?.history);
+    if (isFollowUp && previousPrompt) {
+        const modification = extractFollowUpModification(input);
+        const combined = modification ? `${previousPrompt}，${modification}` : previousPrompt;
+        return {
+            kind: "generate_image",
+            prompt: combined,
+            explicit: true,
+            direct: false,
+            ...(isGif ? { format: "gif" as const } : {}),
+            ...(isTransparent ? { background: "transparent" as const } : {}),
+            ...(isCanvas ? { isCanvas: true } : {}),
+            ...(layout ? { layout } : {}),
+            ...(usageScene ? { usageScene } : {}),
+        };
+    }
+
+    // ⑦ 显式生成/创作/设计/拆解动作 → 生成图片
     if (GENERATE_ACTION_PATTERN.test(input)) {
         const stripped = stripInstructionPrefix(input);
         let prompt = colonBody ?? stripped;
@@ -269,7 +335,7 @@ export function detectAgentIntent(
         };
     }
 
-    // ⑦ 延续上下文的偏好答复（例如针对动图/表情包的简短神态回复「邪魅坏笑：一看就没憋好事」）
+    // ⑧ 延续上下文的偏好答复（例如针对动图/表情包的简短神态回复「邪魅坏笑：一看就没憋好事」）
     if (historyGifContext && !SMALL_TALK_PATTERN.test(input) && input.length >= 2) {
         return {
             kind: "generate_image",
@@ -281,14 +347,21 @@ export function detectAgentIntent(
         };
     }
 
-    // ⑦ 提到提示词但没有明确动作 → 聊天（例如「用这个提示词生成图片」已在⑥命中）
+    // ⑨ 提到提示词但没有明确动作 → 聊天（例如「用这个提示词生成图片」已在⑦命中）
     if (/提示词|prompt/i.test(input)) return CHAT_INTENT;
 
-    // ⑧ 独立完整生图提示词：不是提问/闲聊，长度和画面要素都达标 → 直接出图
+    // ⑩ 独立完整生图提示词：不是提问/闲聊，长度和画面要素都达标 → 生成图片
     if (
         !SMALL_TALK_PATTERN.test(input) &&
-        input.replace(/\s+/g, "").length >= 30 &&
-        countVisualCategories(input) >= 2
+        !PURE_INQUIRY_PATTERN.test(input) &&
+        !input.endsWith("?") &&
+        !input.endsWith("？") &&
+        (
+            // 模式 A：长度 >= 24，且命中至少 2 个视觉要素分类
+            (input.replace(/\s+/g, "").length >= 24 && countVisualCategories(input) >= 2) ||
+            // 模式 B：长段细节场景描述（>= 40 字，且包含视觉要素，非咨询问句）
+            (input.replace(/\s+/g, "").length >= 40 && countVisualCategories(input) >= 1)
+        )
     ) {
         return {
             kind: "generate_image",
@@ -301,6 +374,6 @@ export function detectAgentIntent(
         };
     }
 
-    // ⑨ 其余 → 聊天
+    // ⑪ 其余 → 聊天
     return CHAT_INTENT;
 }
