@@ -341,4 +341,17 @@ describe("对话运行时", () => {
         expect(runner.toolCalls).toHaveLength(0);
         expect(result.messages.map((message) => message.role)).toEqual(["assistant"]);
     });
+
+    test("动图生成请求直连执行时自动带上 format: gif", async () => {
+        const runner = createRunner({
+            turns: [],
+            messages: [{ id: "u1", role: "user", text: "生成一个猫咪动图：邪魅坏笑的橘猫，眼睛微微眯起，魔性表情", createdAt: 0 }],
+        });
+        const result = await runner.run();
+        expect(runner.calls).toHaveLength(0);
+        expect(runner.toolCalls).toHaveLength(1);
+        expect(runner.toolCalls[0].tool).toBe("generate_image");
+        expect(runner.toolCalls[0].arguments.format).toBe("gif");
+        expect(result.directToolResult?.ok).toBe(true);
+    });
 });

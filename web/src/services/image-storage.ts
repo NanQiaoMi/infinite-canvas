@@ -193,6 +193,7 @@ function queueImagePreview(storageKey: string) {
 }
 
 async function storeImagePreview(storageKey: string, original: Blob) {
+    if (original.type === "image/gif") return undefined;
     const preview = await createImageThumbnail(original).catch(() => undefined);
     await previewStore.setItem<StoredImagePreview>(storageKey, { version: IMAGE_PREVIEW_VERSION, blob: preview }).catch(() => undefined);
     return preview ? cacheImagePreview(storageKey, preview) : undefined;

@@ -155,4 +155,23 @@ describe("本地意图识别", () => {
         expect(intent.direct).toBe(true);
         expect(intent.prompt).toBe(text);
     });
+
+    test("动图与 GIF 意图准确识别", () => {
+        const gif1 = detectAgentIntent("生成一个猫咪动图", { hasReferences: false });
+        expect(gif1.kind).toBe("generate_image");
+        expect(gif1.format).toBe("gif");
+
+        const gif2 = detectAgentIntent("做个搞笑猫咪gif表情包", { hasReferences: false });
+        expect(gif2.kind).toBe("generate_image");
+        expect(gif2.format).toBe("gif");
+
+        const gif3 = detectAgentIntent("来个动态表情包：邪魅坏笑的橘猫", { hasReferences: false });
+        expect(gif3.kind).toBe("generate_image");
+        expect(gif3.format).toBe("gif");
+        expect(gif3.prompt).toBe("邪魅坏笑的橘猫");
+
+        const gif4 = detectAgentIntent("generate an animated gif of a cat running", { hasReferences: false });
+        expect(gif4.kind).toBe("generate_image");
+        expect(gif4.format).toBe("gif");
+    });
 });

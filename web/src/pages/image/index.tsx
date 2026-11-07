@@ -740,29 +740,63 @@ function ResultImageCard({
 }) {
     const { t } = useTranslation();
     useSyncExternalStore(subscribeImagePreviews, getImagePreviewRevision);
+    const isGif = image.mimeType === "image/gif";
     return (
-        <div className="group overflow-hidden rounded-xl border border-stone-200/90 bg-white transition-all duration-200 hover:-translate-y-0.5 hover:border-stone-300 hover:shadow-md dark:border-stone-800 dark:bg-stone-900 dark:hover:border-stone-700">
-            <div className="relative">
-                <Image src={previewUrlFor(image.storageKey) || image.dataUrl} preview={{ src: image.dataUrl }} alt={t("imageWorkbench.resultAlt", { count: index + 1 })} className="agent-fade-in aspect-square object-cover transition-transform duration-300 group-hover:scale-[1.01]" />
-                {image.mimeType === "image/gif" ? <span className="pointer-events-none absolute left-2 top-2 rounded-md bg-black/55 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-white backdrop-blur-sm">GIF</span> : null}
-            </div>
-            <div className="flex items-center justify-between gap-2 border-t border-stone-200/70 px-3 py-2 dark:border-stone-800">
-                <div className="flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-[11px] text-stone-400 dark:text-stone-500">
-                    <span className="tabular-nums">
-                        {image.width}x{image.height}
+        <div className="group relative aspect-square overflow-hidden rounded-2xl border border-stone-200/90 bg-stone-100/50 shadow-2xs transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md dark:border-stone-800 dark:bg-stone-900/50 dark:hover:border-stone-700">
+            <div className="relative size-full">
+                <Image
+                    src={previewUrlFor(image.storageKey) || image.dataUrl}
+                    preview={{ src: image.dataUrl }}
+                    alt={t("imageWorkbench.resultAlt", { count: index + 1 })}
+                    className="agent-fade-in size-full object-cover transition-transform duration-500 ease-out group-hover:scale-[1.02]"
+                />
+                {/* 动图 GIF 徽章 */}
+                {isGif ? (
+                    <span className="pointer-events-none absolute left-2.5 top-2.5 z-10 rounded-md bg-black/60 px-1.5 py-0.5 font-mono text-[10px] font-semibold tracking-wider text-white backdrop-blur-sm shadow-xs">
+                        GIF
                     </span>
+                ) : null}
+
+                {/* 左下角微悬浮尺寸规格胶囊（hover 时优雅显现） */}
+                <span className="pointer-events-none absolute bottom-2.5 left-2.5 z-10 flex items-center gap-1.5 rounded-full bg-black/55 px-2.5 py-0.5 font-mono text-[10px] tabular-nums text-white/95 opacity-0 backdrop-blur-md transition-opacity duration-200 group-hover:opacity-100 shadow-xs">
+                    <span>
+                        {image.width}×{image.height}
+                    </span>
+                    <span className="text-white/40">·</span>
                     <span>{formatBytes(image.bytes)}</span>
-                    <span>{formatDuration(image.durationMs)}</span>
-                </div>
-                <div className="flex shrink-0 items-center">
+                </span>
+
+                {/* 右下角悬浮玻璃拟态操作栏（直接浮于画面上，不占外部空间） */}
+                <div
+                    className="absolute bottom-2.5 right-2.5 z-10 flex items-center gap-0.5 rounded-full bg-black/55 px-1 py-0.5 text-white opacity-0 backdrop-blur-md transition-opacity duration-200 group-hover:opacity-100 shadow-md dark:bg-black/70"
+                    onClick={(event) => event.stopPropagation()}
+                >
                     <Tooltip title={t("common.addToAssets")}>
-                        <Button size="small" type="text" icon={<FolderPlus className="size-3.5" />} onClick={() => void onSaveAsset(image, index)} />
+                        <button
+                            type="button"
+                            className="flex size-6.5 items-center justify-center rounded-full text-white/80 transition hover:bg-white/20 hover:text-white"
+                            onClick={() => void onSaveAsset(image, index)}
+                        >
+                            <FolderPlus className="size-3.5" />
+                        </button>
                     </Tooltip>
                     <Tooltip title={t("imageWorkbench.addReference")}>
-                        <Button size="small" type="text" icon={<PenLine className="size-3.5" />} onClick={() => void onEdit(image, index)} />
+                        <button
+                            type="button"
+                            className="flex size-6.5 items-center justify-center rounded-full text-white/80 transition hover:bg-white/20 hover:text-white"
+                            onClick={() => void onEdit(image, index)}
+                        >
+                            <PenLine className="size-3.5" />
+                        </button>
                     </Tooltip>
                     <Tooltip title={t("common.download")}>
-                        <Button size="small" type="text" icon={<Download className="size-3.5" />} onClick={() => onDownload(image, index)} />
+                        <button
+                            type="button"
+                            className="flex size-6.5 items-center justify-center rounded-full text-white/80 transition hover:bg-white/20 hover:text-white"
+                            onClick={() => onDownload(image, index)}
+                        >
+                            <Download className="size-3.5" />
+                        </button>
                     </Tooltip>
                 </div>
             </div>
@@ -773,11 +807,13 @@ function ResultImageCard({
 function PendingImageCard() {
     const { t } = useTranslation();
     return (
-        <div className="relative aspect-square overflow-hidden rounded-xl border border-stone-200/80 dark:border-stone-800">
+        <div className="relative aspect-square overflow-hidden rounded-2xl border border-stone-200/80 bg-stone-100/40 shadow-xs dark:border-stone-800 dark:bg-stone-900/40">
             <div className="agent-shimmer absolute inset-0" />
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-xs text-stone-500 dark:text-stone-400">
-                <LoaderCircle className="size-5 animate-spin" />
-                <span>{t("workbench.generating")}</span>
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2.5 text-xs text-stone-500 dark:text-stone-400">
+                <div className="relative flex size-9 items-center justify-center rounded-xl border border-stone-200/70 bg-white/80 shadow-xs backdrop-blur-sm dark:border-stone-700/70 dark:bg-stone-800/80">
+                    <LoaderCircle className="size-4.5 animate-spin text-stone-700 dark:text-stone-200" />
+                </div>
+                <span className="font-medium tracking-tight">{t("workbench.generating")}</span>
             </div>
         </div>
     );
@@ -786,7 +822,7 @@ function PendingImageCard() {
 function FailedImageCard({ error, onRetry }: { error: string; onRetry: () => void }) {
     const { t } = useTranslation();
     return (
-        <div className="overflow-hidden rounded-xl border border-red-200/80 bg-red-50/60 dark:border-red-950 dark:bg-red-950/20">
+        <div className="overflow-hidden rounded-2xl border border-red-200/80 bg-red-50/60 dark:border-red-950 dark:bg-red-950/20">
             <div className="flex aspect-square flex-col items-center justify-center gap-3 p-5 text-center">
                 <div className="text-sm font-medium text-red-600 dark:text-red-300">{t("workbench.failed")}</div>
                 <Typography.Paragraph ellipsis={{ rows: 4 }} className="!mb-0 !text-xs !text-red-500 dark:!text-red-300">
@@ -811,7 +847,6 @@ function LogPanel({
     selectedLogIds,
     activeLogId,
     modelLabel,
-    showTitle = true,
     quotaCapability,
     onSelectedLogIdsChange,
     onCreateSession,
@@ -823,7 +858,6 @@ function LogPanel({
     activeLogId?: string;
     modelLabel?: string;
     quotaCapability?: "image" | "video";
-    showTitle?: boolean;
     onSelectedLogIdsChange: (ids: string[]) => void;
     onCreateSession: () => void;
     onDeleteSelected: () => void;
@@ -838,26 +872,51 @@ function LogPanel({
 
     return (
         <div className="flex h-full min-h-0 flex-col">
-            <div className="shrink-0 px-1 pb-2 pt-1">
-                {showTitle ? (
-                    <div className="mb-2 flex items-center justify-between gap-3">
-                        <h2 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-stone-400 dark:text-stone-500">{t("workbench.logs")}</h2>
-                        <span className="text-[10px] tabular-nums text-stone-400 dark:text-stone-500">{logs.length}</span>
+            <div className="shrink-0 px-3 pb-1 pt-4">
+                <div className="flex items-center gap-2 px-1 pb-4">
+                    <span
+                        className="size-5 shrink-0 bg-stone-800 dark:bg-stone-100"
+                        style={{ mask: "url(/logo.svg) center / contain no-repeat", WebkitMask: "url(/logo.svg) center / contain no-repeat" }}
+                    />
+                    <span className="text-[13px] font-semibold tracking-tight text-stone-900 dark:text-stone-100">{t("imageWorkbench.title")}</span>
+                    <span className="rounded border border-stone-300/80 px-1 font-mono text-[9px] uppercase tracking-widest text-stone-400 dark:border-stone-700 dark:text-stone-500">image</span>
+                </div>
+                <button
+                    type="button"
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-stone-600 transition hover:bg-black/[.045] dark:text-stone-300 dark:hover:bg-white/[.06]"
+                    onClick={onCreateSession}
+                >
+                    <SquarePen className="size-4 text-stone-500 dark:text-stone-400" />
+                    {t("workbench.new")}
+                </button>
+                <div className="mt-5 flex items-center justify-between px-1">
+                    <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-stone-400/90 dark:text-stone-500">{t("workbench.logs")}</span>
+                        <span className="rounded-full bg-stone-200/60 px-1.5 py-0.2 font-mono text-[9px] tabular-nums text-stone-500 dark:bg-stone-800 dark:text-stone-400">{logs.length}</span>
                     </div>
-                ) : null}
-                <div className="flex flex-wrap gap-1">
-                    <Button type="text" size="small" className="!h-7 !rounded-lg !px-2 !text-[11px] !text-stone-500 hover:!bg-black/[.05] dark:!text-stone-400 dark:hover:!bg-white/[.06]" icon={<Plus className="size-3.5" />} onClick={onCreateSession}>
-                        {t("workbench.new")}
-                    </Button>
-                    <Button type="text" size="small" className="!h-7 !rounded-lg !px-2 !text-[11px] !text-stone-500 hover:!bg-black/[.05] dark:!text-stone-400 dark:hover:!bg-white/[.06]" icon={<CheckSquare className="size-3.5" />} disabled={!logs.length} onClick={toggleAll}>
-                        {allSelected ? t("common.cancel") : t("workbench.selectAll")}
-                    </Button>
-                    <Button type="text" size="small" className="!h-7 !rounded-lg !px-2 !text-[11px] !text-red-500 hover:!bg-red-50 dark:!text-red-400 dark:hover:!bg-red-950/20" icon={<Trash2 className="size-3.5" />} disabled={!selectedLogIds.length} onClick={onDeleteSelected}>
-                        {t("common.delete")}
-                    </Button>
+                    {logs.length > 0 ? (
+                        <div className="flex items-center gap-1">
+                            <button
+                                type="button"
+                                className="rounded px-1.5 py-0.5 text-[10px] text-stone-400 transition hover:bg-black/[.04] hover:text-stone-700 dark:hover:bg-white/[.06] dark:hover:text-stone-200"
+                                onClick={toggleAll}
+                            >
+                                {allSelected ? t("common.cancel") : t("workbench.selectAll")}
+                            </button>
+                            {selectedLogIds.length > 0 ? (
+                                <button
+                                    type="button"
+                                    className="rounded px-1.5 py-0.5 text-[10px] text-red-500 transition hover:bg-red-50 dark:hover:bg-red-950/30"
+                                    onClick={onDeleteSelected}
+                                >
+                                    {t("common.delete")} ({selectedLogIds.length})
+                                </button>
+                            ) : null}
+                        </div>
+                    ) : null}
                 </div>
             </div>
-            <div className="hover-scrollbar min-h-0 flex-1 space-y-1 overflow-y-auto px-0.5">
+            <div className="hover-scrollbar min-h-0 flex-1 space-y-1 overflow-y-auto px-2 pb-3 pt-1">
                 {logs.map((log) => (
                     <LogCard
                         key={log.id}
@@ -870,7 +929,7 @@ function LogPanel({
                 ))}
                 {!logs.length ? <div className="flex min-h-40 flex-1 items-center justify-center text-center text-xs text-stone-400 dark:text-stone-500">{t("workbench.noLogs")}</div> : null}
             </div>
-            <div className="mt-2 shrink-0 border-t border-stone-200/70 px-1 pt-2.5 dark:border-stone-800">
+            <div className="shrink-0 border-t border-stone-200/70 px-3 py-3 dark:border-stone-800">
                 <div className="flex items-center gap-2 text-[11px] text-stone-500 dark:text-stone-400">
                     <span className="size-1.5 shrink-0 rounded-full bg-emerald-500" />
                     <span className="min-w-0 truncate font-mono">{modelLabel || "-"}</span>
@@ -889,10 +948,12 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
     return (
         <button
             type="button"
-            className={`block w-full rounded-lg px-2.5 py-2 text-left transition-colors ${active ? "bg-black/[.06] dark:bg-white/[.08]" : "hover:bg-black/[.04] dark:hover:bg-white/[.05]"}`}
+            className={`group block w-full rounded-xl px-2.5 py-2 text-left transition-all ${
+                active ? "bg-black/[.06] shadow-2xs dark:bg-white/[.08]" : "hover:bg-black/[.035] dark:hover:bg-white/[.05]"
+            }`}
             onClick={onClick}
         >
-            <div className="grid grid-cols-[minmax(128px,1fr)_auto] gap-2">
+            <div className="grid grid-cols-[minmax(120px,1fr)_auto] gap-2">
                 <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-2">
                     <Checkbox className="mt-0.5" checked={selected} onClick={(event) => event.stopPropagation()} onChange={(event) => onSelectedChange(event.target.checked)} />
                     <div className="min-w-0">
@@ -900,7 +961,12 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
                         {thumbnails.length ? (
                             <div className="mt-1.5 flex gap-1 overflow-hidden">
                                 {thumbnails.map((image) => (
-                                    <img key={image.id} src={previewUrlFor(image.storageKey) || image.dataUrl} alt="" className="size-8 shrink-0 rounded-lg object-cover" />
+                                    <img
+                                        key={image.id}
+                                        src={previewUrlFor(image.storageKey) || image.dataUrl}
+                                        alt=""
+                                        className="size-8 shrink-0 rounded-lg border border-black/5 object-cover dark:border-white/10"
+                                    />
                                 ))}
                             </div>
                         ) : null}

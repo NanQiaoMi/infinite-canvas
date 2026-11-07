@@ -86,7 +86,7 @@ export function StepTrail({
           });
 
     return (
-        <div className="agent-message-in w-full space-y-3 select-none">
+        <div className="agent-message-in w-full space-y-3.5 pt-2 sm:pt-4 select-none">
             {/* 顶部折叠摘要栏：极简、灵动、带微倒三角指示 */}
             <button
                 type="button"
@@ -110,7 +110,7 @@ export function StepTrail({
 
             {/* 卡片本体：从容宽敞的呼吸空间 + 垂直思维链时间轴（Timeline Beam） */}
             {expanded ? (
-                <div className="agent-fade-in rounded-2xl border border-[#e5e3dc] bg-[#faf9f5]/90 p-4.5 shadow-xs transition-all duration-200 sm:p-5.5 dark:border-[#2f2d29] dark:bg-[#1e1d1b]/90">
+                <div className="agent-fade-in mt-1 rounded-2xl border border-[#e5e3dc] bg-[#faf9f5]/90 p-5 shadow-xs transition-all duration-200 sm:p-6 dark:border-[#2f2d29] dark:bg-[#1e1d1b]/90">
                     <ol className="relative space-y-4">
                         {steps.map((step, index) => {
                             const isRunning = step.status === "running";

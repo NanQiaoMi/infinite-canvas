@@ -86,6 +86,14 @@ const ZH_PROMPT = `你是「无限画布」内置的 AI 创作助手，运行在
 - 超宽电影级荧幕 / 带鱼屏全景 -> "size": "2016x864" (21:9 超宽幅)
 若用户未显式要求比例，请结合主体构图主动匹配上述最契合的尺寸，让出图效果最好！
 
+## 动图与动态 GIF 生成支持（完全支持，绝不拒绝）
+你完全支持直接生成真正会动的动态 GIF（例如动态表情包、搞笑动图、逐帧动画、魔性循环表情等）：
+- 当用户提出「生成动图 / 动态表情包 / GIF / 制作会动的图」等需求时，必须直接调用 generate_image，并在 arguments 中传入 "format": "gif"（帧数默认 9，每帧时长默认 200ms）！
+- 示例：\`\`\`tool
+{"tool":"generate_image","arguments":{"prompt":"一只超级搞笑的橘猫表情包，嘴角勾起邪魅坏笑，魔性眨眼动作循环","format":"gif","frame_count":9,"frame_duration_ms":200}}
+\`\`\`
+- 严禁声称「目前只能生成静态图，不能输出真正会动的 GIF」，系统底层原生支持动态 GIF 生成，只要传入 "format": "gif" 即可直接输出真正的动态动图！
+
 ## 工具调用协议（必须严格遵守）
 你可以使用以下工具：
 
@@ -165,6 +173,14 @@ When calling generate_image, you must actively provide the best suited size in a
 - Ultra-wide cinema / panoramic display -> "size": "2016x864" (21:9 ultrawide)
 If the user did not explicitly specify an aspect ratio, proactively select the most aesthetically pleasing size above based on the subject!
 
+## Animated GIF generation support (Fully supported, never decline)
+You fully support generating real animated GIFs (such as reaction GIFs, animated memes, motion stickers, and looping clips):
+- When the user asks for "GIF / animated image / motion sticker / reaction GIF / moving meme", call generate_image with "format": "gif" in arguments!
+- Example: \`\`\`tool
+{"tool":"generate_image","arguments":{"prompt":"a funny orange cat smirking slyly, animated meme loop","format":"gif","frame_count":9,"frame_duration_ms":200}}
+\`\`\`
+- Never claim that you cannot generate animated GIFs or can only make static images. The system natively routes GIF requests to specialized animation models.
+
 ## Tool protocol (must follow strictly)
 You can use these tools:
 
@@ -218,24 +234,29 @@ export function buildIntentDirective(locale: AgentLocale, intent: AgentIntent) {
     const isEdit = intent.kind === "edit_image";
     const tool = isEdit ? "edit_image" : "generate_image";
     const prompt = intent.prompt.trim();
+    const isGif = intent.format === "gif" || /动图|动态表情包|动态图|\bgif\b|会动的/i.test(prompt);
     if (locale === "zh") {
         const lines = [
-            `【意图路由·系统指令】系统已在本地判定：用户本轮想要${isEdit ? "修改参考图（edit_image）" : "生成图片（generate_image）"}，不是写提示词、不是优化提示词、也不是咨询。`,
+            `【意图路由·系统指令】系统已在本地判定：用户本轮想要${isEdit ? "修改参考图（edit_image）" : isGif ? "生成动态 GIF 动图（generate_image format:gif）" : "生成图片（generate_image）"}，不是写提示词、不是优化提示词、也不是咨询。`,
             "要求：",
             `1) 必须直接输出 \`\`\`tool 代码块调用 ${tool}，不要反问、不要只回复文字；`,
             prompt ? `2) prompt 使用用户给出的画面描述原文：${prompt}` : "2) prompt 使用用户给出的画面描述原文；信息不足时结合上下文补全为完整提示词。",
-            `3) 根据画面题材与用途指定合理的 size（如手机壁纸 864x1536、电脑壁纸/横屏 1536x864、海报 768x1024、头像 1024x1024 等），不要无脑默认 1024x1024；`,
+            isGif
+                ? `3) 用户需要【会动的动态 GIF】（动态表情包/动图），必须在 arguments 中指定 "format": "gif"，系统会自动调度动图引擎，绝对不要声称「无法输出会动的 GIF」！`
+                : `3) 根据画面题材与用途指定合理的 size（如手机壁纸 864x1536、电脑壁纸/横屏 1536x864、海报 768x1024、头像 1024x1024 等），不要无脑默认 1024x1024；`,
         ];
         if (isEdit) lines.push("4) 参考图由系统自动传入，arguments 只需要 prompt。");
         lines.push(`${isEdit ? 5 : 4}) 生成完成后用 1-3 句总结结果并给出下一步。`);
         return lines.join("\n");
     }
     const lines = [
-        `[Intent routing · system directive] The system has locally determined that the user wants to ${isEdit ? "edit the reference image (edit_image)" : "generate an image (generate_image)"}, not to write, refine or discuss a prompt.`,
+        `[Intent routing · system directive] The system has locally determined that the user wants to ${isEdit ? "edit the reference image (edit_image)" : isGif ? "generate an animated GIF (generate_image format:gif)" : "generate an image (generate_image)"}, not to write, refine or discuss a prompt.`,
         "Requirements:",
         `1) You must output a \`\`\`tool code block calling ${tool} directly; do not ask questions and do not reply with text only;`,
         prompt ? `2) Use the user's original visual description as the prompt: ${prompt}` : "2) Use the user's original visual description as the prompt; complete it into a full prompt if needed.",
-        `3) Specify an appropriate size based on the theme (e.g. mobile wallpaper 864x1536, widescreen 1536x864, poster 768x1024, avatar 1024x1024), do not default to 1024x1024;`,
+        isGif
+            ? `3) The user explicitly requested an animated GIF; you must pass "format": "gif" in arguments. Never claim that animated GIFs cannot be created!`
+            : `3) Specify an appropriate size based on the theme (e.g. mobile wallpaper 864x1536, widescreen 1536x864, poster 768x1024, avatar 1024x1024), do not default to 1024x1024;`,
     ];
     if (isEdit) lines.push("4) References are passed automatically, so arguments only need the prompt.");
     lines.push(`${isEdit ? 5 : 4}) After generating, summarize the result in 1-3 sentences and offer next steps.`);

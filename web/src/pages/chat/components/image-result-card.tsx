@@ -30,12 +30,16 @@ export function ImageResultCard({
     const revision = useSyncExternalStore(subscribeImagePreviews, getImagePreviewRevision);
     const [preview, setPreview] = useState("");
     const [loaded, setLoaded] = useState(false);
+    const [isGif, setIsGif] = useState(false);
     const addAsset = useAssetStore((state) => state.addAsset);
     const openArtifact = useConversationAgentStore((state) => state.openArtifact);
 
     useEffect(() => {
         if (!image.storageKey) return;
         void ensureImagePreview(image.storageKey);
+        void getImageBlob(image.storageKey).then((blob) => {
+            if (blob?.type === "image/gif") setIsGif(true);
+        });
     }, [image.storageKey]);
 
     useEffect(() => {
@@ -50,7 +54,9 @@ export function ImageResultCard({
 
     const download = async () => {
         const url = await resolveImageUrl(image.storageKey);
-        if (url) saveAs(url, `${image.id}.png`);
+        const blob = image.storageKey ? await getImageBlob(image.storageKey) : null;
+        const ext = blob?.type === "image/gif" || image.storageKey?.endsWith(".gif") ? "gif" : "png";
+        if (url) saveAs(url, `${image.id}.${ext}`);
     };
 
     const saveToAssets = async () => {
@@ -163,6 +169,13 @@ export function ImageResultCard({
 
                 {/* 显现瞬间的掠影高光 */}
                 <div className="agent-shine-sweep pointer-events-none absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent dark:via-white/20" />
+
+                {/* 动图 GIF 徽章 */}
+                {isGif ? (
+                    <span className="pointer-events-none absolute left-2.5 top-2.5 z-10 rounded-md bg-black/60 px-1.5 py-0.5 font-mono text-[10px] font-semibold tracking-wider text-white backdrop-blur-sm shadow-xs">
+                        GIF
+                    </span>
+                ) : null}
 
                 {/* 右上角放大预览按钮 */}
                 <span className="absolute right-2 top-2 flex size-6.5 items-center justify-center rounded-full bg-black/45 text-white opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100 shadow-xs">

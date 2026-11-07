@@ -50,10 +50,11 @@ export function ArtifactPanel() {
         if (!imageUrl) return;
         const response = await fetch(imageUrl);
         const blob = await response.blob();
+        const ext = blob.type === "image/gif" || artifact.storageKey?.endsWith(".gif") ? "gif" : "png";
         const objectUrl = URL.createObjectURL(blob);
         const link = document.createElement("a");
         link.href = objectUrl;
-        link.download = `${artifact.id}.png`;
+        link.download = `${artifact.id}.${ext}`;
         link.click();
         URL.revokeObjectURL(objectUrl);
     };

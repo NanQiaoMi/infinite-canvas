@@ -31,6 +31,13 @@ export const AGENT_TOOLS: AgentToolDefinition[] = [
                 },
                 quality: { type: "string", enum: ["low", "medium", "high", "xhigh", "max"], description: "质量，省略时使用默认质量" },
                 background: { type: "string", enum: ["transparent", "auto"], description: "背景，省略时使用默认值" },
+                format: {
+                    type: "string",
+                    enum: ["png", "gif"],
+                    description: "图片输出格式。当用户要求「动图 / 动态表情包 / 动画 / GIF / 会动的图」时必须传 gif，系统会自动调用动图模型输出真正会动的动态 GIF；默认为 png",
+                },
+                frame_count: { type: "integer", minimum: 2, maximum: 16, description: "GIF 动图帧数（2-16），默认 9 帧" },
+                frame_duration_ms: { type: "integer", minimum: 50, maximum: 1000, description: "GIF 每帧时长毫秒数（50-1000），默认 200ms" },
                 model: { type: "string", description: "图片模型名；必须是当前可用图片模型之一" },
             },
             required: ["prompt"],
@@ -78,18 +85,29 @@ function failure(tool: string, code: AgentToolErrorCode, error: string): AgentTo
     return { tool, ok: false, code, error };
 }
 
-function resolveImageModelOption(requested: string): { option: string } | { error: string } {
+function resolveImageModelOption(requested: string, format?: "png" | "gif"): { option: string } | { error: string } {
     const config = useConfigStore.getState().config;
     const options = selectableModelsByCapability(config, "image");
     if (!options.length) return { error: t("toolErrors.noImageModel") as string };
+    const isGif = format === "gif";
     const name = requested.trim();
-    if (!name) {
-        const preferred = options.includes(config.imageModel) ? config.imageModel : options[0];
-        return { option: preferred };
+    if (name) {
+        if (options.includes(name)) {
+            if (isGif && !/gpt-image-2\.6/i.test(name)) {
+                const gifModel = options.find((m) => /gpt-image-2\.6/i.test(m));
+                if (gifModel) return { option: gifModel };
+            }
+            return { option: name };
+        }
+        const matched = options.find((option) => IMAGE_MODEL_LABEL(option) === name) ?? options.find((option) => IMAGE_MODEL_LABEL(option).toLowerCase() === name.toLowerCase());
+        if (matched) return { option: matched };
     }
-    if (options.includes(name)) return { option: name };
-    const matched = options.find((option) => IMAGE_MODEL_LABEL(option) === name) ?? options.find((option) => IMAGE_MODEL_LABEL(option).toLowerCase() === name.toLowerCase());
-    return matched ? { option: matched } : { error: t("toolErrors.unknownModel", { name }) as string };
+    if (isGif) {
+        const gifModel = options.find((m) => /gpt-image-2\.6/i.test(m));
+        if (gifModel) return { option: gifModel };
+    }
+    const preferred = options.includes(config.imageModel) ? config.imageModel : options[0];
+    return { option: preferred };
 }
 
 function imageQuotaSnapshot(): AgentQuotaSnapshot | undefined {
@@ -118,13 +136,14 @@ async function executeGenerateImage(call: AgentToolCall, context: { signal: Abor
     const args = call.arguments;
     const prompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
     if (!prompt) return failure("generate_image", "invalid_args", t("toolErrors.promptRequired") as string);
-    const resolved = resolveImageModelOption(typeof args.model === "string" ? args.model : "");
+    const isGif = args.format === "gif" || /动图|动态表情包|动态图|\bgif\b|会动的/i.test(prompt);
+    const resolved = resolveImageModelOption(typeof args.model === "string" ? args.model : "", isGif ? "gif" : "png");
     if ("error" in resolved) return failure("generate_image", "invalid_args", resolved.error);
     const config = useConfigStore.getState().config;
     const count = Math.max(1, Math.min(4, typeof args.count === "number" ? args.count : 1));
     const modelOption = resolved.option;
     const requestedSize = typeof args.size === "string" && args.size.trim() ? args.size.trim() : "";
-    const size = requestedSize || inferImageSizeFromPrompt(prompt, config.size);
+    const size = isGif ? "auto" : (requestedSize || inferImageSizeFromPrompt(prompt, config.size));
     const generationConfig = {
         ...config,
         model: modelOption,
@@ -134,7 +153,15 @@ async function executeGenerateImage(call: AgentToolCall, context: { signal: Abor
         ...(typeof args.background === "string" ? { background: args.background } : {}),
     };
     try {
-        const generated = await requestGeneration(generationConfig, prompt, { signal: context.signal });
+        const requestOptions = isGif
+            ? {
+                  signal: context.signal,
+                  outputFormat: "gif" as const,
+                  frameCount: Math.min(16, Math.max(2, Math.round(Number(args.frame_count) || 9))),
+                  frameDurationMs: Math.min(1000, Math.max(50, Math.round(Number(args.frame_duration_ms) || 200))),
+              }
+            : { signal: context.signal };
+        const generated = await requestGeneration(generationConfig, prompt, requestOptions);
         if (!generated.length) return failure("generate_image", "execution_failed", t("toolErrors.noImageReturned") as string);
         const stored = await Promise.all(generated.map((image) => uploadImage(image.dataUrl)));
         await useQuotaStore.getState().refresh().catch(() => undefined);
@@ -146,7 +173,16 @@ async function executeGenerateImage(call: AgentToolCall, context: { signal: Abor
             prompt,
             model: IMAGE_MODEL_LABEL(modelOption),
         }));
-        return { tool: "generate_image", ok: true, images, model: IMAGE_MODEL_LABEL(modelOption), size: generationConfig.size, count: images.length, quota: imageQuotaSnapshot() };
+        return {
+            tool: "generate_image",
+            ok: true,
+            images,
+            model: IMAGE_MODEL_LABEL(modelOption),
+            size: generationConfig.size,
+            count: images.length,
+            ...(isGif ? { format: "gif" } : {}),
+            quota: imageQuotaSnapshot(),
+        };
     } catch (error) {
         if (context.signal.aborted) return cancelFailure("generate_image");
         return quotaFailureIfExhausted("generate_image", error);
