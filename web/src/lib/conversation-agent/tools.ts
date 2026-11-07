@@ -4,6 +4,7 @@ import { nanoid } from "nanoid";
 import { quotaExhausted, useQuotaStore } from "@/stores/use-quota-store";
 import { selectableModelsByCapability, useConfigStore } from "@/stores/use-config-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
+import { useAgentStore } from "@/stores/use-agent-store";
 import { requestEdit, requestGeneration } from "@/services/api/image";
 import { getImageBlob, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import type { ReferenceImage } from "@/types/image";
@@ -25,7 +26,7 @@ export const AGENT_TOOLS: AgentToolDefinition[] = [
             type: "object",
             properties: {
                 prompt: { type: "string", description: "完整的生图提示词" },
-                count: { type: "integer", minimum: 1, maximum: 4, description: "生成张数，默认 1" },
+                count: { type: "integer", minimum: 1, maximum: 12, description: "生成张数，默认 1，最多 12" },
                 size: {
                     type: "string",
                     description: "画幅尺寸/比例。支持如 1024x1024 (1:1 头像/图标), 1536x864 (16:9 电脑壁纸/横屏/风景), 864x1536 (9:16 手机壁纸/竖屏/全身), 768x1024 (3:4 海报/写真), 2016x864 (21:9 宽银幕)；根据题材主动匹配，不要默认都是 1:1",
@@ -55,7 +56,7 @@ export const AGENT_TOOLS: AgentToolDefinition[] = [
             type: "object",
             properties: {
                 prompt: { type: "string", description: "修改要求/提示词" },
-                count: { type: "integer", minimum: 1, maximum: 4, description: "生成张数，默认 1" },
+                count: { type: "integer", minimum: 1, maximum: 12, description: "生成张数，默认 1，最多 12" },
                 size: {
                     type: "string",
                     description: "画幅尺寸/比例。支持如 1024x1024 (1:1), 1536x864 (16:9), 864x1536 (9:16), 768x1024 (3:4) 等；省略时根据修改场景推断或沿用参考图尺寸",
@@ -145,7 +146,7 @@ async function executeGenerateImage(call: AgentToolCall, context: { signal: Abor
     const resolved = resolveImageModelOption(typeof args.model === "string" ? args.model : "", isGif ? "gif" : "png");
     if ("error" in resolved) return failure("generate_image", "invalid_args", resolved.error);
     const config = useConfigStore.getState().config;
-    const count = Math.max(1, Math.min(4, typeof args.count === "number" ? args.count : 1));
+    const count = Math.max(1, Math.min(12, typeof args.count === "number" ? args.count : 1));
     const modelOption = resolved.option;
     const requestedSize = typeof args.size === "string" && args.size.trim() ? args.size.trim() : "";
     const size = isGif ? "auto" : (requestedSize || inferImageSizeFromPrompt(prompt, config.size));
@@ -203,7 +204,7 @@ async function executeEditImage(call: AgentToolCall, context: { signal: AbortSig
     const resolved = resolveImageModelOption(typeof args.model === "string" ? args.model : "");
     if ("error" in resolved) return failure("edit_image", "invalid_args", resolved.error);
     const config = useConfigStore.getState().config;
-    const count = Math.max(1, Math.min(4, typeof args.count === "number" ? args.count : 1));
+    const count = Math.max(1, Math.min(12, typeof args.count === "number" ? args.count : 1));
     const modelOption = resolved.option;
     const requestedSize = typeof args.size === "string" && args.size.trim() ? args.size.trim() : "";
     const size = requestedSize || inferImageSizeFromPrompt(prompt, config.size);
@@ -278,7 +279,59 @@ export async function executeAgentTool(call: AgentToolCall, context: { signal: A
     const validation = validateArguments(definition.parameters, call.arguments);
     if (!validation.ok) return failure(call.tool, "invalid_args", validation.error);
     try {
-        if (isCanvasTool(call.tool)) return await executeCanvasAgentTool(call);
+        if (isCanvasTool(call.tool)) {
+            const hasCanvasContext = Boolean(useAgentStore.getState().canvasContext);
+            if (!hasCanvasContext) {
+                if (call.tool === "canvas_batch_generate_nodes") {
+                    const rawTasks = Array.isArray(call.arguments?.tasks) ? (call.arguments.tasks as Array<{ prompt?: string; size?: string; background?: string }>) : [];
+                    const tasks = rawTasks.filter((t) => typeof t?.prompt === "string" && t.prompt.trim());
+                    if (tasks.length > 0) {
+                        // 在非画布环境（如独立AI对话页面）中优雅降级为直接并发生成图片，彻底杜绝报错引发的 ReAct 循环失控
+                        const results = await Promise.all(
+                            tasks.map((task) =>
+                                executeGenerateImage(
+                                    {
+                                        tool: "generate_image",
+                                        arguments: {
+                                            prompt: task.prompt!.trim(),
+                                            size: task.size || "1024x1024",
+                                            count: 1,
+                                            ...(task.background ? { background: task.background } : {}),
+                                        },
+                                    },
+                                    context,
+                                ),
+                            ),
+                        );
+                        const successfulImages = results.flatMap((r) => (r.ok && "images" in r ? r.images : []));
+                        if (successfulImages.length > 0) {
+                            return {
+                                tool: "generate_image",
+                                ok: true,
+                                images: successfulImages,
+                                model: results.find((r) => r.ok && "model" in r && r.model)?.model || "gpt-image-2.5",
+                                size: tasks[0]?.size || "1024x1024",
+                                count: successfulImages.length,
+                            };
+                        }
+                        const firstErr = results.find((r) => !r.ok);
+                        return firstErr || failure("generate_image", "execution_failed", "批量图片生成未产生有效输出");
+                    }
+                } else if (call.tool === "canvas_create_image_node") {
+                    const prompt = typeof call.arguments?.prompt === "string" ? call.arguments.prompt.trim() : "";
+                    const size = typeof call.arguments?.size === "string" ? call.arguments.size.trim() : "1024x1024";
+                    const background = call.arguments?.background === "transparent" ? "transparent" : undefined;
+                    return await executeGenerateImage(
+                        {
+                            tool: "generate_image",
+                            arguments: { prompt, size, count: 1, ...(background ? { background } : {}) },
+                        },
+                        context,
+                    );
+                }
+            }
+            return await executeCanvasAgentTool(call);
+        }
         if (call.tool === "generate_image") return await executeGenerateImage({ ...call, arguments: validation.value }, context);
         if (call.tool === "edit_image") return await executeEditImage({ ...call, arguments: validation.value }, context);
         return await executeApplyPrompt({ ...call, arguments: validation.value }, context);

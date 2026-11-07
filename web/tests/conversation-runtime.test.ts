@@ -717,4 +717,101 @@ describe("对话运行时", () => {
         expect(executedPrompts[1]).toBe("modern AI chat web application UI design");
         expect(executedPrompts[2]).toBe("modern ecommerce website UI design desktop");
     });
+
+    test("生成5张图片时，完成后熔断刹车生效，杜绝大模型在下一轮复读生图工具造成循环失控", async () => {
+        const { runAgentTurn } = await import("@/lib/conversation-agent/runtime");
+        let rounds = 0;
+        let toolExecutions = 0;
+        const result = await runAgentTurn({
+            locale: "zh-CN",
+            messages: [{ id: "u1", role: "user", text: "生成5张可爱猫咪图", createdAt: 1 }],
+            tools: [
+                {
+                    name: "generate_image",
+                    description: "生成图片",
+                    parameters: { type: "object", properties: { prompt: { type: "string" }, count: { type: "integer" } }, required: ["prompt"] },
+                },
+            ],
+            buildContext: () => ({ defaultSize: "1024x1024", pageContext: "chat", imageModels: [] }),
+            callModel: async () => {
+                rounds += 1;
+                if (rounds === 1) {
+                    return {
+                        content: "好的，马上生成5张可爱猫咪图！",
+                        toolCalls: [
+                            {
+                                tool: "generate_image",
+                                arguments: { prompt: "可爱猫咪图，日系治愈插画", count: 5 },
+                            },
+                        ],
+                    };
+                }
+                // 模拟大模型在第二轮失控，试图再次调用 generate_image
+                return {
+                    content: "继续为您生成更多：",
+                    toolCalls: [
+                        {
+                            tool: "generate_image",
+                            arguments: { prompt: "另一只可爱猫咪", count: 1 },
+                        },
+                    ],
+                };
+            },
+            executeTool: async (call) => {
+                toolExecutions += typeof call.arguments.count === "number" ? call.arguments.count : 1;
+                return { tool: call.tool, ok: true, images: [], count: 5, size: "1024x1024" };
+            },
+            signal: new AbortController().signal,
+        });
+
+        // 验证：第一轮执行了 5 张，第二轮触发熔断刹车，不再执行多余生图
+        expect(toolExecutions).toBe(5);
+        expect(rounds).toBe(2);
+        expect(result.roundLimitReached).toBe(false);
+    });
+
+    test("在普通对话 /chat 页面下大模型误调 canvas_batch_generate_nodes 时，自动解包降级为 generate_image，避免报错死循环", async () => {
+        const { runAgentTurn } = await import("@/lib/conversation-agent/runtime");
+        const executedTools: string[] = [];
+        const result = await runAgentTurn({
+            locale: "zh-CN",
+            messages: [{ id: "u1", role: "user", text: "在画布上批量生成4张不同风格的赛博朋克猫咪头像，并排排开", createdAt: 1 }],
+            tools: [
+                {
+                    name: "generate_image",
+                    description: "生成图片",
+                    parameters: { type: "object", properties: { prompt: { type: "string" } }, required: ["prompt"] },
+                },
+            ],
+            buildContext: () => ({ defaultSize: "1024x1024", pageContext: "chat", imageModels: [] }),
+            callModel: async () => ({
+                content: "马上为您在画布上排布生成！",
+                toolCalls: [
+                    {
+                        tool: "canvas_batch_generate_nodes",
+                        arguments: {
+                            tasks: [
+                                { prompt: "赛博猫咪 1", title: "方案 1", size: "1024x1024" },
+                                { prompt: "赛博猫咪 2", title: "方案 2", size: "1024x1024" },
+                                { prompt: "赛博猫咪 3", title: "方案 3", size: "1024x1024" },
+                                { prompt: "赛博猫咪 4", title: "方案 4", size: "1024x1024" },
+                            ],
+                            layout: "horizontal",
+                            run: true,
+                        },
+                    },
+                ],
+            }),
+            executeTool: async (call) => {
+                executedTools.push(call.tool);
+                return { tool: call.tool, ok: true, images: [], count: 1, size: "1024x1024" };
+            },
+            signal: new AbortController().signal,
+        });
+
+        // 验证：canvas_batch_generate_nodes 被自动降级并解包为 4 个 generate_image 调用
+        expect(executedTools.length).toBe(4);
+        expect(executedTools.every((t) => t === "generate_image")).toBe(true);
+        expect(result.roundLimitReached).toBe(false);
+    });
 });

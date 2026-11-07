@@ -2,6 +2,8 @@
 
 ## Unreleased
 
++ [修复] 彻底消除大模型生图多轮 ReAct 循环失控、画布助手生命周期锁死与环境工具污染：在运行时引入总生成图片计数与硬终止熔断刹车，当达成用户需求张数（如5张）后直接阻止模型继续调用生图工具并强制总结交付，根除耗时3~4分钟、连续5轮重复调用的恶性循环；修复画布助手面板在非 chat 作用域下活跃会话判断失效导致的生命周期锁死，确保助手在异常与完成时必然重置 running 状态并释放输入框；在普通对话 /chat 页面系统提示词中彻底屏蔽画布工具，并在大模型误调 canvas_* 时自动解包降级为并发 generate_image，避免 execution_failed 错误与恶性重试；并将多图批量生成由串行等待升级为 Promise.all 并发调度，大幅降低整体出图耗时。
+
 + [优化] 扩展批量排布与并发生图上限至 12 张：升级 AI 对话与画布助手的任务拆解及意图数量识别上限至 12 张，原生支持「十张」「十二张」「一套十个」等中文数字解析；扩容画布批量排布工具 `canvas_batch_generate_nodes` 上限至 12 个节点，并将 10–12 个节点的网格排布自适应优化为 4 列 × 3 行，更契合宽屏画布视觉美感。
 
 + [修复] 修复 AI 对话页面 useMemo 未定义导致的运行时白屏异常：为 `web/src/pages/chat/components/image-result-card.tsx` 与 `web/src/pages/chat/index.tsx` 补齐 `useMemo` 与 `AgentIntent` 导入，消除 React 运行时 `ReferenceError: useMemo is not defined` 报错；清理过期旧单一清理调用 `setCompletedToolResult`，保持渐进式渲染数组 `completedToolResults` 状态一致性。
