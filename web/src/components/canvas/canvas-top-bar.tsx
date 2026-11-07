@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 
 import { UserStatusActions } from "@/components/layout/user-status-actions";
 import { canvasThemes } from "@/lib/canvas-theme";
+import { cn } from "@/lib/utils";
 import { useCanvasSidePanelStore } from "@/stores/use-canvas-side-panel-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { DOCS_URL } from "@/constant/env";
@@ -184,15 +185,44 @@ function MenuLabel({ text, shortcut }: { text: string; shortcut: string }) {
     );
 }
 
+import { useConversationAgentStore } from "@/stores/use-conversation-agent-store";
+
 function CompactAgentStatus({ status, onClick }: { status: { connected: boolean; enabled: boolean; activity: string }; onClick: () => void }) {
     const colorTheme = useThemeStore((state) => state.theme);
     const theme = canvasThemes[colorTheme];
     const { t } = useTranslation();
-    const label = status.connected ? t("canvas.agentConnected") : status.enabled ? t("canvas.agentConnecting", { activity: status.activity || t("canvas.connecting") }) : t("canvas.agentDisconnected");
-    const dotColor = status.connected ? "#22c55e" : status.enabled ? "#f59e0b" : theme.node.muted;
+    const isAiRunning = useConversationAgentStore((state) => state.running);
+
+    let label = "AI 助手就绪";
+    let dotColor = "#22c55e";
+    let textColor = "#16a34a";
+
+    if (status.connected) {
+        label = t("canvas.agentConnected");
+        dotColor = "#22c55e";
+        textColor = "#16a34a";
+    } else if (isAiRunning) {
+        label = "AI 助手执行中...";
+        dotColor = "#f59e0b";
+        textColor = "#d97706";
+    } else if (status.enabled) {
+        label = t("canvas.agentConnecting", { activity: status.activity || t("canvas.connecting") });
+        dotColor = "#f59e0b";
+        textColor = "#d97706";
+    }
+
     return (
-        <button type="button" className="flex h-8 items-center gap-1.5 text-xs transition hover:opacity-75" style={{ color: status.connected ? "#16a34a" : status.enabled ? "#d97706" : theme.node.muted }} onClick={onClick} title={t("canvas.openAgent")}>
-            <span className="size-2 rounded-full" style={{ background: dotColor }} />
+        <button
+            type="button"
+            className="flex h-8 items-center gap-1.5 text-xs transition hover:opacity-75"
+            style={{ color: textColor }}
+            onClick={onClick}
+            title="打开 AI 对话助手与节点控制"
+        >
+            <span
+                className={cn("size-2 rounded-full", isAiRunning && "animate-pulse")}
+                style={{ background: dotColor }}
+            />
             <span className="max-w-[140px] truncate">{label}</span>
         </button>
     );

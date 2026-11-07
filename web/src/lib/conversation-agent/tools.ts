@@ -9,6 +9,7 @@ import { getImageBlob, resolveImageUrl, uploadImage } from "@/services/image-sto
 import type { ReferenceImage } from "@/types/image";
 
 import { inferImageSizeFromPrompt } from "./aspect-ratio";
+import { CANVAS_AGENT_TOOLS, executeCanvasAgentTool, isCanvasTool } from "./canvas-tools";
 import { validateArguments } from "./protocol";
 import type { AgentImageRef, AgentQuotaSnapshot, AgentToolCall, AgentToolDefinition, AgentToolErrorCode, AgentToolResult } from "./types";
 
@@ -269,12 +270,15 @@ async function executeApplyPrompt(call: AgentToolCall, context: { signal: AbortS
     return { tool: "apply_prompt", ok: true, target, prompt };
 }
 
+export const ALL_AGENT_TOOLS: AgentToolDefinition[] = [...AGENT_TOOLS, ...CANVAS_AGENT_TOOLS];
+
 export async function executeAgentTool(call: AgentToolCall, context: { signal: AbortSignal; references?: AgentImageRef[] }): Promise<AgentToolResult> {
-    const definition = AGENT_TOOLS.find((tool) => tool.name === call.tool);
+    const definition = ALL_AGENT_TOOLS.find((tool) => tool.name === call.tool);
     if (!definition) return failure(call.tool || "unknown", "unsupported", t("toolErrors.unknownTool", { name: call.tool || "?" }) as string);
     const validation = validateArguments(definition.parameters, call.arguments);
     if (!validation.ok) return failure(call.tool, "invalid_args", validation.error);
     try {
+        if (isCanvasTool(call.tool)) return await executeCanvasAgentTool(call);
         if (call.tool === "generate_image") return await executeGenerateImage({ ...call, arguments: validation.value }, context);
         if (call.tool === "edit_image") return await executeEditImage({ ...call, arguments: validation.value }, context);
         return await executeApplyPrompt({ ...call, arguments: validation.value }, context);
