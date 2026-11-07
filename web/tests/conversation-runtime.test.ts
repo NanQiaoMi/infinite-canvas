@@ -467,6 +467,11 @@ describe("对话运行时", () => {
         expect(isBoilerplateSummary("已完成画布操作指令。")).toBe(true);
         expect(isBoilerplateSummary("已生成一张竖版海报素材，尺寸为 1086 x 1448，使用 GPT Image 2.6")).toBe(true);
         expect(isBoilerplateSummary("生成成功\n\n已为您生成一张图片，尺寸为 1024x1024。")).toBe(true);
+        expect(
+            isBoilerplateSummary(
+                "生成成功\n一只软萌的灰白色小猫，圆圆的大眼睛，趴在柔软的毛毯上，温暖治愈的氛围。\n* 画幅：正方形 1:1\n* 尺寸：1024 x 1024\n* 风格：温馨写实、高清宠物摄影\n还可以继续生成不同品种、不同姿势的猫咪！柔和光照、细腻阴影\n* 构图：正方形 1:1，主体居中\n* 背景：纯白色\n* 细节：橘白猫咪、红色项圈、金色铃铛、方块大眼睛。",
+            ),
+        ).toBe(true);
 
         // 真实构思、分析或回答必须保留，不被误判为套话
         expect(isBoilerplateSummary("好的，为您构思如下画面：一只可爱的橘猫坐在阳光下……")).toBe(false);
