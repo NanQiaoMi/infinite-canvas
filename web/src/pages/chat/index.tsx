@@ -144,48 +144,57 @@ export default function ChatPage() {
         };
     }, [pageContext]);
 
-    const callModel: AgentModelCall = useCallback(
-        async ({ systemPrompt, messages, tools, signal, onDelta }) => {
-            const config = useConfigStore.getState().config;
-            if (!config.textModel) throw new Error(t("chat.errors.noTextModel"));
-            // chatgpt2api 不支持原生 function calling：声明 tools 会让模型声称「后端不支持」，
-            // 因此只有管理员把渠道工具协议设为 native 时才发送原生 tools，其余走系统提示词的文本协议。
-            const textChannel = config.channels.find((channel) => channel.id === (config.textModel.split("::")[0] || ""));
-            const nativeTools = textChannel?.toolProtocol === "native";
-            const run = () =>
-                requestConversationTurn(
-                    { ...config, model: config.textModel },
-                    messages.map((item) => ({ role: item.role, content: item.content })),
-                    { systemPrompt, tools: nativeTools ? tools.map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters })) : [], onDelta, signal },
-                );
-            let turn;
-            try {
-                turn = await run();
-            } catch (error) {
-                if (signal.aborted || !isNetworkError(error)) throw error;
-                setSteps((current) => {
-                    const running = current.find((s) => s.status === "running");
-                    if (running) {
-                        return current.map((s) => (s.id === running.id ? { ...s, status: "waiting-retry" as const } : s));
-                    }
-                    stepSeqRef.current += 1;
-                    return [
+    const createModelCaller = useCallback(
+        (targetSessionId: string): AgentModelCall =>
+            async ({ systemPrompt, messages, tools, signal, onDelta }) => {
+                const config = useConfigStore.getState().config;
+                if (!config.textModel) throw new Error(t("chat.errors.noTextModel"));
+                // chatgpt2api 不支持原生 function calling：声明 tools 会让模型声称「后端不支持」，
+                // 因此只有管理员把渠道工具协议设为 native 时才发送原生 tools，其余走系统提示词的文本协议。
+                const textChannel = config.channels.find((channel) => channel.id === (config.textModel.split("::")[0] || ""));
+                const nativeTools = textChannel?.toolProtocol === "native";
+                const run = () =>
+                    requestConversationTurn(
+                        { ...config, model: config.textModel },
+                        messages.map((item) => ({ role: item.role, content: item.content })),
+                        { systemPrompt, tools: nativeTools ? tools.map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters })) : [], onDelta, signal },
+                    );
+                let turn;
+                try {
+                    turn = await run();
+                } catch (error) {
+                    if (signal.aborted || !isNetworkError(error)) throw error;
+                    useConversationAgentStore.getState().setSessionRun(targetSessionId, (current) => {
+                        const runningStep = current.steps.find((s) => s.status === "running");
+                        if (runningStep) {
+                            return {
+                                ...current,
+                                steps: current.steps.map((s) => (s.id === runningStep.id ? { ...s, status: "waiting-retry" as const } : s)),
+                            };
+                        }
+                        return {
+                            ...current,
+                            steps: [
+                                ...current.steps,
+                                {
+                                    id: `retry-${Date.now()}`,
+                                    kind: "retry" as const,
+                                    label: t("chat.steps.networkWaitRetry"),
+                                    status: "waiting-retry" as const,
+                                },
+                            ],
+                        };
+                    });
+                    await new Promise((resolve) => setTimeout(resolve, 900));
+                    useConversationAgentStore.getState().setSessionRun(targetSessionId, (current) => ({
                         ...current,
-                        {
-                            id: `retry-${stepSeqRef.current}`,
-                            kind: "retry" as const,
-                            label: t("chat.steps.networkWaitRetry"),
-                            status: "waiting-retry" as const,
-                        },
-                    ];
-                });
-                await new Promise((resolve) => setTimeout(resolve, 900));
-                setSteps((current) => current.map((s) => (s.status === "waiting-retry" ? { ...s, status: "running" as const } : s)));
-                turn = await run();
-            }
-            const native = nativeToolCallsToAgent(turn.toolCalls.map((call) => ({ name: call.name, arguments: call.arguments })));
-            return { content: turn.content, toolCalls: native.calls, toolCallErrors: native.errors };
-        },
+                        steps: current.steps.map((s) => (s.status === "waiting-retry" ? { ...s, status: "running" as const } : s)),
+                    }));
+                    turn = await run();
+                }
+                const native = nativeToolCallsToAgent(turn.toolCalls.map((call) => ({ name: call.name, arguments: call.arguments })));
+                return { content: turn.content, toolCalls: native.calls, toolCallErrors: native.errors };
+            },
         [t],
     );
 
@@ -305,7 +314,7 @@ export default function ChatPage() {
                     messages: history,
                     tools: AGENT_TOOLS,
                     buildContext,
-                    callModel,
+                    callModel: createModelCaller(targetSessionId),
                     executeTool: (call, context) => executeAgentTool(call, context),
                     onEvent: (event: AgentEvent) => {
                         if (event.type === "assistant-stream") {
@@ -483,7 +492,7 @@ export default function ChatPage() {
                 useQuotaStore.getState().scheduleRefresh();
             }
         },
-        [activeSession?.id, appendMessages, buildContext, callModel, clearSessionRun, createSession, input, references, setSessionRun, t],
+        [activeSession?.id, appendMessages, buildContext, createModelCaller, clearSessionRun, createSession, input, references, setSessionRun, t],
     );
 
     const stop = () => {

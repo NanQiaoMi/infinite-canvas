@@ -134,7 +134,38 @@ function getCorrectionText(isCanvas: boolean): string {
 const META_LABEL_PATTERN =
     /^(?:主角|主体|角色|风格|画风|比例|尺寸|画幅|设定|统一设定|种状态|状态|动作|表情|数量|模型|格式|背景|环境|特点|要求|说明|提示词|方案名称|设计要求|五种状态|四种状态|三种状态|不同状态)$/i;
 
-export function extractNumberedPrompts(text: string, count: number, basePrompt: string): Array<{ title: string; prompt: string }> {
+const DIVERSE_DESIGN_THEMES = [
+    {
+        title: "极简现代",
+        style: "极简现代设计风格，大面积纯净留白与优雅排版空间，清晰视觉层级，柔和自然漫反射采光，高级克制莫兰迪色调，精致超清细节",
+    },
+    {
+        title: "潮流视觉",
+        style: "现代潮流视觉风格，前卫大胆的构图张力与空间层次对比，立体光影，鲜明视觉焦点，高质感材质细节，现代设计美学",
+    },
+    {
+        title: "质感光影",
+        style: "高端商业质感风格，电影级平衡布光与细腻材质纹理，典雅大气的视觉平衡构图，大师级色彩搭配，超清画质",
+    },
+    {
+        title: "创意插画",
+        style: "艺术插画视觉风格，流线型几何构图与灵动光效，丰富视觉肌理，优雅和谐的色彩氛围，精致层次感",
+    },
+    {
+        title: "未来科技",
+        style: "轻科技未来主义风格，通透半透明材质与细腻微光，纯净科技感背景，未来设计美学，超精细渲染",
+    },
+    {
+        title: "复古人文",
+        style: "复古人文美学风格，胶片质感与自然暖调光晕，温润纸质肌理，经典优雅排版空间，浓郁艺术氛围",
+    },
+];
+
+export function extractNumberedPrompts(
+    text: string,
+    count: number,
+    basePrompt: string,
+): Array<{ title: string; prompt: string; size?: string }> {
     const cleanBase = basePrompt
         .replace(/[（(][^）)]+[）)]/g, "")
         .replace(/(?:再|重新)?(?:生成|画|来|做)?一?次/g, "")
@@ -162,6 +193,7 @@ export function extractNumberedPrompts(text: string, count: number, basePrompt: 
                     return subStates.slice(0, count).map((state) => ({
                         title: state,
                         prompt: `${subject}，${state}${detectedStyle ? `，${detectedStyle}` : "，生动细腻，主体居中"}`,
+                        size: inferImageSizeFromPrompt(`${subject}，${state}`, "1024x1024"),
                     }));
                 }
             }
@@ -177,12 +209,13 @@ export function extractNumberedPrompts(text: string, count: number, basePrompt: 
             return {
                 title: `方案 ${idx + 1}`,
                 prompt: `${subject}，${detail}`,
+                size: inferImageSizeFromPrompt(`${subject}，${detail}`, "1536x864"),
             };
         });
     }
 
     // 3. 逐行匹配常规列表项（如 1. 红色生命药水：...），排除元数据键名（如主角、风格、比例等）
-    const items: Array<{ title: string; prompt: string }> = [];
+    const items: Array<{ title: string; prompt: string; size?: string }> = [];
     const itemPattern =
         /^(?:[\d+一二三四五六七八九]+[\s.、|｜:：]+|[*•\-—~#]+\s*|[❤️💙💚💛💜🧡🤍🖤✨🎨📦🔍]+\s*)?(?:(?:方案|风格|图层|素材|项目|版本)?[\d+一二三四五六七八九]+[:：\s.、]?\s*)?[*]*([^*：:\n—\-]{2,20})[*]*\s*[：:—\-]\s*(.+)$/;
 
@@ -194,7 +227,11 @@ export function extractNumberedPrompts(text: string, count: number, basePrompt: 
             const detail = match[2].trim();
             if (rawTitle && detail && detail.length >= 4 && !META_LABEL_PATTERN.test(rawTitle)) {
                 const prompt = cleanBase ? `${cleanBase}，${rawTitle}：${detail}` : `${rawTitle}：${detail}`;
-                items.push({ title: rawTitle || `素材 ${items.length + 1}`, prompt });
+                items.push({
+                    title: rawTitle || `素材 ${items.length + 1}`,
+                    prompt,
+                    size: inferImageSizeFromPrompt(prompt, "1536x864"),
+                });
             }
         }
         if (items.length >= count) break;
@@ -209,18 +246,21 @@ export function extractNumberedPrompts(text: string, count: number, basePrompt: 
             return parts.slice(0, count).map((part) => ({
                 title: part,
                 prompt: cleanBase ? `${cleanBase}，${part}：精致高光，细节清晰，独立单体` : part,
+                size: inferImageSizeFromPrompt(part, "1024x1024"),
             }));
         }
     }
 
-    const result: Array<{ title: string; prompt: string }> = [];
+    // 5. 智能创意分流：结合业务用途与多样化设计主题输出高质量方案，彻底告别死板的「设计稿，方案 1」
+    const result: Array<{ title: string; prompt: string; size?: string }> = [];
     const targetCount = Math.max(2, Math.min(8, count || 4));
     const prefix = cleanBase || basePrompt;
     for (let i = 0; i < targetCount; i += 1) {
-        result.push({
-            title: `方案 ${i + 1}`,
-            prompt: prefix ? `${prefix}，方案 ${i + 1}` : `设计方案 ${i + 1}`,
-        });
+        const theme = DIVERSE_DESIGN_THEMES[i % DIVERSE_DESIGN_THEMES.length];
+        const title = `方案 ${i + 1} · ${theme.title}`;
+        const prompt = prefix ? `${prefix}，${theme.style}` : `创意视觉设计，${theme.style}`;
+        const size = inferImageSizeFromPrompt(prefix || prompt, "1536x864");
+        result.push({ title, prompt, size });
     }
     return result;
 }
@@ -257,9 +297,9 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
     };
     const requestedImageCount = intent.batchCount || (intentTool ? 1 : 0);
 
-    const runIntentTool = async (prompt: string) => {
+    const runIntentTool = async (prompt: string, customSize?: string, customTitle?: string) => {
         const defaultSize = options.buildContext().defaultSize;
-        const size = inferImageSizeFromPrompt(prompt, defaultSize);
+        const size = customSize || inferImageSizeFromPrompt(prompt, defaultSize);
         const format = intent.format || (/动图|动态表情包|动态图|\bgif\b|会动的/i.test(prompt) ? "gif" : undefined);
         const background = intent.background || (/透明底|透明背景|透明图|透明png|png透明|transparent/i.test(prompt) ? "transparent" : undefined);
         const hasCanvasTools = options.tools.some((t) => t.name === "canvas_batch_generate_nodes");
@@ -274,7 +314,7 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
                 const tasks = subItems.map((item) => ({
                     prompt: item.prompt,
                     title: item.title,
-                    size: inferImageSizeFromPrompt(item.prompt, "1024x1024"),
+                    size: item.size || inferImageSizeFromPrompt(item.prompt, "1024x1024"),
                     ...(background ? { background } : {}),
                 }));
                 call = {
@@ -287,7 +327,7 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
                     arguments: {
                         prompt,
                         size,
-                        title: intent.usageScene ? `${intent.usageScene}` : "AI 生图节点",
+                        title: customTitle || (intent.usageScene ? `${intent.usageScene}` : "AI 生图节点"),
                         ...(background ? { background } : {}),
                         run: true,
                     },
@@ -300,6 +340,7 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
                     prompt,
                     size,
                     count: 1,
+                    ...(customTitle ? { title: customTitle } : {}),
                     ...(format ? { format } : {}),
                     ...(background ? { background } : {}),
                 },
@@ -480,25 +521,32 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
                                 m.role === "assistant" && Array.isArray(m.promptBlocks) && m.promptBlocks.length >= 2,
                         );
                         const historyPromptBlocks = prevAssistant?.promptBlocks;
-                        let subPrompts: string[] = [];
+                        let subTasks: Array<{ prompt: string; title?: string; size?: string }> = [];
                         if (parsed.promptBlocks.length >= 2) {
-                            subPrompts = parsed.promptBlocks.slice(0, count);
+                            subTasks = parsed.promptBlocks.slice(0, count).map((p, idx) => ({
+                                prompt: p,
+                                title: `方案 ${idx + 1}`,
+                                size: inferImageSizeFromPrompt(p, options.buildContext().defaultSize),
+                            }));
                         } else if (historyPromptBlocks && historyPromptBlocks.length >= 2) {
-                            subPrompts = historyPromptBlocks.slice(0, count);
+                            subTasks = historyPromptBlocks.slice(0, count).map((p, idx) => ({
+                                prompt: p,
+                                title: `方案 ${idx + 1}`,
+                                size: inferImageSizeFromPrompt(p, options.buildContext().defaultSize),
+                            }));
                         } else {
-                            const subItems = extractNumberedPrompts(parsed.displayText, count, intent.prompt);
-                            subPrompts = subItems.map((item) => item.prompt);
+                            subTasks = extractNumberedPrompts(parsed.displayText, count, intent.prompt);
                         }
-                        if (subPrompts.length >= 1) {
+                        if (subTasks.length >= 1) {
                             await Promise.all(
-                                subPrompts.map(async (subPrompt) => {
+                                subTasks.map(async (task) => {
                                     if (options.signal?.aborted) return;
-                                    await runIntentTool(subPrompt);
+                                    await runIntentTool(task.prompt, task.size, task.title);
                                 }),
                             );
                             modelOnlyMessages.push({
                                 role: "user",
-                                content: `【系统提示】所有要求的 ${subPrompts.length} 张图片已全部生成完毕并展示在界面中。请在本轮直接给出最终交付总结与设计说明，绝对不要再次调用任何生图工具！`,
+                                content: `【系统提示】所有要求的 ${subTasks.length} 款设计方案图片已全部生成完毕并展示在界面中。请在本轮直接给出最终交付总结与设计说明，绝对不要再次调用任何生图工具！`,
                             });
                             continue;
                         }

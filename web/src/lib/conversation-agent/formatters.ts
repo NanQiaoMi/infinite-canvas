@@ -5,19 +5,16 @@ import type { AgentToolCall } from "./types";
 export function getInitialUnderstandStepLabel(text: string, intent?: AgentIntent): string {
     const t = (key: string, options?: Record<string, unknown>) => i18n.t(`chat.${key}`, options);
     if (intent?.isCanvas && intent?.decompose) {
-        return `拆解画布任务 · 规划多节点并排排布`;
+        return `规划画布布局 · 拆解多节点排布`;
     }
     if (intent?.isCanvas) {
         return `分析画布需求 · 规划生图节点`;
     }
-    if (intent?.usageScene && intent?.decompose) {
-        return `分析用途【${intent.usageScene}】· 拆解图层与规格`;
-    }
-    if (intent?.decompose) {
-        return `拆解任务需求 · 规划多图层素材与画幅`;
+    if (intent?.decompose || (intent?.batchCount && intent.batchCount > 1)) {
+        return `分析创作需求 · 规划多方案构思与视觉参数`;
     }
     if (intent?.usageScene) {
-        return `分析业务用途【${intent.usageScene}】· 构图与视觉定位`;
+        return `分析业务用途与视觉定位 · 规划画面构图与参数`;
     }
     const defaultUnderstand = t("steps.understand", { defaultValue: "理解创作需求" });
     return text ? `${defaultUnderstand} · "${text.slice(0, 24)}"` : defaultUnderstand;
@@ -58,7 +55,9 @@ export function formatAgentToolStepLabel(call: AgentToolCall): string {
 
     const label = defaultNames[call.tool] || call.tool;
     const prompt = typeof call.arguments.prompt === "string" ? call.arguments.prompt : "";
+    const title = typeof call.arguments.title === "string" ? call.arguments.title : "";
     const size = typeof call.arguments.size === "string" ? call.arguments.size : "";
     const meta = size ? ` ${size}` : "";
-    return prompt ? `${label} · "${prompt.slice(0, 32)}"${meta}` : `${label}${meta}`;
+    const display = title ? `${title} · "${prompt.slice(0, 24)}"` : prompt ? `"${prompt.slice(0, 32)}"` : "";
+    return display ? `${label} · ${display}${meta}` : `${label}${meta}`;
 }
