@@ -279,4 +279,26 @@ describe("本地意图识别", () => {
         expect(rerunIntent.prompt).not.toContain("一次，共5张");
         expect(rerunIntent.prompt).not.toContain("共5张");
     });
+
+    test("批量生成数量上限扩展至 12，且支持阿拉伯数字与中文数字", () => {
+        // 阿拉伯数字 10、12
+        const tenSample = detectAgentIntent("批量生成10张不同姿态的柴犬并在画布排开");
+        expect(tenSample.batchCount).toBe(10);
+        expect(tenSample.decompose).toBe(true);
+
+        const twelveSample = detectAgentIntent("在画布批量生成12张生肖图标");
+        expect(twelveSample.batchCount).toBe(12);
+        expect(twelveSample.decompose).toBe(true);
+
+        // 中文数字「十张」「十二张」
+        const cnTenSample = detectAgentIntent("生成一套十个奇幻魔法药水图标");
+        expect(cnTenSample.batchCount).toBe(10);
+
+        const cnTwelveSample = detectAgentIntent("在画布上生成十二张星空插画");
+        expect(cnTwelveSample.batchCount).toBe(12);
+
+        // 超过上限的安全限制到 12
+        const overflowSample = detectAgentIntent("批量生成20张复古胶片街拍");
+        expect(overflowSample.batchCount).toBe(12);
+    });
 });

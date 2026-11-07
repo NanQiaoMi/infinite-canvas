@@ -158,12 +158,22 @@ function extractColonBody(text: string) {
     return match ? match[1].trim() || null : null;
 }
 
-/** 提取期望批量生成的张数（如「4张」「一套3个」） */
+/** 提取期望批量生成的张数（如「4张」「一套3个」「一套十个」「共10张」「十二个生肖」） */
 function extractBatchCount(text: string): number | undefined {
+    const cnMap: Record<string, number> = {
+        一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9,
+        十: 10, 十一: 11, 十二: 12,
+    };
+    // 优先匹配如「一套3个」「一组10张」「一套十个」中“套/组”后面的具体数量
+    const suiteMatch = text.match(/(?:一套|一组)\s*(?:共|一共|总共)?\s*(\d+|十一|十二|十|[一二两三四五六七八九])\s*[张幅个次]/);
+    if (suiteMatch) {
+        const val = suiteMatch[1];
+        if (/^\d+$/.test(val)) return Math.min(12, Math.max(1, parseInt(val, 10)));
+        if (cnMap[val]) return cnMap[val];
+    }
     const numMatch = text.match(/(?:共|一共|总共)?\s*(\d+)\s*[张幅个套组次]/);
-    if (numMatch) return Math.min(8, Math.max(1, parseInt(numMatch[1], 10)));
-    const cnMap: Record<string, number> = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
-    const cnMatch = text.match(/(?:共|一共|总共)?\s*([一二两三四五六七八九])\s*[张幅个套组次]/);
+    if (numMatch) return Math.min(12, Math.max(1, parseInt(numMatch[1], 10)));
+    const cnMatch = text.match(/(?:共|一共|总共)?\s*(十一|十二|十|[一二两三四五六七八九])\s*[张幅个套组次]/);
     if (cnMatch && cnMap[cnMatch[1]]) return cnMap[cnMatch[1]];
     return undefined;
 }
@@ -190,8 +200,8 @@ export function stripInstructionPrefix(text: string) {
     trimmed = trimmed.replace(LEADING_GENERATE_PATTERN, "").replace(LEADING_EN_PATTERN, "").trim();
     trimmed = trimmed.replace(/^(?:透明底|透明背景|透明图|透明png|png透明|png透明图片|png透明图)+[\s，,。.!！、]*/i, "").trim();
     trimmed = trimmed.replace(/^(?:再|重新)?(?:生成|来|做|出|搞)?\s*一?次[，,。.!！、\s]*/i, "").trim();
-    trimmed = trimmed.replace(/^(?:共|一共|总共)?\s*(?:\d+|[一二两三四五六七八九几])\s*[张幅个套组次][，,。.!！、\s]*/i, "").trim();
-    trimmed = trimmed.replace(/[，,。.!！、\s]*(?:共|一共|总共)?\s*(?:\d+|[一二两三四五六七八九几])\s*[张幅个套组次]$/i, "").trim();
+    trimmed = trimmed.replace(/^(?:共|一共|总共)?\s*(?:\d+|十一|十二|十|[一二两三四五六七八九几])\s*[张幅个套组次][，,。.!！、\s]*/i, "").trim();
+    trimmed = trimmed.replace(/[，,。.!！、\s]*(?:共|一共|总共)?\s*(?:\d+|十一|十二|十|[一二两三四五六七八九几])\s*[张幅个套组次]$/i, "").trim();
     trimmed = trimmed.replace(/[，,。.!！、\s]*(?:再|重新)?(?:生成|来|做|出|搞)?\s*一?次$/i, "").trim();
     const stripped = trimmed.replace(/^[，,。.!！、：:\s]+/, "").trim();
     if ((stripped === "素材" || !stripped) && /海报/i.test(text)) {
@@ -208,7 +218,7 @@ export function extractFollowUpModification(input: string): string {
     let text = input.trim();
     text = text.replace(/^(?:我?想要?|来个|整个|搞个|做个|换成|选|我选)\s*/i, "");
     text = text.replace(/^(?:再|另外再?|重新|接着|继续)?(?:生成|画|来|做|出|整|搞)?\s*(?:一?[个张幅组套版次]|几[个张幅次]|同款)?[，,。.!！、\s]*/i, "");
-    text = text.replace(/(?:[，,。.!！、\s]*(?:共|一共|总共)?\s*(?:\d+|[一二两三四五六七八九几])\s*[张幅个套组次])+/gi, "");
+    text = text.replace(/(?:[，,。.!！、\s]*(?:共|一共|总共)?\s*(?:\d+|十一|十二|十|[一二两三四五六七八九几])\s*[张幅个套组次])+/gi, "");
     text = text.replace(/(?:[，,。.!！、\s]*(?:再|重新|另外再?|接着|继续)?(?:生成|画|来|做|出|整|搞)?\s*(?:一?[个张幅组套版次]|几[个张幅次]|同款)?)+$/gi, "");
     text = text.replace(/^[，,。.!！、：:\s]+|[，,。.!！、：:\s]+$/g, "");
     if (/^(?:再|重新|继续|再来|再出|再做|再生成)?(?:一?次|一?张|一?版)?$/i.test(text)) return "";
