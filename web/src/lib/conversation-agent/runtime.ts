@@ -125,9 +125,57 @@ const GENERATION_INTENT_PATTERN = /(生成|出图|画一|画个|画张|改图|�
 const CORRECTION_TEXT =
     "【系统纠错】你具备工具调用能力，工具由无限画布前端执行，绝对不要说「无法执行工具 / 后端不支持 / 临时聊天 / 未连接画布工具」。请直接按协议输出 ```tool 代码块（严格 JSON）。在画布中生成或排布图片时，调用 canvas_batch_generate_nodes（批量）或 canvas_create_image_node（单张）；在对话中生成调用 generate_image；修改已有图片调用 edit_image。";
 
-function extractNumberedPrompts(text: string, count: number, basePrompt: string): Array<{ title: string; prompt: string }> {
-    const cleanBase = basePrompt.replace(/[（(][^）)]+[）)]/g, "").trim();
+const META_LABEL_PATTERN =
+    /^(?:主角|主体|角色|风格|画风|比例|尺寸|画幅|设定|统一设定|种状态|状态|动作|表情|数量|模型|格式|背景|环境|特点|要求|说明|提示词|方案名称|设计要求|五种状态|四种状态|三种状态|不同状态)$/i;
+
+export function extractNumberedPrompts(text: string, count: number, basePrompt: string): Array<{ title: string; prompt: string }> {
+    const cleanBase = basePrompt
+        .replace(/[（(][^）)]+[）)]/g, "")
+        .replace(/(?:再|重新)?(?:生成|画|来|做)?一?次/g, "")
+        .replace(/(?:共|一共|总共)?\s*\d+\s*[张幅个套组次]/g, "")
+        .replace(/^[，,。.!！、：:\s]+|[，,。.!！、：:\s]+$/g, "")
+        .trim();
+
     const lines = text.split("\n");
+    let detectedSubject = "";
+    let detectedStyle = "";
+
+    // 1. 优先检查文本中是否有枚举的状态行（如「五种状态：求抱抱、委屈哭哭、疯狂贴贴、求亲亲、翻肚皮撒娇」）
+    for (const line of lines) {
+        const trimmed = line.trim();
+        const m = trimmed.match(/^[*•\-—~#\s]*([^*：:\n—\-]{2,20})[*]*\s*[：:—\-]\s*(.+)$/);
+        if (m) {
+            const label = m[1].trim();
+            const val = m[2].trim();
+            if (/主角|主体|角色/i.test(label)) detectedSubject = val.replace(/[。！!]$/, "");
+            if (/风格|画风/i.test(label)) detectedStyle = val.replace(/[。！!]$/, "");
+            if (/状态|动作|表情/i.test(label)) {
+                const subStates = val.split(/[、，,；;]+/).map((s) => s.trim().replace(/[。！!]$/, "")).filter(Boolean);
+                if (subStates.length >= 2) {
+                    const subject = cleanBase || detectedSubject || "主体";
+                    return subStates.slice(0, count).map((state) => ({
+                        title: state,
+                        prompt: `${subject}，${state}${detectedStyle ? `，${detectedStyle}` : "，生动细腻，主体居中"}`,
+                    }));
+                }
+            }
+        }
+    }
+
+    // 2. 检查是否有英文/中文编号括号分项，如 (1) ...; (2) ...; (3) ...
+    const numParenMatches = [...text.matchAll(/\(([1-8一二三四五六七八])\)\s*([^;；\n]+)/g)];
+    if (numParenMatches.length >= 2) {
+        const subject = cleanBase || detectedSubject || "主体";
+        return numParenMatches.slice(0, count).map((m, idx) => {
+            const detail = m[2].trim().replace(/[。！!]$/, "");
+            return {
+                title: `方案 ${idx + 1}`,
+                prompt: `${subject}，${detail}`,
+            };
+        });
+    }
+
+    // 3. 逐行匹配常规列表项（如 1. 红色生命药水：...），排除元数据键名（如主角、风格、比例等）
     const items: Array<{ title: string; prompt: string }> = [];
     const itemPattern =
         /^(?:[\d+一二三四五六七八九]+[\s.、|｜:：]+|[*•\-—~#]+\s*|[❤️💙💚💛💜🧡🤍🖤✨🎨📦🔍]+\s*)?(?:(?:方案|风格|图层|素材|项目|版本)?[\d+一二三四五六七八九]+[:：\s.、]?\s*)?[*]*([^*：:\n—\-]{2,20})[*]*\s*[：:—\-]\s*(.+)$/;
@@ -138,7 +186,7 @@ function extractNumberedPrompts(text: string, count: number, basePrompt: string)
         if (match) {
             const rawTitle = match[1].replace(/^[\d+一二三四五六七八九]+[\s.、|｜]+/, "").trim();
             const detail = match[2].trim();
-            if (rawTitle && detail && detail.length >= 4) {
+            if (rawTitle && detail && detail.length >= 4 && !META_LABEL_PATTERN.test(rawTitle)) {
                 const prompt = cleanBase ? `${cleanBase}，${rawTitle}：${detail}` : `${rawTitle}：${detail}`;
                 items.push({ title: rawTitle || `素材 ${items.length + 1}`, prompt });
             }
@@ -147,7 +195,7 @@ function extractNumberedPrompts(text: string, count: number, basePrompt: string)
     }
     if (items.length >= 2) return items;
 
-    // 如果文本中未提取到编号项，但用户提示词中包含括号分项（如「红色生命、蓝色魔法、绿色体力」）
+    // 4. 如果文本中未提取到编号项，但用户提示词中包含括号分项（如「红色生命、蓝色魔法、绿色体力」）
     const parenMatch = basePrompt.match(/[（(]([^）)]+)[）)]/);
     if (parenMatch) {
         const parts = parenMatch[1].split(/[、,，\s/|｜]+/).map((s) => s.trim()).filter(Boolean);
@@ -276,6 +324,11 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
         const parsed = parseAgentOutput(turn.content);
         const refusal = REFUSAL_PATTERN.test(parsed.displayText) || REFUSAL_PATTERN.test(turn.content);
         let cleanedDisplayText = stripEchoedPrefix(parsed.displayText, lastAssistantText, lastUserText);
+        // 清理夹杂在文本回复中的裸露 JSON 块（如 {"size":"1024x1024","n":5,"prompt":"..."}）
+        cleanedDisplayText = cleanedDisplayText
+            .replace(/\{[^{}\n]*"size"[^{}\n]*"prompt"[^{}\n]*\}/g, "")
+            .replace(/\{[^{}\n]*"prompt"[^{}\n]*"size"[^{}\n]*\}/g, "")
+            .trim();
         if (refusal) {
             // 剥离大模型推诿拒绝的陈述（如「临时聊天/无法调用工具/等额度恢复后/resets in 35 minutes」），避免残留在对话流中
             cleanedDisplayText = cleanedDisplayText
@@ -314,9 +367,17 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
                     if (intent.decompose || (intent.batchCount && intent.batchCount > 1) || parsed.promptBlocks.length > 1) {
                         const count = intent.batchCount || (parsed.promptBlocks.length > 1 ? parsed.promptBlocks.length : 4);
                         const layout = intent.layout || "horizontal";
+                        const historyPromptBlocks = [...options.messages].reverse().find((m) => m.role === "assistant" && Array.isArray(m.promptBlocks) && m.promptBlocks.length >= 2)?.promptBlocks;
                         let tasks: Array<{ prompt: string; title: string; size: string; background?: "transparent" }>;
                         if (parsed.promptBlocks.length >= 2) {
                             tasks = parsed.promptBlocks.slice(0, count).map((p, idx) => ({
+                                prompt: p,
+                                title: `方案 ${idx + 1}`,
+                                size: inferImageSizeFromPrompt(p, "1024x1024"),
+                                ...(intent.background ? { background: intent.background } : {}),
+                            }));
+                        } else if (historyPromptBlocks && historyPromptBlocks.length >= 2) {
+                            tasks = historyPromptBlocks.slice(0, count).map((p, idx) => ({
                                 prompt: p,
                                 title: `方案 ${idx + 1}`,
                                 size: inferImageSizeFromPrompt(p, "1024x1024"),
@@ -373,9 +434,12 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
                     const isBatchChat = (intent.decompose || (intent.batchCount && intent.batchCount > 1)) && intentTool === "generate_image";
                     if (isBatchChat) {
                         const count = intent.batchCount || (parsed.promptBlocks.length > 1 ? parsed.promptBlocks.length : 3);
+                        const historyPromptBlocks = [...options.messages].reverse().find((m) => m.role === "assistant" && Array.isArray(m.promptBlocks) && m.promptBlocks.length >= 2)?.promptBlocks;
                         let subPrompts: string[] = [];
                         if (parsed.promptBlocks.length >= 2) {
                             subPrompts = parsed.promptBlocks.slice(0, count);
+                        } else if (historyPromptBlocks && historyPromptBlocks.length >= 2) {
+                            subPrompts = historyPromptBlocks.slice(0, count);
                         } else {
                             const subItems = extractNumberedPrompts(parsed.displayText, count, intent.prompt);
                             subPrompts = subItems.map((item) => item.prompt);

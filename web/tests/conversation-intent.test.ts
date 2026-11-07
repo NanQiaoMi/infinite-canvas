@@ -256,4 +256,27 @@ describe("本地意图识别", () => {
         expect(intentDirectChoice.kind).toBe("generate_image");
         expect(intentDirectChoice.prompt).toContain("一只可爱的橘白小猫");
     });
+
+    test("普通生图不误注入「微信表情包」预设场景，且批量与次数修饰准确剥离", () => {
+        // 1. 普通萌宠描述不强行设定为微信表情包
+        const catIntent = detectAgentIntent("生成一个大大撒娇的橘猫 不同状态的");
+        expect(catIntent.kind).toBe("generate_image");
+        expect(catIntent.usageScene).toBeUndefined();
+
+        // 2. 「再生成一次，共5张」准确提取 batchCount: 5，且不残留「一次，共5张」前缀
+        const history = [
+            { role: "user", text: "生成一个大大撒娇的橘猫 不同状态的" },
+            {
+                role: "assistant",
+                text: "已生成一只胖橘猫",
+                promptBlocks: ["圆滚滚胖橘猫，大脑袋小短腿，软萌肉垫，撒娇动作"],
+            },
+        ];
+        const rerunIntent = detectAgentIntent("再生成一次，共5张", { history });
+        expect(rerunIntent.kind).toBe("generate_image");
+        expect(rerunIntent.batchCount).toBe(5);
+        expect(rerunIntent.prompt).toContain("圆滚滚胖橘猫");
+        expect(rerunIntent.prompt).not.toContain("一次，共5张");
+        expect(rerunIntent.prompt).not.toContain("共5张");
+    });
 });

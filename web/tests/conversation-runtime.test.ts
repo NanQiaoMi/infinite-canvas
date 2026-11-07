@@ -647,4 +647,74 @@ describe("对话运行时", () => {
 
         expect(executedTools).toContain("canvas_create_image_node");
     });
+
+    test("extractNumberedPrompts 解析规格清单（主角/风格/比例/五种状态）时不会提取元标签，而是组合出完整状态提示词", async () => {
+        const { extractNumberedPrompts } = await import("@/lib/conversation-agent/runtime");
+        const modelSpecText = `统一设定：
+主角：圆滚滚、肉嘟嘟的大橘猫。
+风格：Q版萌系、粗黑描边、夸张表情。
+比例：每张 1:1。
+五种状态：求抱抱、委屈哭哭、疯狂贴贴、求亲亲、翻肚皮撒娇。
+目前请切换到普通聊天使用图片生成，继续沿用这套完整的五张设计要求。`;
+
+        const prompts = extractNumberedPrompts(modelSpecText, 5, "再生成一次，共5张");
+        expect(prompts).toHaveLength(5);
+        // 不应包含「主角」、「风格」、「比例」等标签名作为提示词
+        for (const p of prompts) {
+            expect(p.prompt).not.toMatch(/^(?:主角|风格|比例|五种状态|统一设定)/);
+            expect(p.prompt).not.toContain("一次，共5张");
+        }
+        // 应包含五种不同状态
+        expect(prompts[0].prompt).toContain("求抱抱");
+        expect(prompts[1].prompt).toContain("委屈哭哭");
+        expect(prompts[2].prompt).toContain("疯狂贴贴");
+        expect(prompts[3].prompt).toContain("求亲亲");
+        expect(prompts[4].prompt).toContain("翻肚皮撒娇");
+    });
+
+    test("当上一轮助手已提供 promptBlocks 且用户要求「生成三张设计稿」时，运行时直接继承历史 promptBlocks 出图", async () => {
+        const { runAgentTurn } = await import("@/lib/conversation-agent/runtime");
+        const executedPrompts: string[] = [];
+        const result = await runAgentTurn({
+            locale: "zh-CN",
+            messages: [
+                { id: "u1", role: "user", text: "帮我构思三个界面设计方案", createdAt: 1 },
+                {
+                    id: "a1",
+                    role: "assistant",
+                    text: "为你构思了三个方案：\n1. 移动端极简设计\n2. AI 聊天 Web 应用\n3. 现代电商桌面端",
+                    promptBlocks: [
+                        "modern mobile app UI design clean aesthetic",
+                        "modern AI chat web application UI design",
+                        "modern ecommerce website UI design desktop",
+                    ],
+                    createdAt: 2,
+                },
+                { id: "u2", role: "user", text: "生成三张设计稿", createdAt: 3 },
+            ],
+            tools: [
+                {
+                    name: "generate_image",
+                    description: "生成图片",
+                    parameters: { type: "object", properties: { prompt: { type: "string" } }, required: ["prompt"] },
+                },
+            ],
+            buildContext: () => ({ defaultSize: "1024x1024", pageContext: "chat", imageModels: [] }),
+            callModel: async () => ({
+                content: "好的，马上为你生成三张设计稿！",
+                toolCalls: [],
+            }),
+            executeTool: async (call) => {
+                executedPrompts.push(String(call.arguments.prompt || ""));
+                return { tool: call.tool, ok: true, images: [], count: 1, size: "1024x1024" };
+            },
+            signal: new AbortController().signal,
+        });
+
+        expect(executedPrompts).toHaveLength(3);
+        // 验证执行的提示词继承了上一轮的 3 个 promptBlocks，而不是泛泛的「设计稿，方案 1」
+        expect(executedPrompts[0]).toBe("modern mobile app UI design clean aesthetic");
+        expect(executedPrompts[1]).toBe("modern AI chat web application UI design");
+        expect(executedPrompts[2]).toBe("modern ecommerce website UI design desktop");
+    });
 });
