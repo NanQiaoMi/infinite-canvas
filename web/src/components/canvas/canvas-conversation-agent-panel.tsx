@@ -239,19 +239,22 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
 
                 const finalSteps = currentStepsRef.current.map((s) => (s.status === "running" ? { ...s, status: "done" as const } : s));
                 if (result.messages.length) {
-                    const lastAssistantIdx = result.messages.map((m) => m.role).lastIndexOf("assistant");
-                    const messagesToAppend = result.messages.map((m, idx) =>
-                        m.role === "assistant" && idx === lastAssistantIdx && finalSteps.length > 0 ? { ...m, steps: finalSteps } : m,
+                    const firstAssistantIdx = result.messages.findIndex((m) => m.role === "assistant");
+                    let messagesToAppend = result.messages.map((m, idx) =>
+                        m.role === "assistant" && idx === firstAssistantIdx && finalSteps.length > 0 ? { ...m, steps: finalSteps } : m,
                     );
-                    if (lastAssistantIdx === -1 && finalSteps.length > 0) {
-                        messagesToAppend.push({
-                            id: nanoid(),
-                            role: "assistant",
-                            text: "已完成画布操作指令。",
-                            steps: finalSteps,
-                            promptBlocks: [],
-                            createdAt: Date.now(),
-                        });
+                    if (firstAssistantIdx === -1 && finalSteps.length > 0) {
+                        messagesToAppend = [
+                            {
+                                id: nanoid(),
+                                role: "assistant",
+                                text: "",
+                                steps: finalSteps,
+                                promptBlocks: [],
+                                createdAt: Date.now(),
+                            },
+                            ...messagesToAppend,
+                        ];
                     }
                     appendMessages(sessionId, messagesToAppend);
                 }

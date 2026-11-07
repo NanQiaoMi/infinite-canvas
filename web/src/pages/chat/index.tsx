@@ -9,7 +9,7 @@ import { nativeToolCallsToAgent } from "@/lib/conversation-agent/protocol";
 import { runAgentTurn } from "@/lib/conversation-agent/runtime";
 import { agentLocaleOf } from "@/lib/conversation-agent/system-prompt";
 import { AGENT_TOOLS, executeAgentTool } from "@/lib/conversation-agent/tools";
-import type { AgentContextInput, AgentEvent, AgentImageRef, AgentMessage, AgentModelCall, AgentToolCall } from "@/lib/conversation-agent/types";
+import type { AgentContextInput, AgentEvent, AgentImageRef, AgentMessage, AgentModelCall, AgentToolCall, AgentToolResult } from "@/lib/conversation-agent/types";
 import { requestConversationTurn } from "@/services/api/image";
 import { uploadImage } from "@/services/image-storage";
 import { decodeChannelModel, findModelOptionByQuery, modelOptionLabel, selectableModelsByCapability, useConfigStore } from "@/stores/use-config-store";
@@ -18,7 +18,7 @@ import { useQuotaStore } from "@/stores/use-quota-store";
 import { cn } from "@/lib/utils";
 
 import { ChatComposer } from "./components/chat-composer";
-import { ChatMessage } from "./components/chat-message";
+import { ChatMessage, ToolResultBody } from "./components/chat-message";
 import { ChatSessionList } from "./components/chat-session-list";
 import { ArtifactPanel } from "./components/artifact-panel";
 import { CommandPalette } from "./components/command-palette";
@@ -77,6 +77,7 @@ export default function ChatPage() {
         });
     }, []);
     const [exitingTool, setExitingTool] = useState<AgentToolCall | null>(null);
+    const [completedToolResult, setCompletedToolResult] = useState<{ call: AgentToolCall; result: AgentToolResult } | null>(null);
     const exitTimerRef = useRef<number | null>(null);
     const stepsTimerRef = useRef<number | null>(null);
     const stepSeqRef = useRef(0);
@@ -269,6 +270,7 @@ export default function ChatPage() {
             setReferences([]);
             setInput("");
             setStreamingText("");
+            setCompletedToolResult(null);
             setTurnStartedAt(Date.now());
             if (stepsTimerRef.current) window.clearTimeout(stepsTimerRef.current);
             const history = useConversationAgentStore.getState().sessions.find((session) => session.id === sessionId)?.messages ?? [];
@@ -312,6 +314,7 @@ export default function ChatPage() {
                             setStreamingText("");
                             if (exitTimerRef.current) window.clearTimeout(exitTimerRef.current);
                             setExitingTool(null);
+                            setCompletedToolResult(null);
                             setRunningTool(event.call);
                             setSteps((current) => {
                                 const next = current.map((step) =>
@@ -343,9 +346,7 @@ export default function ChatPage() {
                             setSteps((current) => current.map((step) => (step.id === lastToolStepRef.current && step.status === "running" ? { ...step, status: "done" as const } : step)));
                             lastToolStepRef.current = null;
                             if (event.call.tool === "generate_image" || event.call.tool === "edit_image") {
-                                setExitingTool(event.call);
-                                if (exitTimerRef.current) window.clearTimeout(exitTimerRef.current);
-                                exitTimerRef.current = window.setTimeout(() => setExitingTool(null), 260);
+                                setCompletedToolResult({ call: event.call, result: event.result });
                             }
                         }
                     },
@@ -353,22 +354,25 @@ export default function ChatPage() {
                     references: attachments,
                 });
                 const finalSteps = currentStepsRef.current.map((s) => (s.status === "running" ? { ...s, status: "done" as const } : s));
-                const lastAssistantIdx = result.messages.map((m) => m.role).lastIndexOf("assistant");
-                const messagesWithSteps = result.messages.map((msg, idx) => {
-                    if (msg.role === "assistant" && idx === lastAssistantIdx && finalSteps.length > 0) {
+                const firstAssistantIdx = result.messages.findIndex((m) => m.role === "assistant");
+                let messagesWithSteps = result.messages.map((msg, idx) => {
+                    if (msg.role === "assistant" && idx === firstAssistantIdx && finalSteps.length > 0) {
                         return { ...msg, steps: finalSteps };
                     }
                     return msg;
                 });
-                if (lastAssistantIdx === -1 && finalSteps.length > 0) {
-                    messagesWithSteps.push({
-                        id: nanoid(),
-                        role: "assistant",
-                        text: "任务已完成。",
-                        steps: finalSteps,
-                        promptBlocks: [],
-                        createdAt: Date.now(),
-                    });
+                if (firstAssistantIdx === -1 && finalSteps.length > 0) {
+                    messagesWithSteps = [
+                        {
+                            id: nanoid(),
+                            role: "assistant",
+                            text: "",
+                            steps: finalSteps,
+                            promptBlocks: [],
+                            createdAt: Date.now(),
+                        },
+                        ...messagesWithSteps,
+                    ];
                 }
                 appendMessages(sessionId, messagesWithSteps);
                 if (result.roundLimitReached) appendMessages(sessionId, [{ id: nanoid(), role: "error", text: t("chat.errors.tooManyRounds"), createdAt: Date.now() }]);
@@ -382,10 +386,12 @@ export default function ChatPage() {
                     appendMessages(sessionId, [{ id: nanoid(), role: "error", text: isNetworkError(error) ? t("chat.errors.network") : raw, createdAt: Date.now() }]);
                 }
             } finally {
-                controllerRef.current = null;
                 setRunning(false);
-                setStreamingText("");
                 setRunningTool(null);
+                setCompletedToolResult(null);
+                setExitingTool(null);
+                setStreamingText("");
+                controllerRef.current = null;
                 setSteps([]);
                 if (stepsTimerRef.current) window.clearTimeout(stepsTimerRef.current);
                 setTurnStartedAt(0);
@@ -520,7 +526,7 @@ export default function ChatPage() {
                                       <ChatMessage key={item.id} message={item} onRetry={item.role === "error" ? () => retryMessage(index) : undefined} />
                                   ))}
                             {steps.length ? <StepTrail steps={steps} running={running} /> : null}
-                            {running && streamingText ? (
+                            {running && streamingText && !completedToolResult && !runningTool ? (
                                 <div className="agent-message-in w-full">
                                     <SmoothStreamText rawText={streamingText} running={running} />
                                 </div>
@@ -528,9 +534,14 @@ export default function ChatPage() {
                             {runningTool && (runningTool.tool === "generate_image" || runningTool.tool === "edit_image") ? (
                                 <GenerationWaiting call={runningTool} startedAt={turnStartedAt || Date.now()} />
                             ) : null}
-                            {!runningTool && exitingTool ? (
-                                <div className="agent-fade-out">
-                                    <GenerationWaiting call={exitingTool} startedAt={turnStartedAt || Date.now()} />
+                            {!runningTool && completedToolResult && (completedToolResult.call.tool === "generate_image" || completedToolResult.call.tool === "edit_image") ? (
+                                <div className="agent-message-in w-full space-y-2">
+                                    <ToolResultBody result={completedToolResult.result} />
+                                </div>
+                            ) : null}
+                            {running && streamingText && completedToolResult ? (
+                                <div className="agent-message-in w-full">
+                                    <SmoothStreamText rawText={streamingText} running={running} />
                                 </div>
                             ) : null}
                             {runningTool && runningTool.tool === "apply_prompt" ? (
@@ -541,7 +552,7 @@ export default function ChatPage() {
                                     </div>
                                 </div>
                             ) : null}
-                            {running && !streamingText && !runningTool && !steps.length ? <ThinkingLine startedAt={turnStartedAt || Date.now()} /> : null}
+                            {running && !streamingText && !runningTool && !completedToolResult && !steps.length ? <ThinkingLine startedAt={turnStartedAt || Date.now()} /> : null}
                         </div>
                     </div>
                     {/* 底部向上渐变遮罩，使接近输入框的文字柔和淡化，不再生硬切断 */}

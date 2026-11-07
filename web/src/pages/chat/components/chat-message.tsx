@@ -103,7 +103,7 @@ function UserAttachments({ images }: { images: AgentImageRef[] }) {
     );
 }
 
-function ToolResultBody({ result }: { result: AgentToolResult }) {
+export function ToolResultBody({ result }: { result: AgentToolResult }) {
     const { t } = useTranslation();
     const navigate = useNavigate();
     if (!result.ok) {

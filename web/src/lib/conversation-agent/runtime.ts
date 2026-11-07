@@ -24,12 +24,50 @@ export type AgentRuntimeOptions = {
     intent?: AgentIntent;
 };
 
-function toModelMessages(messages: AgentMessage[]): AgentModelMessage[] {
+/**
+ * 判断一段 assistant 文本是否属于后置生图总结套话或空洞确认。
+ * 这类套话如果在历史中透传给上游大模型，极易诱发大模型在下一次生成请求时「复读/照抄」上一轮的回答。
+ */
+export function isBoilerplateSummary(text: string): boolean {
+    const trimmed = text.trim();
+    if (!trimmed) return true;
+    if (/^(?:已完成工具调用|图片生成已完成|任务已完成|已完成画布操作指令|生成成功)[。.]?$/i.test(trimmed)) return true;
+    if (/^已为您在画布上(?:创建生图节点并启动精细渲染|批量创建节点并排布[，, ]正在并行启动渲染)[。.]?$/i.test(trimmed)) return true;
+    if (/^(?:生成成功\s*)?已(?:为[您你])?生成(?:一张|一组|多张|[\d]+张)?(?:竖版|横版|方形|自定义)?(?:海报|图片|素材|壁纸|头像|图标|表情包)?[^。\n]{0,80}(?:使用\s*GPT\s*Image[^\n]*)?[。.]?$/i.test(trimmed)) return true;
+    return false;
+}
+
+/**
+ * 检测并剥离大模型偶发的「复读上一轮回答开头」的问题。
+ */
+export function stripEchoedPrefix(currentText: string, previousText?: string): string {
+    if (!previousText) return currentText;
+    const trimmedPrev = previousText.trim();
+    if (trimmedPrev.length < 6) return currentText;
+    const trimmedCurr = currentText.trimStart();
+    if (trimmedCurr.startsWith(trimmedPrev)) {
+        return trimmedCurr.slice(trimmedPrev.length).replace(/^[，。；：\n\s]+/, "");
+    }
+    const firstSentence = trimmedPrev.split(/[。\n！？!]/)[0]?.trim();
+    if (firstSentence && firstSentence.length >= 8 && trimmedCurr.startsWith(firstSentence)) {
+        return trimmedCurr.slice(firstSentence.length).replace(/^[，。；：\n\s]+/, "");
+    }
+    return currentText;
+}
+
+export function toModelMessages(messages: AgentMessage[]): AgentModelMessage[] {
     const result: AgentModelMessage[] = [];
     for (const message of messages) {
-        if (message.role === "user") result.push({ role: "user", content: message.text });
-        else if (message.role === "assistant") result.push({ role: "assistant", content: message.raw ?? message.text });
-        else if (message.role === "tool") result.push({ role: "user", content: message.text });
+        if (message.role === "user") {
+            result.push({ role: "user", content: message.text });
+        } else if (message.role === "assistant") {
+            const rawContent = message.raw ?? message.text;
+            // 过滤纯生图总结套话，避免模型在下一次生成时复读上一轮回复
+            if (isBoilerplateSummary(rawContent)) continue;
+            result.push({ role: "assistant", content: rawContent });
+        } else if (message.role === "tool") {
+            result.push({ role: "user", content: message.text });
+        }
     }
     return result.slice(-40);
 }
@@ -111,6 +149,7 @@ function extractNumberedPrompts(text: string, count: number, basePrompt: string)
 export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentTurnResult> {
     const maxRounds = Math.max(1, options.maxRounds ?? 8);
     const lastUserText = [...options.messages].reverse().find((message) => message.role === "user")?.text ?? "";
+    const lastAssistantText = [...options.messages].reverse().find((m) => m.role === "assistant" && m.text.trim())?.text;
     // 页面未显式传 intent 时，用最后一条 user 消息在本地自动识别：/chat 页面无需改动即可获得 direct 执行与兜底。
     const intent = options.intent ?? detectAgentIntent(lastUserText, { hasReferences: (options.references?.length ?? 0) > 0, history: options.messages });
     /** 生成/改图意图对应的工具名；chat / apply_prompt 为 null。 */
@@ -165,19 +204,23 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
             messages: [...toModelMessages([...options.messages, ...newMessages]), ...modelOnlyMessages, ...(pendingDirective ? [{ role: "user" as const, content: pendingDirective }] : [])],
             tools: options.tools,
             signal: options.signal,
-            onDelta: (text) => options.onEvent?.({ type: "assistant-stream", text: stripForStreaming(text) }),
+            onDelta: (text) => {
+                const cleaned = stripEchoedPrefix(stripForStreaming(text), lastAssistantText);
+                options.onEvent?.({ type: "assistant-stream", text: cleaned });
+            },
         });
         pendingDirective = null;
         if (options.signal?.aborted) return { messages: newMessages, aborted: true, roundLimitReached: false };
 
         const parsed = parseAgentOutput(turn.content);
+        const cleanedDisplayText = stripEchoedPrefix(parsed.displayText, lastAssistantText);
         const invalid: Array<{ call: AgentToolCall; error: string }> = [
             ...(turn.toolCallErrors || []).map((item) => ({ call: { tool: item.tool, arguments: {} }, error: item.error })),
             ...parsed.invalidCalls,
         ];
         const calls = [...turn.toolCalls, ...parsed.toolCalls];
         if (calls.length) modelToolCallMade = true;
-        newMessages.push({ id: nanoid(), role: "assistant", text: parsed.displayText, raw: turn.content, promptBlocks: parsed.promptBlocks, createdAt: Date.now() });
+        newMessages.push({ id: nanoid(), role: "assistant", text: cleanedDisplayText, raw: turn.content, promptBlocks: parsed.promptBlocks, createdAt: Date.now() });
 
         for (const item of invalid) {
             const result = invalidResult(item.call.tool, item.error);
