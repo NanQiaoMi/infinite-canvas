@@ -16,6 +16,8 @@
     --radius-xl: calc(var(--radius) + 4px);
     --font-heading: var(--font-sans);
     --font-sans: var(--font-sans);
+    --font-serif: var(--font-serif);
+    --font-claude-serif: var(--font-claude-serif);
     --color-sidebar-ring: var(--sidebar-ring);
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -49,6 +51,9 @@
 }
 
 :root {
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    --font-serif: "Copernicus", "Tiempos Text", "Charter", "Bitstream Charter", "Iowan Old Style", "Source Serif 4", "Source Serif Pro", "Georgia", "Cambria", "Songti SC", "Source Han Serif SC", "Source Han Serif CN", "Noto Serif CJK SC", "Noto Serif SC", "STSong", "AR PL New Sung", "SimSun", serif;
+    --font-claude-serif: var(--font-serif);
     --radius: 0.625rem;
     --border: oklch(0.922 0 0);
     --ring: oklch(0.708 0 0);
@@ -463,10 +468,14 @@
 
 .agent-streamdown {
     overflow-wrap: anywhere;
-    font-size: 15.5px;
-    line-height: 1.8;
+    font-family: var(--font-claude-serif);
+    font-size: 16px;
+    line-height: 1.82;
     color: #1f1e1d;
-    letter-spacing: -0.01em;
+    letter-spacing: -0.005em;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
 }
 
 .dark .agent-streamdown {
@@ -481,18 +490,29 @@
     margin-bottom: 0;
 }
 
-/* Claude 风格段落间距 */
+/* Claude 风格段落间距与阅读行距 */
 .agent-streamdown p {
+    font-family: var(--font-claude-serif);
     margin-top: 0;
-    margin-bottom: 0.9em;
-    line-height: 1.8;
+    margin-bottom: 0.95em;
+    line-height: 1.82;
+    letter-spacing: -0.005em;
 }
 
 .agent-streamdown p:last-child {
     margin-bottom: 0;
 }
 
-/* Claude 风格标题排版体系 */
+/* Claude 风格标题排版体系（人文主义衬线字体） */
+.agent-streamdown h1,
+.agent-streamdown h2,
+.agent-streamdown h3,
+.agent-streamdown h4,
+.agent-streamdown h5,
+.agent-streamdown h6 {
+    font-family: var(--font-claude-serif);
+}
+
 .agent-streamdown h1 {
     font-size: 1.45rem;
     font-weight: 600;
@@ -508,12 +528,12 @@
 }
 
 .agent-streamdown h2 {
-    font-size: 1.22rem;
+    font-size: 1.25rem;
     font-weight: 600;
     line-height: 1.4;
     letter-spacing: -0.01em;
     color: #141312;
-    margin-top: 1.55em;
+    margin-top: 1.6em;
     margin-bottom: 0.55em;
 }
 
@@ -522,11 +542,12 @@
 }
 
 .agent-streamdown h3 {
-    font-size: 1.08rem;
+    font-size: 1.1rem;
     font-weight: 600;
     line-height: 1.45;
+    letter-spacing: -0.005em;
     color: #1f1e1d;
-    margin-top: 1.35em;
+    margin-top: 1.4em;
     margin-bottom: 0.45em;
 }
 
@@ -541,7 +562,7 @@
     font-weight: 600;
     line-height: 1.5;
     color: #2e2b27;
-    margin-top: 1.15em;
+    margin-top: 1.2em;
     margin-bottom: 0.35em;
 }
 
@@ -551,14 +572,16 @@
     color: #e2e0da;
 }
 
-/* Claude 风格引用块（标志性左侧细线与沉静灰阶） */
+/* Claude 风格引用块（标志性左侧细线与沉静书卷灰阶） */
 .agent-streamdown blockquote {
+    font-family: var(--font-claude-serif);
     margin-top: 0.6em;
-    margin-bottom: 0.85em;
+    margin-bottom: 0.9em;
     padding-left: 1rem;
-    border-left: 2px solid #dcdad4;
-    color: #6b6965;
+    border-left: 2.5px solid #dcdad4;
+    color: #63605a;
     font-style: normal;
+    line-height: 1.75;
 }
 
 .dark .agent-streamdown blockquote {
@@ -590,25 +613,26 @@
 .agent-streamdown ul {
     list-style-type: disc;
     margin-top: 0.45em;
-    margin-bottom: 0.85em;
-    padding-left: 1.35em;
+    margin-bottom: 0.9em;
+    padding-left: 1.4em;
 }
 
 .agent-streamdown ol {
     list-style-type: decimal;
     margin-top: 0.45em;
-    margin-bottom: 0.85em;
-    padding-left: 1.35em;
+    margin-bottom: 0.9em;
+    padding-left: 1.4em;
 }
 
 .agent-streamdown li {
+    font-family: var(--font-claude-serif);
     margin-top: 0.25em;
-    margin-bottom: 0.3em;
-    line-height: 1.75;
+    margin-bottom: 0.35em;
+    line-height: 1.8;
 }
 
 .agent-streamdown li::marker {
-    color: #9c9993;
+    color: #8c8983;
 }
 
 .dark .agent-streamdown li::marker {
@@ -626,23 +650,27 @@
     border-top-color: #2c2a27;
 }
 
-/* 表格排版 */
+/* Claude 风格表格排版 */
 .agent-streamdown table {
     width: 100%;
-    margin-top: 0.85em;
-    margin-bottom: 1.15em;
+    margin-top: 0.9em;
+    margin-bottom: 1.2em;
     border-collapse: collapse;
-    font-size: 0.92rem;
-    line-height: 1.6;
+    font-family: var(--font-claude-serif);
+    font-size: 0.94rem;
+    line-height: 1.7;
+    font-variant-numeric: tabular-nums;
 }
 
 .agent-streamdown th {
-    padding: 0.55rem 0.85rem;
+    padding: 0.6rem 0.9rem;
+    font-family: var(--font-claude-serif);
     font-weight: 600;
     text-align: left;
-    border-bottom: 2px solid #e5e3dc;
-    background: #f6f5f0;
+    border-bottom: 1.5px solid #e0ded8;
+    background: #f7f6f2;
     color: #1f1e1d;
+    letter-spacing: -0.005em;
 }
 
 .dark .agent-streamdown th {
@@ -652,26 +680,30 @@
 }
 
 .agent-streamdown td {
-    padding: 0.55rem 0.85rem;
+    padding: 0.6rem 0.9rem;
+    font-family: var(--font-claude-serif);
     border-bottom: 1px solid #ebe9e3;
+    color: inherit;
+    line-height: 1.7;
 }
 
 .dark .agent-streamdown td {
     border-bottom-color: #2c2a27;
 }
 
+/* 代码块与行内代码：保持精确现代等宽字体，形成人文衬线与工业代码的对比张力 */
 .agent-streamdown [data-streamdown="code-block"] {
     position: relative;
     display: block;
     contain: none;
     contain-intrinsic-size: none !important;
     width: 100%;
-    margin-block: 0.35rem;
+    margin-block: 0.45rem;
     padding: 0;
     gap: 0;
     overflow: hidden;
     border: 0;
-    border-radius: 0.4rem;
+    border-radius: 0.5rem;
     background: color-mix(in srgb, currentColor 5%, transparent);
 }
 
@@ -681,8 +713,8 @@
 
 .agent-streamdown [data-streamdown="code-block"] > div:has(> [data-streamdown="code-block-actions"]) {
     position: absolute;
-    top: 0.2rem;
-    right: 0.2rem;
+    top: 0.25rem;
+    right: 0.25rem;
     z-index: 1;
     height: auto;
     margin: 0;
@@ -690,16 +722,19 @@
 
 .agent-streamdown [data-streamdown="code-block-body"] {
     min-height: 0;
-    padding: 0.4rem 2rem 0.4rem 0.6rem;
+    padding: 0.5rem 2.2rem 0.5rem 0.75rem;
     overflow-x: auto;
     border: 0;
     border-radius: 0;
     background: transparent !important;
-    font-size: 0.75rem;
-    line-height: 1.15rem;
+    font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
+    font-size: 0.8rem;
+    line-height: 1.25rem;
 }
 
+.agent-streamdown [data-streamdown="code-block-body"] code,
 .agent-streamdown [data-streamdown="code-block-body"] code > span {
+    font-family: inherit !important;
     display: block;
 }
 
@@ -708,7 +743,7 @@
     margin: 0;
     padding: 0;
     border: 0;
-    border-radius: 0.3rem;
+    border-radius: 0.35rem;
     background: transparent;
     box-shadow: none;
     opacity: 0;
@@ -717,12 +752,12 @@
 
 .agent-streamdown [data-streamdown="code-block"]:hover [data-streamdown="code-block-actions"],
 .agent-streamdown [data-streamdown="code-block-actions"]:focus-within {
-    opacity: 0.58;
+    opacity: 0.65;
 }
 
 .agent-streamdown [data-streamdown="code-block-actions"] button {
     padding: 0.25rem;
-    border-radius: 0.3rem;
+    border-radius: 0.35rem;
 }
 
 .agent-streamdown [data-streamdown="code-block-actions"] button:hover {
@@ -730,10 +765,11 @@
 }
 
 .agent-streamdown [data-streamdown="inline-code"] {
-    padding: 0.12rem 0.35rem;
+    padding: 0.12rem 0.38rem;
     border: 0;
-    border-radius: 0.3rem;
+    border-radius: 0.35rem;
     background: color-mix(in srgb, currentColor 7%, transparent);
+    font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
     font-size: 0.88em;
 }
 
