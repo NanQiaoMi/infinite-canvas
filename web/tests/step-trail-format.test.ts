@@ -6,7 +6,6 @@ describe("formatStepLabel - 思考过程步骤文本智能 Chip 格式化", () =
     it("自动将文件名（如 1000287761.jpg、SKILL.md）识别并包装为 Chip 节点", () => {
         const nodes = formatStepLabel("查看第一张图片，礼堂座位布局图 1000287761.jpg 以及 SKILL.md 文件");
         expect(nodes.length).toBeGreaterThan(1);
-        // 查找包含 chip 的 React element
         const chips = nodes.filter((node) => React.isValidElement(node));
         expect(chips.length).toBe(2);
     });

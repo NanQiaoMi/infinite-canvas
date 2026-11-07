@@ -283,18 +283,29 @@ export function ChatComposer({ value, onChange, onSend, onStop, running, modelLa
                         <button
                             type="button"
                             className={cn(
-                                "flex size-8 items-center justify-center rounded-full transition-all duration-200 active:scale-90",
+                                "flex size-8 shrink-0 items-center justify-center rounded-xl transition-all duration-200 active:scale-95",
                                 running
-                                    ? "bg-stone-900 text-white shadow-sm ring-2 ring-stone-900/20 hover:bg-stone-800 dark:bg-stone-100 dark:text-stone-900 dark:ring-stone-100/20 dark:hover:bg-white"
+                                    ? "bg-[#1f1e1d] shadow-xs hover:bg-[#33312c] dark:bg-[#f2efe8] dark:hover:bg-white"
                                     : canSend
-                                      ? "bg-stone-900 text-white shadow-sm hover:scale-105 hover:bg-stone-800 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white"
-                                      : "cursor-not-allowed bg-stone-200/80 text-stone-400 dark:bg-stone-800/80 dark:text-stone-500",
+                                      ? "bg-[#1f1e1d] shadow-xs hover:scale-105 hover:bg-[#33312c] dark:bg-[#f2efe8] dark:hover:bg-white"
+                                      : "cursor-not-allowed bg-stone-100 text-stone-400 dark:bg-stone-800/70 dark:text-stone-500",
                             )}
                             disabled={!running && !canSend}
                             onClick={() => (running ? onStop() : onSend())}
                             title={running ? t("chat.stop") : t("chat.send")}
                         >
-                            {running ? <Square className="size-3.5 fill-current animate-pulse" /> : <ArrowUp className="size-4" />}
+                            {running ? (
+                                <span className="size-2.5 rounded-[2px] bg-white animate-pulse dark:bg-stone-900" />
+                            ) : (
+                                <ArrowUp
+                                    className={cn(
+                                        "size-4 shrink-0 transition-transform duration-150",
+                                        canSend ? "!text-white dark:!text-stone-900" : "text-stone-400 dark:text-stone-500",
+                                    )}
+                                    strokeWidth={2.75}
+                                    style={canSend ? { stroke: "currentColor" } : undefined}
+                                />
+                            )}
                         </button>
                     </div>
                 </div>
