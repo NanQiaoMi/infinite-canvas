@@ -70,6 +70,8 @@ export type AgentSession = {
     messages: AgentMessage[];
     createdAt: number;
     updatedAt: number;
+    scope?: "chat" | "canvas";
+    canvasProjectId?: string;
 };
 
 /** 运行上下文：每次模型调用前由页面构建，保证注入的是最新额度/模型信息。 */

@@ -237,4 +237,23 @@ describe("本地意图识别", () => {
         expect(suiteSample.kind).toBe("generate_image");
         expect(suiteSample.decompose).toBe(true);
     });
+
+    test("「要双爪合十求抱抱」及助手推荐选项能够准确识别为延续生图意图", () => {
+        const history = [
+            { role: "user", text: "生成一只可爱的橘白小猫，阳光草地背景" },
+            {
+                role: "assistant",
+                text: "🐈 已生成一只可爱的橘白小猫！采用写实摄影风格。你还可以尝试更可爱！摸摸」或者「双爪合十求抱抱」！",
+                promptBlocks: ["一只可爱的橘白小猫，阳光草地背景，大眼睛软萌"],
+            },
+        ];
+        const intent = detectAgentIntent("要双爪合十求抱抱", { history });
+        expect(intent.kind).toBe("generate_image");
+        expect(intent.prompt).toContain("一只可爱的橘白小猫");
+        expect(intent.prompt).toContain("双爪合十求抱抱");
+
+        const intentDirectChoice = detectAgentIntent("双爪合十求抱抱", { history });
+        expect(intentDirectChoice.kind).toBe("generate_image");
+        expect(intentDirectChoice.prompt).toContain("一只可爱的橘白小猫");
+    });
 });

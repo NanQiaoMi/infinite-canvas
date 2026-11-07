@@ -561,4 +561,90 @@ describe("对话运行时", () => {
         const assistantMsgs = result.messages.filter((m) => m.role === "assistant");
         expect(assistantMsgs.every((m) => !m.text.includes("临时聊天"))).toBe(true);
     });
+
+    test("上游额度借口（resets in 35 minutes / 这次暂时无法调用）自动拦截并执行生图兜底，消除复读循环", async () => {
+        const { runAgentTurn, isBoilerplateSummary, stripEchoedPrefix } = await import("@/lib/conversation-agent/runtime");
+
+        // 1. 验证总结卡片与额度推诿借口被判定为 boilerplate
+        expect(
+            isBoilerplateSummary("🐈 已生成一只可爱的橘白小猫！采用写实摄影风格，方形构图，阳光草地背景。尺寸 1254 × 1254，模型 GPT Image 2.6。"),
+        ).toBe(true);
+        expect(isBoilerplateSummary("这次暂时无法调用图片生成工具。等额度恢复后，可以生成一只双爪合十的猫。")).toBe(true);
+        expect(isBoilerplateSummary("It resets in 35 minutes.")).toBe(true);
+
+        // 2. 验证复读清洗
+        expect(stripEchoedPrefix("要双爪合十求抱抱 这是一只可爱小猫", undefined, "要双爪合十求抱抱")).toBe("这是一只可爱小猫");
+
+        // 3. 验证端到端运行
+        const executedCalls: any[] = [];
+        const result = await runAgentTurn({
+            locale: "zh-CN",
+            messages: [
+                { id: "u1", role: "user", text: "画一只可爱的橘白小猫", createdAt: 1 },
+                {
+                    id: "a1",
+                    role: "assistant",
+                    text: "🐈 已生成一只可爱的橘白小猫！你还可以尝试更可爱！摸摸」或者「双爪合十求抱抱」！",
+                    promptBlocks: ["一只可爱的橘白小猫，阳光草地背景，柔软毛发"],
+                    createdAt: 2,
+                },
+                { id: "u2", role: "user", text: "要双爪合十求抱抱", createdAt: 3 },
+            ],
+            tools: [
+                {
+                    name: "generate_image",
+                    description: "生成图片",
+                    parameters: { type: "object", properties: { prompt: { type: "string" } }, required: ["prompt"] },
+                },
+            ],
+            buildContext: () => ({ defaultSize: "1024x1024", pageContext: "chat", imageModels: [] }),
+            callModel: async () => ({
+                content:
+                    "这次暂时无法调用图片生成工具。等额度恢复后，可以生成一只双爪合十、眼巴巴望着镜头、奶声奶气求抱抱的胖橘猫。🐈💕 It resets in 35 minutes.",
+                toolCalls: [],
+            }),
+            executeTool: async (call) => {
+                executedCalls.push(call);
+                return { tool: call.tool, ok: true, images: [], count: 1, size: "1024x1024" };
+            },
+            signal: new AbortController().signal,
+        });
+
+        // 确认工具成功执行，且带上了双爪合十求抱抱
+        expect(executedCalls.length).toBeGreaterThan(0);
+        expect(executedCalls[0].arguments.prompt).toContain("双爪合十求抱抱");
+        // 确认上游推诿文本已被清洗
+        const assistantTexts = result.messages.filter((m) => m.role === "assistant").map((m) => m.text);
+        expect(assistantTexts.some((t) => t.includes("resets in") || t.includes("暂时无法调用"))).toBe(false);
+    });
+
+    test("在画布环境（pageContext: canvas）下，高置信度意图直连下发 canvas_create_image_node 或 canvas_batch_generate_nodes", async () => {
+        const { runAgentTurn } = await import("@/lib/conversation-agent/runtime");
+        const executedTools: string[] = [];
+        await runAgentTurn({
+            locale: "zh-CN",
+            messages: [{ id: "u1", role: "user", text: "生成图片：一个红苹果，高光", createdAt: 1 }],
+            tools: [
+                {
+                    name: "canvas_create_image_node",
+                    description: "在画布上创建图片节点",
+                    parameters: { type: "object", properties: { prompt: { type: "string" } }, required: ["prompt"] },
+                },
+                {
+                    name: "canvas_batch_generate_nodes",
+                    description: "在画布上批量创建图片节点",
+                    parameters: { type: "object", properties: { tasks: { type: "array" } }, required: ["tasks"] },
+                },
+            ],
+            buildContext: () => ({ defaultSize: "1024x1024", pageContext: "canvas", imageModels: [] }),
+            callModel: async () => ({ content: "已生成", toolCalls: [] }),
+            executeTool: async (call) => {
+                executedTools.push(call.tool);
+                return { tool: call.tool, ok: true, nodeId: "n1", title: "测试", prompt: "苹果", size: "1024x1024", position: { x: 0, y: 0 } };
+            },
+            signal: new AbortController().signal,
+        });
+
+        expect(executedTools).toContain("canvas_create_image_node");
+    });
 });

@@ -87,7 +87,8 @@ export default function ChatPage() {
     const [listOpen, setListOpen] = useState(false);
     const controllerRef = useRef<AbortController | null>(null);
     const scrollRef = useRef<HTMLDivElement | null>(null);
-    const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null;
+    const chatSessions = useMemo(() => sessions.filter((session) => session.scope !== "canvas"), [sessions]);
+    const activeSession = chatSessions.find((session) => session.id === activeSessionId) ?? chatSessions[0] ?? null;
 
     useEffect(() => {
         void hydrate();
@@ -117,9 +118,11 @@ export default function ChatPage() {
     useLayoutEffect(() => {
         const node = scrollRef.current;
         if (!node) return;
-        const changed = lastSessionRef.current !== activeSessionId;
-        lastSessionRef.current = activeSessionId;
-        if (changed) {
+        const currentActiveId = activeSession?.id ?? null;
+        const changed = lastSessionRef.current !== undefined && lastSessionRef.current !== currentActiveId;
+        const previousSessionId = lastSessionRef.current;
+        lastSessionRef.current = currentActiveId;
+        if (changed && previousSessionId) {
             if (controllerRef.current) {
                 controllerRef.current.abort();
                 controllerRef.current = null;
@@ -278,8 +281,9 @@ export default function ChatPage() {
                     if (payload) text = t("chat.commands.editPrefix", { text: payload });
                 }
             }
-            let sessionId = useConversationAgentStore.getState().activeSessionId;
-            if (!sessionId) sessionId = createSession();
+            let sessionId = activeSession?.id;
+            if (!sessionId) sessionId = createSession({ scope: "chat" });
+            lastSessionRef.current = sessionId;
             const attachments = references.length ? references : undefined;
             appendMessages(sessionId, [{ id: nanoid(), role: "user", text, attachments, createdAt: Date.now() }]);
             setReferences([]);
@@ -475,14 +479,14 @@ export default function ChatPage() {
     };
 
     const createAndClose = () => {
-        createSession();
+        createSession({ scope: "chat" });
         setListOpen(false);
     };
 
     const sessionList = (
         <ChatSessionList
-            sessions={sessions}
-            activeSessionId={activeSessionId}
+            sessions={chatSessions}
+            activeSessionId={activeSession?.id ?? null}
             modelLabel={textModel ? modelLabelOf(textModel) : ""}
             quotaHint={quotaHint}
             onSelect={(id) => {

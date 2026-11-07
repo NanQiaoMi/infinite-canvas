@@ -127,7 +127,7 @@ const LEADING_GENERATE_PATTERN =
     /^(?:(?:在画布上?|在画板上?|在无限画布上?)\s*)?(?:批量)?(?:生成|创建|绘制|画|出图|出|做|来|制作|换|设计|搞|整|安排|弄)\s*(?:一套\s*(?:\d+|[一二两三四五六七八九])\s*[个张幅]|一套|一组|一?\s*[张幅个组份版套]|几\s*[张幅个套]|\d+\s*[张幅个套]|[一二两三四五六七八九几]\s*[张幅个套])?\s*(?:(?:透明底|透明背景|透明图|透明png|png透明|png透明图片|png透明图)?\s*(?:图片|图像|照片|插画|海报|头像|壁纸|封面|图|画|作品|动图|动态图|动态表情包|表情包|gif|素材|图标))?\s*[：:，,。.!！、\s]*/i;
 
 /** 指代型文本：这类内容不能当作提示词，交给运行时用历史 promptBlocks 兜底。 */
-const REFERENCE_PROMPT_PATTERN = /(提示词|这张图|那张图|这个|那个|上面|上述|刚才|之前|参考图)/i;
+export const REFERENCE_PROMPT_PATTERN = /(提示词|这张图|那张图|这个|那个|上面|上述|刚才|之前|参考图)/i;
 
 /** 英文生成指令前缀。 */
 const LEADING_EN_PATTERN =
@@ -193,17 +193,36 @@ export function stripInstructionPrefix(text: string) {
     return stripped;
 }
 
-/** 提取续作/增补中的微调要求（如从「换个姿势再来一个」中提取「换个姿势」） */
-function extractFollowUpModification(input: string): string {
+/** 提取续作/增补中的微调要求（如从「换个姿势再来一个」中提取「换个姿势」，从「要双爪合十求抱抱」中提取「双爪合十求抱抱」） */
+export function extractFollowUpModification(input: string): string {
     return input
+        .replace(/^(?:我?想要?|来个|整个|搞个|做个|换成|选|我选)\s*/i, "")
         .replace(/(?:再|另外再?|重新|接着|继续)?(?:生成|画|来|做|出|整|搞)?\s*(?:一?[个张幅组套版]|几[个张幅]|同款)?$/i, "")
         .replace(/^[，,。.!！、：:\s]+|[，,。.!！、：:\s]+$/g, "")
         .trim();
 }
 
-/** 延续上一轮生成的追问/增补指令：如「再生成一个」「再来一张」「换个姿势再来一个」「不改变她原来的脸，再来一张」 */
-const FOLLOW_UP_PATTERN =
-    /(?:再|另外再?|重新|接着|继续|换[个一]|换种|换套|换身|按[照这个]?风格再?|延续[这个]?风格再?)(?:生成|画|来|做|出|整|搞)?\s*(?:一?[个张幅组套版]|几[个张幅]|同款)?|不改变.*再来|换个.*再[来画生成]|延续.*再[来画生成]|按.*风格.*再/i;
+/** 延续上一轮生成的追问/增补指令：如「再生成一个」「再来一张」「换个姿势再来一个」「不改变她原来的脸，再来一张」「要双爪合十求抱抱」 */
+export const FOLLOW_UP_PATTERN =
+    /^(?:我?想要?|来个|整个|搞个|做个|换成|选|我选)\s*([^。！？!?\n]{2,30})|(?:再|另外再?|重新|接着|继续|换[个一]|换种|换套|换身|按[照这个]?风格再?|延续[这个]?风格再?)(?:生成|画|来|做|出|整|搞)?\s*(?:一?[个张幅组套版]|几[个张幅]|同款)?|不改变.*再来|换个.*再[来画生成]|延续.*再[来画生成]|按.*风格.*再/i;
+
+/** 提取上一轮助手回复中推荐的选项（如「摸摸」或者「双爪合十求抱抱」） */
+export function extractAssistantSuggestions(history?: Array<{ role: string; text?: string }>): string[] {
+    if (!history || !history.length) return [];
+    for (let index = history.length - 1; index >= 0; index -= 1) {
+        const item = history[index];
+        if (item.role === "assistant" && item.text) {
+            const matches: string[] = [];
+            const quoteRegex = /[「『"“]([^」』"”\n]{2,25})[」』"”]/g;
+            let m;
+            while ((m = quoteRegex.exec(item.text)) !== null) {
+                matches.push(m[1].trim());
+            }
+            if (matches.length > 0) return matches;
+        }
+    }
+    return [];
+}
 
 /** 追溯历史会话中最近一次的生成提示词，用于「再生成一个」「换个姿势再来一张」等延续生成意图 */
 export function findLastGenerationPrompt(history?: Array<{ role: string; text?: string; call?: AgentToolCall; promptBlocks?: string[] }>): string {
@@ -293,9 +312,11 @@ export function detectAgentIntent(
         return CHAT_INTENT;
     }
 
-    // ⑥ 续作/增补上一轮生成（例如「再生成一个」「再来一张」「换个姿势再来一个」）
-    const isFollowUp = FOLLOW_UP_PATTERN.test(input) || /^(再来|再出|换一版|换个风格|换个姿势)$/.test(input);
+    // ⑥ 续作/增补上一轮生成（例如「再生成一个」「再来一张」「换个姿势再来一个」「要双爪合十求抱抱」或用户直接选择了上一轮推荐的选项）
     const previousPrompt = findLastGenerationPrompt(options?.history);
+    const assistantSuggestions = extractAssistantSuggestions(options?.history);
+    const matchesSuggestion = assistantSuggestions.some((s) => input.includes(s) || s.includes(input));
+    const isFollowUp = (FOLLOW_UP_PATTERN.test(input) || /^(再来|再出|换一版|换个风格|换个姿势)$/.test(input) || matchesSuggestion) && Boolean(previousPrompt);
     if (isFollowUp && previousPrompt) {
         const modification = extractFollowUpModification(input);
         const combined = modification ? `${previousPrompt}，${modification}` : previousPrompt;
