@@ -38,7 +38,9 @@ function toolStepLabel(call: AgentToolCall, t: (key: string) => string) {
     };
     const label = names[call.tool] || call.tool;
     const prompt = typeof call.arguments.prompt === "string" ? call.arguments.prompt : "";
-    return prompt ? `${label} · ${prompt.slice(0, 26)}` : label;
+    const size = typeof call.arguments.size === "string" ? call.arguments.size : "";
+    const meta = size ? ` ${size}` : "";
+    return prompt ? `${label} · "${prompt.slice(0, 32)}"${meta}` : `${label}${meta}`;
 }
 
 export default function ChatPage() {
@@ -279,7 +281,8 @@ export default function ChatPage() {
             setStreamingText("");
             setTurnStartedAt(Date.now());
             if (stepsTimerRef.current) window.clearTimeout(stepsTimerRef.current);
-            setSteps([{ id: "understand", kind: "understand", label: t("chat.steps.understand"), status: "running" }]);
+            const initialLabel = text ? `${t("chat.steps.understand")} · "${text.slice(0, 26)}"` : t("chat.steps.understand");
+            setSteps([{ id: "understand", kind: "understand", label: initialLabel, status: "running" }]);
             setRunning(true);
             const controller = new AbortController();
             controllerRef.current = controller;
