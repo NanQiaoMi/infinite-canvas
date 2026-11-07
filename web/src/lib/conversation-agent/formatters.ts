@@ -1,5 +1,21 @@
 import i18n from "@/i18n";
+import type { AgentIntent } from "./intent";
 import type { AgentToolCall } from "./types";
+
+export function getInitialUnderstandStepLabel(text: string, intent?: AgentIntent): string {
+    const t = (key: string, options?: Record<string, unknown>) => i18n.t(`chat.${key}`, options);
+    if (intent?.usageScene && intent?.decompose) {
+        return `分析用途【${intent.usageScene}】· 拆解图层与规格`;
+    }
+    if (intent?.decompose) {
+        return `拆解任务需求 · 规划多图层素材与画幅`;
+    }
+    if (intent?.usageScene) {
+        return `分析业务用途【${intent.usageScene}】· 构图与视觉定位`;
+    }
+    const defaultUnderstand = t("steps.understand", { defaultValue: "理解创作需求" });
+    return text ? `${defaultUnderstand} · "${text.slice(0, 24)}"` : defaultUnderstand;
+}
 
 export function formatAgentToolStepLabel(call: AgentToolCall): string {
     const t = (key: string, options?: Record<string, unknown>) => i18n.t(`chat.${key}`, options);

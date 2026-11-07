@@ -50,9 +50,21 @@ export function buildContextBlock(input: AgentContextInput, locale: AgentLocale)
 const ZH_PROMPT = `你是「无限画布」内置的 AI 创作助手，运行在无限画布网页里，专门帮助用户完成与图片创作相关的任务。
 
 ## 你的身份与边界
-- 你是无限画布内置的 AI 创作与操作助手；你可以通过内置工具直接读取和操作当前画布（创建节点、批量生成、连线、更新、排布），但不能连接外部未受信任的本机程序、不能执行 Shell 命令或随意读写本地磁盘。
+- 你是无限画布内置的 AI 创作与操作助手；你可以通过内置工具直接读取和操作当前画布（创建节点、批量生成、连线、更新、排布），也可以在对话中直接生成图片，但不能连接外部未受信任的本机程序、不能执行 Shell 命令或随意读写本地磁盘。
 - 你只处理创作相关任务：提示词编写与优化、图片生成、画布节点操作、任务拆解与排布、参数解释、创作建议。
+- 行动优先、交付为王：当用户提出带有任何创作、设计、做图、海报、插画、电商、头像、表情包等明确用途的需求时，即使输入简短，也必须主动分析其用途并立即调用工具产出视觉结果，严禁只讲理论大道理、严禁只给文字提示词而不调用工具、严禁在有合理方案时反问推诿。
 - 不编造能力：不能声称自己「已经生成 / 已经保存 / 已经打开页面」，除非收到系统回填的工具结果。
+
+## 深度理解用户用途与业务场景（必须贯彻执行）
+不同用途有极度鲜明的视觉规律与技术规格，你必须深入理解并在提示词与参数中自主决策：
+1. **小红书/美妆穿搭/生活种草**：画幅必须选用 3:4 竖屏（768x1024）；主视觉突出质感与生活呼吸感（如水光肌、柔和暖调自然采光、浅景深虚化、真实质感细节，避免过度塑料磨皮感）；
+2. **电商主图/商业广告**：突出商品主体（居中对齐、微仰视视角、专业棚拍三点布光、金属/玻璃/皮革高精材质渲染、清晰倒影）；免抠素材必须纯白背景；
+3. **宣传海报/视觉封面**：画幅选用 3:4 竖屏或 16:9 横屏；画面必须具备强烈的视觉层级（留白出排版空间、主视觉震撼有力、色彩张力鲜明）；复合海报主动拆解为主体立绘、背景层与装饰微标；
+4. **游戏原画/角色立绘**：全身体态张力（864x1536 竖屏）、硬表面机械或二次元精致服饰线条、多角度或三视图拆解；独立立绘必须使用透明底（"background": "transparent"）或纯白背景；
+5. **微信表情包/萌宠表情**：画幅 1:1（1024x1024），大头Q版、高对比度黑描边、夸张生动的日常情绪（开心大笑、委屈哭泣、暗中观察、摸鱼），必须使用真实透明底（"background": "transparent"）；
+6. **Logo/图标/UI组件**：极简矢量几何、中心对称、扁平微渐变或磨砂玻璃拟态，统一真实透明底。
+
+遇到上述用途，先在思考中分析用途核心要素，然后直接输出调用工具生成！生成后在总结文字中向用户简要说明所做出的专业设计决策。
 
 ## 你要做的事
 1. 提示词生成：从用户的模糊需求出发，产出可直接使用的生图提示词。
@@ -296,49 +308,72 @@ export function buildIntentDirective(locale: AgentLocale, intent: AgentIntent) {
     const isGif = intent.format === "gif" || /动图|动态表情包|动态图|\bgif\b|会动的/i.test(prompt);
     const isAsset = /素材|免抠|贴纸|立绘素材|cutout|isolated/i.test(prompt);
     const isTransparent = intent.background === "transparent" || /透明底|透明背景|透明图|透明png|png透明|transparent/i.test(prompt);
-    const isMultiStep = /拆分|多[个张轮次]|分步|整套|一套|组图|全套|系列|split|multi-?step|suite|batch|set of/i.test(prompt);
+    const isDecompose = intent.decompose || /拆分|拆解|多[个张轮次]|分步|整套|一套|组图|全套|系列|split|multi-?step|suite|batch|set of/i.test(prompt);
+    const usageScene = intent.usageScene;
+    const batchCount = intent.batchCount;
+
     if (locale === "zh") {
+        const intentDesc = isEdit
+            ? "修改参考图（edit_image）"
+            : isGif
+              ? "生成动态 GIF 动图（generate_image format:gif）"
+              : isTransparent
+                ? "生成真正的 PNG 透明底图片（generate_image background:transparent）"
+                : isDecompose
+                  ? "进行任务拆解与多素材批量生成"
+                  : "生成图片（generate_image）";
+
         const lines = [
-            `【意图路由·系统指令】系统已在本地判定：用户本轮想要${isEdit ? "修改参考图（edit_image）" : isGif ? "生成动态 GIF 动图（generate_image format:gif）" : isTransparent ? "生成真正的 PNG 透明底图片（generate_image background:transparent）" : "生成图片（generate_image）"}，不是写提示词、不是优化提示词、也不是咨询。`,
-            "要求：",
-            `1) 必须直接输出 \`\`\`tool 代码块调用 ${tool}，不要反问、不要只回复文字；`,
-            prompt ? `2) prompt 使用用户给出的画面描述原文：${prompt}` : "2) prompt 使用用户给出的画面描述原文；信息不足时结合上下文补全为完整提示词。",
-            isGif
-                ? `3) 用户需要【会动的动态 GIF】（动态表情包/动图），必须在 arguments 中指定 "format": "gif"，系统会自动调度动图引擎，绝对不要声称「无法输出会动的 GIF」！`
-                : `3) 作为专业视觉总监，必须由 AI 自主分析画面构图张力并指定最佳 size（横向风景大片必须 1536x864，纵向立绘全身照必须 864x1536 或 768x1024，中心聚焦/特写/图标必须 1024x1024），严禁无脑默认 1024x1024；`,
+            `【意图路由·系统指令】系统已在本地判定：用户本轮的核心目标是${intentDesc}，不是单纯聊天、不是评价提示词，而是要拿到最终的生成成果。`,
+            "执行要求：",
+            `1) 行动优先：必须在回复中直接输出 \`\`\`tool 代码块调用工具执行生成，严禁只输出理论说明、严禁反问推诿；`,
+            prompt ? `2) 提示词基础：使用用户给出的核心描述并结合专业设计规范扩展：${prompt}` : "2) 提示词策略：根据用户的用途定位，主动补充构图、视角、光影、材质与色彩细节，产出专业提示词；",
         ];
+
+        if (usageScene) {
+            lines.push(`3) 核心用途定位【${usageScene}】：必须针对该场景的技术规范进行视觉决策（如小红书用 3:4 细腻摄影；电商图用纯白背景高精微距；海报用强层级留白排版；表情包用 1:1 透明底Q版夸张表情；立绘用 9:16 全身或透明底）。`);
+        } else if (isGif) {
+            lines.push(`3) 用户需要【会动的动态 GIF】（动态表情包/动图）：必须在 arguments 中指定 "format": "gif"，系统会自动调度动图引擎，绝对不要声称「无法输出会动的 GIF」！`);
+        } else {
+            lines.push(`3) 构图与画幅决策：作为专业视觉总监，必须自主推断最佳 size（横屏风景大片 1536x864，立绘/全身照 864x1536 或 768x1024，中心聚焦/特写/图标 1024x1024），严禁无脑默认 1024x1024。`);
+        }
+
         if (isTransparent) {
             lines.push(`4) 用户明确要求【生成 PNG 透明图片/透明底】：必须在 arguments 中显式传入 "background": "transparent" 指令，调度透明底通道直接输出真实透明 PNG！`);
         } else if (isAsset) {
-            lines.push(`4) 用户需求涉及【设计素材/免抠元素】，提示词严禁包含 "transparent background/透明底"（避免扩散模型把灰白棋盘格画进像素生成假透明底），必须统一指定纯白背景（"isolated on a solid pure white background, clean sharp edges, no shadows, no checkerboard"）以便后期一键秒抠出真透明 PNG。`);
+            lines.push(`4) 用户需求涉及【设计素材/免抠元素】：提示词严禁包含 "transparent background/透明底"（避免扩散模型画假灰白棋盘格），必须统一指定纯白背景（"isolated on a solid pure white background, clean sharp edges, no shadows, no checkerboard"）以便后期一键秒抠。`);
         }
-        if (isMultiStep) {
-            lines.push(`5) 用户要求【拆分任务/成套素材生成】：你应拆解为 2-3 个核心独立图层素材（如主体人物、前景道具、装饰纹样），可输出多个 tool 代码块并发或分步自循环连续出图，每个素材均使用纯白背景或透明底指令。`);
+
+        if (isDecompose) {
+            const countDesc = batchCount ? `${batchCount} 个` : "2-3 个核心独立";
+            lines.push(`5) 拆分任务/成套素材生成（任务拆解）：将任务拆解为 ${countDesc}图层素材（如主体、背景、微标或系列变体）。在普通对话中输出多个 tool 代码块并发或连续出图；在画布页面中优先调用 canvas_batch_generate_nodes 自动排布生成。`);
         }
-        const extraCount = (isTransparent || isAsset ? 1 : 0) + (isMultiStep ? 1 : 0);
-        if (isEdit) lines.push(`${extraCount + 4}) 参考图由系统自动传入，arguments 只需要 prompt。`);
-        lines.push(`${(isEdit ? 1 : 0) + extraCount + 4}) 生成完成后用 1-3 句总结结果并给出下一步。`);
+
+        lines.push(`6) 交付总结：生成完成后用 1-3 句专业语言总结做出的设计决策（尺寸、风格、图层逻辑），并给出下一步微调或衍生建议。`);
         return lines.join("\n");
     }
+
     const lines = [
         `[Intent routing · system directive] The system has locally determined that the user wants to ${isEdit ? "edit the reference image (edit_image)" : isGif ? "generate an animated GIF (generate_image format:gif)" : isTransparent ? "generate a transparent PNG (generate_image background:transparent)" : "generate an image (generate_image)"}, not to write, refine or discuss a prompt.`,
         "Requirements:",
         `1) You must output a \`\`\`tool code block calling ${tool} directly; do not ask questions and do not reply with text only;`,
         prompt ? `2) Use the user's original visual description as the prompt: ${prompt}` : "2) Use the user's original visual description as the prompt; complete it into a full prompt if needed.",
-        isGif
-            ? `3) The user explicitly requested an animated GIF; you must pass "format": "gif" in arguments. Never claim that animated GIFs cannot be created!`
-            : `3) As a visual art director, actively analyze composition tension and decide the optimal size (widescreen 1536x864 for landscapes, vertical 864x1536 or 768x1024 for full-body portraits, 1024x1024 for center-focused close-ups/icons); never blindly default to 1024x1024;`,
     ];
+    if (usageScene) {
+        lines.push(`3) Target application [${usageScene}]: adapt aspect ratio, lighting and styling specifically for this target use case.`);
+    } else if (isGif) {
+        lines.push(`3) The user explicitly requested an animated GIF; you must pass "format": "gif" in arguments. Never claim that animated GIFs cannot be created!`);
+    } else {
+        lines.push(`3) As a visual art director, actively analyze composition tension and decide the optimal size (widescreen 1536x864, vertical 864x1536 or 768x1024, 1024x1024 for icons/closeups); never blindly default to 1024x1024;`);
+    }
     if (isTransparent) {
         lines.push(`4) The user explicitly requested a transparent PNG: you must pass "background": "transparent" in arguments to command transparent background output!`);
     } else if (isAsset) {
         lines.push(`4) The user requested an isolated asset/cutout; never include "transparent background" (to prevent painting fake checkerboards); specify a solid pure white background ("isolated on a solid pure white background, clean sharp edges, no shadows, no checkerboard") for 1-click clean removal.`);
     }
-    if (isMultiStep) {
-        lines.push(`5) The user requested a multi-step suite/split task: decompose into 2-3 essential elements (e.g. main character, props, accents) and call generate_image for each.`);
+    if (isDecompose) {
+        lines.push(`5) The user requested a multi-step suite/split task: decompose into 2-3 essential elements and call tool for each.`);
     }
-    const extraCount = (isTransparent || isAsset ? 1 : 0) + (isMultiStep ? 1 : 0);
-    if (isEdit) lines.push(`${extraCount + 4}) References are passed automatically, so arguments only need the prompt.`);
-    lines.push(`${(isEdit ? 1 : 0) + extraCount + 4}) After generating, summarize the result in 1-3 sentences and offer next steps.`);
+    lines.push(`6) After generating, summarize the result in 1-3 sentences and offer next steps.`);
     return lines.join("\n");
 }

@@ -27,7 +27,8 @@ import { GenerationWaiting, ThinkingLine } from "./components/generation-waiting
 import { SmoothStreamText } from "./components/smooth-stream-text";
 
 const modelLabelOf = (option: string) => option.split("::").pop() || option;
-import { formatAgentToolStepLabel } from "@/lib/conversation-agent/formatters";
+import { formatAgentToolStepLabel, getInitialUnderstandStepLabel } from "@/lib/conversation-agent/formatters";
+import { detectAgentIntent } from "@/lib/conversation-agent/intent";
 
 const NETWORK_ERROR_PATTERN = /network error|failed to fetch|load failed|networkerror|econnreset|socket hang up|fetch failed/i;
 const isNetworkError = (error: unknown) => NETWORK_ERROR_PATTERN.test(error instanceof Error ? error.message : String(error));
@@ -270,7 +271,8 @@ export default function ChatPage() {
             setStreamingText("");
             setTurnStartedAt(Date.now());
             if (stepsTimerRef.current) window.clearTimeout(stepsTimerRef.current);
-            const initialLabel = text ? `${t("chat.steps.understand")} · "${text.slice(0, 26)}"` : t("chat.steps.understand");
+            const intent = detectAgentIntent(text, { hasReferences: Boolean(attachments?.length) });
+            const initialLabel = getInitialUnderstandStepLabel(text, intent);
             setSteps([{ id: "understand", kind: "understand", label: initialLabel, status: "running" }]);
             setRunning(true);
             const controller = new AbortController();

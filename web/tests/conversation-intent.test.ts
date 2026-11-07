@@ -188,4 +188,53 @@ describe("本地意图识别", () => {
         expect(trans3.kind).toBe("generate_image");
         expect(trans3.background).toBe("transparent");
     });
+
+    test("礼貌请求式问句准确识别为生成请求，不被误判为咨询聊天", () => {
+        const samples = [
+            "能不能帮我画一个戴眼镜的柴犬？",
+            "可以帮我做一张海报吗？",
+            "请问能生成一张科技感壁纸吗？",
+            "可以为我设计一个动漫头像吗？",
+            "能不能做个透明底的水果图标？",
+        ];
+        for (const text of samples) {
+            const intent = detectAgentIntent(text, { hasReferences: false });
+            expect(intent.kind).toBe("generate_image");
+            expect(intent.explicit).toBe(true);
+        }
+    });
+
+    test("用户用途场景与业务定位准确提取", () => {
+        const xiaohongshu = detectAgentIntent("我想做一张小红书美妆推广图");
+        expect(xiaohongshu.kind).toBe("generate_image");
+        expect(xiaohongshu.usageScene).toContain("小红书");
+
+        const ecommerce = detectAgentIntent("做一张电商白底产品图：香水瓶特写");
+        expect(ecommerce.kind).toBe("generate_image");
+        expect(ecommerce.usageScene).toContain("电商产品");
+
+        const emoji = detectAgentIntent("帮我做一套微信日常表情包");
+        expect(emoji.kind).toBe("generate_image");
+        expect(emoji.usageScene).toContain("微信表情包");
+
+        const logo = detectAgentIntent("帮我设计一个科技感极简Logo");
+        expect(logo.kind).toBe("generate_image");
+        expect(logo.usageScene).toContain("Logo/图标");
+    });
+
+    test("任务拆解与批量生成意图准确识别", () => {
+        const decomposeSample = detectAgentIntent("把海报拆解为多次透明底素材生成");
+        expect(decomposeSample.kind).toBe("generate_image");
+        expect(decomposeSample.decompose).toBe(true);
+        expect(decomposeSample.background).toBe("transparent");
+
+        const batchSample = detectAgentIntent("批量生成 4 张赛博机甲头像并在画布排开");
+        expect(batchSample.kind).toBe("generate_image");
+        expect(batchSample.decompose).toBe(true);
+        expect(batchSample.batchCount).toBe(4);
+
+        const suiteSample = detectAgentIntent("帮我做一套中秋节海报素材，拆解为主体和背景");
+        expect(suiteSample.kind).toBe("generate_image");
+        expect(suiteSample.decompose).toBe(true);
+    });
 });
