@@ -1,7 +1,7 @@
 import { nanoid } from "nanoid";
 
 import { inferImageSizeFromPrompt } from "./aspect-ratio";
-import { detectAgentIntent, findLastGenerationPrompt, type AgentIntent } from "./intent";
+import { detectAgentIntent, extractFollowUpModification, findLastGenerationPrompt, REFERENCE_PROMPT_PATTERN, type AgentIntent } from "./intent";
 import { parseAgentOutput, serializeToolResult, stripForStreaming } from "./protocol";
 import { buildIntentDirective, buildSystemPrompt } from "./system-prompt";
 import type { AgentContextInput, AgentEvent, AgentImageRef, AgentMessage, AgentModelCall, AgentModelMessage, AgentToolCall, AgentToolDefinition, AgentToolExecutor, AgentToolResult, AgentTurnResult } from "./types";
@@ -28,36 +28,65 @@ export type AgentRuntimeOptions = {
  * 判断一段 assistant 文本是否属于后置生图总结套话或空洞确认。
  * 这类套话如果在历史中透传给上游大模型，极易诱发大模型在下一次生成请求时「复读/照抄」上一轮的回答。
  */
+/**
+ * 判断一段 assistant 文本是否属于后置生图总结套话、空洞确认或上游推诿借口。
+ * 这类套话如果在历史中透传给上游大模型，极易诱发大模型在下一次生成请求时「复读/照抄」上一轮的回答。
+ */
 export function isBoilerplateSummary(text: string): boolean {
     const trimmed = text.trim();
     if (!trimmed) return true;
+    if (REFUSAL_PATTERN.test(trimmed)) return true;
     if (/^(?:已完成工具调用|图片生成已完成|任务已完成|已完成画布操作指令|生成成功)[。.]?$/i.test(trimmed)) return true;
     if (/^已为您在画布上(?:创建生图节点并启动精细渲染|批量创建节点并排布[，, ]正在并行启动渲染)[。.]?$/i.test(trimmed)) return true;
-    if (/^(?:生成成功\s*)?已(?:为[您你])?生成(?:一张|一组|多张|[\d]+张)?(?:竖版|横版|方形|自定义)?(?:海报|图片|素材|壁纸|头像|图标|表情包)?[^。\n]{0,80}(?:使用\s*GPT\s*Image[^\n]*)?[。.]?$/i.test(trimmed)) return true;
+    // 去除开头装饰性 Emoji 与标点符号
+    const clean = trimmed.replace(/^[\p{Extended_Pictographic}\s*•\-—~#✨🎨📦🔍🐈🐾❤️💙💚💛💜🧡🤍🖤]+/u, "").trim();
+    if (/^(?:生成成功\s*)?已(?:为[您你])?生成(?:一只|一个|一张|一组|多张|[\d]+张)?/i.test(clean)) {
+        // 如果包含尺寸、模型、构图或比例说明，属于典型生图后置总结卡片，从模型历史中过滤
+        if (/尺寸|模型|GPT\s*Image|构图|像素|风格|背景/i.test(clean)) return true;
+    }
     return false;
 }
 
 /**
- * 检测并剥离大模型偶发的「复读上一轮回答」的问题（支持段落与长句多点命中）。
+ * 检测并剥离大模型偶发的「复读上一轮回答或复读用户问题」的问题（支持段落与长句多点命中及重复循环块消除）。
  */
-export function stripEchoedPrefix(currentText: string, previousText?: string): string {
-    if (!previousText) return currentText;
-    const trimmedPrev = previousText.trim();
-    if (trimmedPrev.length < 6) return currentText;
-    let trimmedCurr = currentText.trimStart();
-    if (trimmedCurr.startsWith(trimmedPrev)) {
-        return trimmedCurr.slice(trimmedPrev.length).replace(/^[，。；：\n\s]+/, "");
-    }
-    const sentences = trimmedPrev
-        .split(/[。\n！？!]/)
-        .map((s) => s.trim())
-        .filter((s) => s.length >= 8);
-    for (const sentence of sentences) {
-        if (trimmedCurr.startsWith(sentence)) {
-            trimmedCurr = trimmedCurr.slice(sentence.length).replace(/^[，。；：\n\s]+/, "");
+export function stripEchoedPrefix(currentText: string, previousText?: string, userText?: string): string {
+    let text = currentText.trimStart();
+    if (userText) {
+        const trimmedUser = userText.trim();
+        if (trimmedUser.length >= 2 && text.startsWith(trimmedUser)) {
+            text = text.slice(trimmedUser.length).replace(/^[，。；：\n\s]+/, "");
         }
     }
-    return trimmedCurr;
+    if (previousText) {
+        const trimmedPrev = previousText.trim();
+        if (trimmedPrev.length >= 6) {
+            if (text.startsWith(trimmedPrev)) {
+                text = text.slice(trimmedPrev.length).replace(/^[，。；：\n\s]+/, "");
+            } else {
+                const sentences = trimmedPrev
+                    .split(/[。\n！？!]/)
+                    .map((s) => s.trim())
+                    .filter((s) => s.length >= 6);
+                for (const sentence of sentences) {
+                    if (text.startsWith(sentence)) {
+                        text = text.slice(sentence.length).replace(/^[，。；：\n\s]+/, "");
+                    }
+                }
+            }
+        }
+    }
+    // 消除重复循环块：如大模型出现「AAA BBB AAA BBB」式的整块复读
+    const lines = text.split("\n");
+    if (lines.length >= 4) {
+        const half = Math.floor(lines.length / 2);
+        const firstHalf = lines.slice(0, half).join("\n").trim();
+        const secondHalf = lines.slice(half).join("\n").trim();
+        if (firstHalf && firstHalf === secondHalf) {
+            return firstHalf;
+        }
+    }
+    return text;
 }
 
 export function toModelMessages(messages: AgentMessage[]): AgentModelMessage[] {
@@ -90,8 +119,8 @@ function invalidResult(tool: string, error: string): AgentToolResult {
  * - direct 的生成/改图意图直接执行工具，不调用模型；
  * - 其余生成/改图意图首轮注入意图指令，模型仍未调用工具时兜底强制执行一次。
  */
-const REFUSAL_PATTERN =
-    /(无法|不能|不支持|不具备|没法|没有|未连接|临时聊天|切换到普通).{0,20}(执行|调用|使用|连接|具备)?(工具|生图|批量生图|图片生成|生成图片|功能|入口)|cannot execute|unable to execute|can't execute|don't have (the )?(ability|access).{0,20}tool|not able to (execute|call).{0,20}tool/i;
+export const REFUSAL_PATTERN =
+    /(无法|不能|不支持|不具备|没法|没有|未连接|临时聊天|切换到普通|暂时无法|不可用).{0,20}(执行|调用|使用|连接|具备)?(工具|生图|批量生图|图片生成|生成图片|功能|入口)|(?:暂时无法调用|等额度恢复后|额度恢复后|额度已用尽|达到限制|达到上限|额度不足)|resets in \d+\s*(?:minutes?|hours?|seconds?)|limit resets in|reached your .* limit|cannot execute|unable to execute|can't execute|don't have (the )?(ability|access).{0,20}tool|not able to (execute|call).{0,20}tool/i;
 const GENERATION_INTENT_PATTERN = /(生成|出图|画一|画个|画张|改图|修改|编辑|参考图|image|generate|edit|画布|节点|并排|排开)/i;
 const CORRECTION_TEXT =
     "【系统纠错】你具备工具调用能力，工具由无限画布前端执行，绝对不要说「无法执行工具 / 后端不支持 / 临时聊天 / 未连接画布工具」。请直接按协议输出 ```tool 代码块（严格 JSON）。在画布中生成或排布图片时，调用 canvas_batch_generate_nodes（批量）或 canvas_create_image_node（单张）；在对话中生成调用 generate_image；修改已有图片调用 edit_image。";
@@ -163,15 +192,48 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
         const size = inferImageSizeFromPrompt(prompt, defaultSize);
         const format = intent.format || (/动图|动态表情包|动态图|\bgif\b|会动的/i.test(prompt) ? "gif" : undefined);
         const background = intent.background || (/透明底|透明背景|透明图|透明png|png透明|transparent/i.test(prompt) ? "transparent" : undefined);
-        const call: AgentToolCall = {
-            tool: intentTool as "generate_image" | "edit_image",
-            arguments: {
-                prompt,
-                size,
-                ...(format ? { format } : {}),
-                ...(background ? { background } : {}),
-            },
-        };
+        const hasCanvasTools = options.tools.some((t) => t.name === "canvas_batch_generate_nodes");
+        const isCanvasTarget = hasCanvasTools && (intent.isCanvas || options.buildContext().pageContext === "canvas");
+
+        let call: AgentToolCall;
+        if (isCanvasTarget) {
+            const isBatch = Boolean(intent.decompose || (intent.batchCount && intent.batchCount > 1));
+            if (isBatch) {
+                const count = intent.batchCount || 4;
+                const subItems = extractNumberedPrompts(prompt, count, prompt);
+                const tasks = subItems.map((item) => ({
+                    prompt: item.prompt,
+                    title: item.title,
+                    size: inferImageSizeFromPrompt(item.prompt, "1024x1024"),
+                    ...(background ? { background } : {}),
+                }));
+                call = {
+                    tool: "canvas_batch_generate_nodes",
+                    arguments: { tasks, layout: intent.layout || "horizontal", run: true },
+                };
+            } else {
+                call = {
+                    tool: "canvas_create_image_node",
+                    arguments: {
+                        prompt,
+                        size,
+                        title: intent.usageScene ? `${intent.usageScene}` : "AI 生图节点",
+                        ...(background ? { background } : {}),
+                        run: true,
+                    },
+                };
+            }
+        } else {
+            call = {
+                tool: (intentTool || "generate_image") as "generate_image" | "edit_image",
+                arguments: {
+                    prompt,
+                    size,
+                    ...(format ? { format } : {}),
+                    ...(background ? { background } : {}),
+                },
+            };
+        }
         options.onEvent?.({ type: "tool-start", call });
         const result = await options.executeTool(call, { signal: options.signal, references: options.references });
         options.onEvent?.({ type: "tool-end", call, result });
@@ -204,7 +266,7 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
                 // 首轮生图/改图意图下，模型在工具调用前输出的前置构思/寒暄不外溢流出，
                 // 彻底避免「先出现文字回答 -> 突然消失卡顿等待出图 -> 出图后再出现文字」的时序倒错
                 if (round === 0 && intentTool) return;
-                const cleaned = stripEchoedPrefix(stripForStreaming(text), lastAssistantText);
+                const cleaned = stripEchoedPrefix(stripForStreaming(text), lastAssistantText, lastUserText);
                 options.onEvent?.({ type: "assistant-stream", text: cleaned });
             },
         });
@@ -212,12 +274,12 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
         if (options.signal?.aborted) return { messages: newMessages, aborted: true, roundLimitReached: false };
 
         const parsed = parseAgentOutput(turn.content);
-        const refusal = REFUSAL_PATTERN.test(parsed.displayText);
-        let cleanedDisplayText = stripEchoedPrefix(parsed.displayText, lastAssistantText);
+        const refusal = REFUSAL_PATTERN.test(parsed.displayText) || REFUSAL_PATTERN.test(turn.content);
+        let cleanedDisplayText = stripEchoedPrefix(parsed.displayText, lastAssistantText, lastUserText);
         if (refusal) {
-            // 剥离大模型推诿拒绝的陈述（如「临时聊天/无法调用工具」），避免残留在对话流中
+            // 剥离大模型推诿拒绝的陈述（如「临时聊天/无法调用工具/等额度恢复后/resets in 35 minutes」），避免残留在对话流中
             cleanedDisplayText = cleanedDisplayText
-                .replace(/.*(?:临时聊天|切换到普通|无法调用|后端不支持|不能执行工具).*$/gm, "")
+                .replace(/.*(?:临时聊天|切换到普通|无法调用|后端不支持|不能执行工具|等额度恢复后|resets in \d+|额度限制|此对话中不可用).*$/gm, "")
                 .trim();
         }
         const invalid: Array<{ call: AgentToolCall; error: string }> = [
@@ -234,15 +296,16 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
             newMessages.push({ id: nanoid(), role: "tool", call: item.call, result, text: serializeToolResult(item.call, result), createdAt: Date.now() });
         }
         if (!calls.length && !invalid.length) {
-            if (!correctionUsed && refusal && GENERATION_INTENT_PATTERN.test(lastUserText)) {
+            if (!correctionUsed && refusal && (GENERATION_INTENT_PATTERN.test(lastUserText) || intentTool !== null)) {
                 correctionUsed = true;
                 options.onEvent?.({ type: "correction-start", reason: "refusal" });
+                modelOnlyMessages.push({ role: "assistant", content: turn.content });
                 modelOnlyMessages.push({ role: "user", content: CORRECTION_TEXT });
                 continue;
             }
-            // 确定性兜底：模型一次工具都没调用时，按本地意图强制执行一次生成/改图，再让模型总结。
-            // 优先采用模型在当前轮次构思的 promptBlocks，其次采用意图提取结果或历史提示词卡片。
-            if (!intentHandled && !modelToolCallMade && intentTool) {
+            // 确定性兜底：模型一次工具都没调用（或推诿拒绝）时，按本地意图或推诿修复强制执行一次生成/改图，再让模型总结。
+            const effectiveIntentTool = intentTool || (refusal && (findLastGenerationPrompt(options.messages) || GENERATION_INTENT_PATTERN.test(lastUserText)) ? "generate_image" : null);
+            if (!intentHandled && !modelToolCallMade && effectiveIntentTool) {
                 const hasCanvasTools = options.tools.some((t) => t.name === "canvas_batch_generate_nodes");
                 const isCanvasTarget = hasCanvasTools && (intent.isCanvas || options.buildContext().pageContext === "canvas");
 
@@ -280,7 +343,8 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
                         continue;
                     } else {
                         const historyPrompt = findLastGenerationPrompt(options.messages);
-                        const candidatePrompt = parsed.promptBlocks[0] || intent.prompt.trim() || historyPrompt;
+                        const followUpMod = lastUserText && !REFERENCE_PROMPT_PATTERN.test(lastUserText) ? extractFollowUpModification(lastUserText) : "";
+                        const candidatePrompt = parsed.promptBlocks[0] || intent.prompt.trim() || (historyPrompt ? (followUpMod ? `${historyPrompt}，${followUpMod}` : historyPrompt) : "");
                         const prompt = candidatePrompt.trim();
                         if (prompt) {
                             const size = inferImageSizeFromPrompt(prompt, options.buildContext().defaultSize);
@@ -325,7 +389,8 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
                         }
                     }
 
-                    const candidatePrompt = parsed.promptBlocks[0] || intent.prompt.trim() || historyPrompt;
+                    const followUpMod = lastUserText && !REFERENCE_PROMPT_PATTERN.test(lastUserText) ? extractFollowUpModification(lastUserText) : "";
+                    const candidatePrompt = parsed.promptBlocks[0] || intent.prompt.trim() || (historyPrompt ? (followUpMod ? `${historyPrompt}，${followUpMod}` : historyPrompt) : "");
                     const prompt = candidatePrompt.trim();
                     const hasReferenceForEdit = intentTool !== "edit_image" || (options.references ?? []).some((reference) => reference.storageKey);
                     if (prompt && hasReferenceForEdit) {

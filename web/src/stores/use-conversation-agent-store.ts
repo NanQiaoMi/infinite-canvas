@@ -32,7 +32,7 @@ type ConversationAgentStore = {
     consumeReferences: () => AgentImageRef[];
     setComposerDraft: (text: string) => void;
     consumeComposerDraft: () => string | null;
-    createSession: () => string;
+    createSession: (options?: { scope?: "chat" | "canvas"; canvasProjectId?: string }) => string;
     deleteSession: (id: string) => void;
     renameSession: (id: string, title: string) => void;
     setActiveSession: (id: string) => void;
@@ -56,9 +56,17 @@ export function formatSessionTitle(text: string): string {
     return `${target.slice(0, 18)}...`;
 }
 
-function createSessionRecord(): AgentSession {
+function createSessionRecord(options?: { scope?: "chat" | "canvas"; canvasProjectId?: string }): AgentSession {
     const now = Date.now();
-    return { id: nanoid(), title: "", messages: [], createdAt: now, updatedAt: now };
+    return {
+        id: nanoid(),
+        title: "",
+        messages: [],
+        createdAt: now,
+        updatedAt: now,
+        scope: options?.scope || "chat",
+        ...(options?.canvasProjectId ? { canvasProjectId: options.canvasProjectId } : {}),
+    };
 }
 
 function sanitizeMessages(value: unknown): AgentMessage[] {
@@ -77,6 +85,8 @@ function sanitizeSessions(value: unknown): AgentSession[] {
         .map((item) => ({
             id: String(item.id || nanoid()),
             title: String(item.title || ""),
+            scope: item.scope === "canvas" ? ("canvas" as const) : ("chat" as const),
+            ...(item.canvasProjectId ? { canvasProjectId: String(item.canvasProjectId) } : {}),
             messages: sanitizeMessages(item.messages).map((message) => (message.role === "assistant" ? { ...message, promptBlocks: Array.isArray(message.promptBlocks) ? message.promptBlocks : [] } : message)),
             createdAt: Number(item.createdAt) || Date.now(),
             updatedAt: Number(item.updatedAt) || Date.now(),
@@ -138,20 +148,36 @@ export const useConversationAgentStore = create<ConversationAgentStore>()((set, 
                 const rawSessions = sanitizeSessions(saved?.sessions);
                 // 过滤掉既无内容也非当前唯一的幽灵空会话
                 const sessions = rawSessions.filter((s, idx) => s.messages.length > 0 || idx === 0);
-                const activeId = saved?.activeSessionId && sessions.some((session) => session.id === saved.activeSessionId) ? saved.activeSessionId : sessions[0]?.id ?? null;
+                const activeId = saved?.activeSessionId && sessions.some((session) => session.id === saved.activeSessionId && session.scope !== "canvas")
+                    ? saved.activeSessionId
+                    : sessions.find((s) => s.scope !== "canvas")?.id ?? sessions[0]?.id ?? null;
                 set({ sessions, activeSessionId: activeId, hydrated: true });
             } catch {
                 set({ hydrated: true });
             }
         },
-        createSession: () => {
-            // 如果当前已有且仅有空的未命名对话（没有消息），直接复用，不重复生成幽灵会话
-            const currentActive = get().sessions.find((s) => s.id === get().activeSessionId);
-            if (currentActive && currentActive.messages.length === 0) {
-                return currentActive.id;
+        createSession: (options?: { scope?: "chat" | "canvas"; canvasProjectId?: string }) => {
+            const scope = options?.scope || "chat";
+            const canvasProjectId = options?.canvasProjectId;
+            if (scope === "canvas" && canvasProjectId) {
+                const existing = get().sessions.find((s) => s.scope === "canvas" && s.canvasProjectId === canvasProjectId);
+                if (existing) {
+                    set({ streamingText: "", runningTool: null });
+                    return existing.id;
+                }
+            } else if (scope === "chat") {
+                const currentActive = get().sessions.find((s) => s.id === get().activeSessionId && s.scope !== "canvas");
+                if (currentActive && currentActive.messages.length === 0) {
+                    return currentActive.id;
+                }
             }
-            const session = createSessionRecord();
-            set((state) => ({ sessions: [session, ...state.sessions].slice(0, MAX_SESSIONS), activeSessionId: session.id, streamingText: "", runningTool: null }));
+            const session = createSessionRecord(options);
+            set((state) => ({
+                sessions: [session, ...state.sessions].slice(0, MAX_SESSIONS),
+                activeSessionId: scope === "chat" ? session.id : state.activeSessionId,
+                streamingText: "",
+                runningTool: null,
+            }));
             schedulePersist();
             return session.id;
         },

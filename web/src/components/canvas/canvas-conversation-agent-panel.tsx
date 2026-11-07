@@ -51,10 +51,11 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
     const { message } = App.useApp();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const closePanel = useAgentStore((state) => state.closePanel);
+    const canvasContext = useAgentStore((state) => state.canvasContext);
+    const projectId = canvasContext?.snapshot?.projectId;
 
     const hydrated = useConversationAgentStore((state) => state.hydrated);
     const sessions = useConversationAgentStore((state) => state.sessions);
-    const activeSessionId = useConversationAgentStore((state) => state.activeSessionId);
     const streamingText = useConversationAgentStore((state) => state.streamingText);
     const running = useConversationAgentStore((state) => state.running);
     const runningTool = useConversationAgentStore((state) => state.runningTool);
@@ -80,7 +81,8 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
     const controllerRef = useRef<AbortController | null>(null);
     const scrollRef = useRef<HTMLDivElement | null>(null);
 
-    const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null;
+    const canvasSessions = sessions.filter((s) => s.scope === "canvas");
+    const activeSession = (projectId ? canvasSessions.find((s) => s.canvasProjectId === projectId) : null) ?? canvasSessions[0] ?? null;
 
     useEffect(() => {
         void hydrate();
@@ -88,7 +90,8 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
 
     const lastSessionRef = useRef<string | null | undefined>(undefined);
     useEffect(() => {
-        if (lastSessionRef.current !== undefined && lastSessionRef.current !== activeSessionId) {
+        const curId = activeSession?.id;
+        if (lastSessionRef.current && lastSessionRef.current !== curId) {
             if (controllerRef.current) {
                 controllerRef.current.abort();
                 controllerRef.current = null;
@@ -98,8 +101,8 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
             setRunningTool(null);
             setSteps([]);
         }
-        lastSessionRef.current = activeSessionId;
-    }, [activeSessionId, setSteps, setRunning, setStreamingText, setRunningTool]);
+        lastSessionRef.current = curId;
+    }, [activeSession?.id, setSteps, setRunning, setStreamingText, setRunningTool]);
 
     useEffect(() => {
         if (!scrollRef.current) return;
@@ -181,8 +184,11 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
             const text = (rawText ?? input).trim();
             if (!text || running) return;
 
-            let sessionId = useConversationAgentStore.getState().activeSessionId;
-            if (!sessionId) sessionId = createSession();
+            let sessionId = activeSession?.id;
+            if (!sessionId) {
+                sessionId = createSession({ scope: "canvas", canvasProjectId: projectId });
+            }
+            lastSessionRef.current = sessionId;
 
             appendMessages(sessionId, [{ id: nanoid(), role: "user", text, createdAt: Date.now() }]);
             setInput("");
@@ -350,7 +356,7 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
                             className="!h-7 !w-7 !p-0"
                             style={{ color: theme.node.muted }}
                             icon={<Plus className="size-3.5" />}
-                            onClick={() => createSession()}
+                            onClick={() => createSession({ scope: "canvas", canvasProjectId: projectId })}
                         />
                     </Tooltip>
                     {onSwitchToCodex ? (
