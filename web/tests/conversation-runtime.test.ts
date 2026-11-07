@@ -518,4 +518,47 @@ describe("对话运行时", () => {
         expect(modelMsgs.some((m) => m.content.includes("好的，为您构思如下海报画面"))).toBe(true);
         expect(modelMsgs.map((m) => m.role)).toEqual(["user", "assistant", "user", "user"]);
     });
+
+    test("模型推诿「临时聊天/无法调用工具」时自动拦截并完成确定性生图兜底，剔除推诿文字", async () => {
+        const { runAgentTurn } = await import("@/lib/conversation-agent/runtime");
+        const executedTools: string[] = [];
+        const result = await runAgentTurn({
+            locale: "zh-CN",
+            messages: [
+                { id: "u1", role: "user", text: "画一只可爱的柴犬", createdAt: 1 },
+                {
+                    id: "t1",
+                    role: "tool",
+                    call: { tool: "generate_image", arguments: { prompt: "一只活泼可爱的赤色柴犬" } },
+                    result: { tool: "generate_image", ok: true, images: [], count: 1, size: "1024x1024" },
+                    text: "<tool_result>ok</tool_result>",
+                    createdAt: 2,
+                },
+                { id: "u2", role: "user", text: "再生成一个", createdAt: 3 },
+            ],
+            tools: [
+                {
+                    name: "generate_image",
+                    description: "生成图片",
+                    parameters: { type: "object", properties: { prompt: { type: "string" } }, required: ["prompt"] },
+                },
+            ],
+            buildContext: () => ({ defaultSize: "1024x1024", pageContext: "chat", imageModels: [] }),
+            callModel: async () => ({
+                content: "目前你使用的是临时聊天，请切换到普通聊天使用图片生成工具。",
+                toolCalls: [],
+            }),
+            executeTool: async (call) => {
+                executedTools.push(call.tool);
+                return { tool: call.tool, ok: true, images: [], count: 1, size: "1024x1024" };
+            },
+            signal: new AbortController().signal,
+        });
+
+        // 验证工具被自动兜底触发执行，且继承了上一轮的柴犬提示词
+        expect(executedTools).toContain("generate_image");
+        // 验证模型推诿的拒绝陈述已被剥离，不会把「临时聊天」展示给用户
+        const assistantMsgs = result.messages.filter((m) => m.role === "assistant");
+        expect(assistantMsgs.every((m) => !m.text.includes("临时聊天"))).toBe(true);
+    });
 });

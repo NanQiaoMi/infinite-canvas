@@ -89,6 +89,45 @@ export function extractAsyncImages(raw: string): Array<{ prompt: string; size: s
     });
 }
 
+/**
+ * 部分大模型（如 ChatGPT 网页中转）未按规范使用 ```tool 围栏，而是直接在正文中输出了裸 JSON 对象，如：
+ * {"size":"1536x864","n":1,"prompt":"..."} 或 {"tool":"generate_image","arguments":{...}}
+ * 解析并将其转换为标准 AgentToolCall，同时从正文中清除该 JSON 字符串，避免裸代码泄露给用户。
+ */
+export function extractEmbeddedJsonToolCalls(text: string): { toolCalls: AgentToolCall[]; cleanedText: string } {
+    const jsonMatch = text.match(/\{[\s\S]*?"(?:prompt|tasks|tool)"[\s\S]*?\}/);
+    if (!jsonMatch) return { toolCalls: [], cleanedText: text };
+    try {
+        const rawJson = jsonMatch[0];
+        const parsed = JSON.parse(rawJson);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            const record = parsed as Record<string, unknown>;
+            let tool = "";
+            let args: Record<string, unknown> = {};
+            if (typeof record.tool === "string" && record.tool) {
+                tool = record.tool;
+                args = (record.arguments as Record<string, unknown>) || record;
+            } else if (Array.isArray(record.tasks)) {
+                tool = "canvas_batch_generate_nodes";
+                args = record;
+            } else if (typeof record.prompt === "string" && record.prompt.trim()) {
+                tool = "generate_image";
+                args = record;
+            }
+            if (tool) {
+                const cleanedText = text.replace(rawJson, "").trim();
+                return {
+                    toolCalls: [{ tool, arguments: args }],
+                    cleanedText,
+                };
+            }
+        }
+    } catch {
+        // 非合法 JSON，保持原样
+    }
+    return { toolCalls: [], cleanedText: text };
+}
+
 export function parseAgentOutput(raw: string): ParsedAgentOutput {
     const toolCalls: AgentToolCall[] = [];
     const promptBlocks: string[] = [];
@@ -108,6 +147,15 @@ export function parseAgentOutput(raw: string): ParsedAgentOutput {
         .replace(/\n{3,}/g, "\n\n")
         .trim();
 
+    let finalDisplayText = displayText;
+    if (!toolCalls.length) {
+        const extracted = extractEmbeddedJsonToolCalls(finalDisplayText);
+        if (extracted.toolCalls.length) {
+            toolCalls.push(...extracted.toolCalls);
+            finalDisplayText = extracted.cleanedText;
+        }
+    }
+
     // 如果模型没有输出 ```tool 代码块，但输出了 ChatGPT 原生 <AsyncImage query="..." /> 标签，将其转化为提示词块
     if (!toolCalls.length) {
         const asyncImages = extractAsyncImages(raw);
@@ -118,7 +166,7 @@ export function parseAgentOutput(raw: string): ParsedAgentOutput {
         }
     }
 
-    return { displayText: sanitizeAssistantText(displayText), toolCalls, promptBlocks, invalidCalls };
+    return { displayText: sanitizeAssistantText(finalDisplayText), toolCalls, promptBlocks, invalidCalls };
 }
 
 /** 流式显示时屏蔽工具/提示词块，并隐藏尚未闭合的代码块内容。 */
@@ -130,6 +178,8 @@ export function stripForStreaming(text: string) {
         const rest = output.slice(last.index + last[0].length);
         if (!rest.includes("```")) output = output.slice(0, last.index);
     }
+    // 屏蔽流式中的裸 JSON 工具调用对象
+    output = output.replace(/\{[\s\S]*?"(?:prompt|tasks|tool)"[\s\S]*?\}/g, "");
     return sanitizeAssistantText(output.replace(/\n{3,}/g, "\n\n").trimEnd());
 }
 

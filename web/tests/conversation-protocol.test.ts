@@ -309,4 +309,46 @@ describe("对话输出协议", () => {
         expect(posterAsset.decompose).toBe(true);
         expect(posterAsset.prompt).toContain("海报设计素材");
     });
+
+    test("裸 JSON 工具调用解析：ChatGPT 网页后端直接输出 JSON 时自动提取为 toolCalls 并清洗正文", () => {
+        const raw = `{"size":"1536x864","n":1,"prompt":"一幅幽默、细节丰富的电影感写实插画：晚高峰拥挤的北京地铁车厢，车厢里挤满中国古典神话人物……"}这个创意很有趣，适合做成一张中国神话 × 北京早高峰的荒诞喜剧电影海报。`;
+        const result = parseAgentOutput(raw);
+        expect(result.toolCalls).toHaveLength(1);
+        expect(result.toolCalls[0].tool).toBe("generate_image");
+        expect((result.toolCalls[0].arguments as { prompt?: string }).prompt).toContain("北京地铁车厢");
+        expect((result.toolCalls[0].arguments as { size?: string }).size).toBe("1536x864");
+        expect(result.displayText).toBe("这个创意很有趣，适合做成一张中国神话 × 北京早高峰的荒诞喜剧电影海报。");
+    });
+
+    test("延续上一轮生图意图继承：「再生成一个」与「换个姿势再来一个」准确继承历史提示词", () => {
+        const history = [
+            {
+                role: "tool",
+                text: "",
+                call: {
+                    tool: "generate_image",
+                    arguments: { prompt: "复古1990s写真少女，瓷白皮肤，深棕色凌乱盘发，奶油色超大毛衣" },
+                },
+            },
+        ];
+
+        const followUp1 = detectAgentIntent("再生成一个", { history });
+        expect(followUp1.kind).toBe("generate_image");
+        expect(followUp1.prompt).toBe("复古1990s写真少女，瓷白皮肤，深棕色凌乱盘发，奶油色超大毛衣");
+
+        const followUp2 = detectAgentIntent("换个姿势再来一个", { history });
+        expect(followUp2.kind).toBe("generate_image");
+        expect(followUp2.prompt).toBe("复古1990s写真少女，瓷白皮肤，深棕色凌乱盘发，奶油色超大毛衣，换个姿势");
+
+        const followUp3 = detectAgentIntent("不改变她原来的脸，再来一张", { history });
+        expect(followUp3.kind).toBe("generate_image");
+        expect(followUp3.prompt).toBe("复古1990s写真少女，瓷白皮肤，深棕色凌乱盘发，奶油色超大毛衣，不改变她原来的脸");
+    });
+
+    test("长段叙事细节场景描述：无显式指令词也能准确识别为生图意图（如北京地铁神话人物）", () => {
+        const text = "拥挤的北京地铁车厢，但乘客全是神话人物（孙悟空、猪八戒等）。车厢连接处的滚动屏显示红色字体：“前往西天取经的乘客请注意，前方到站：高老庄”。车门玻璃上贴着警告标示：“禁止在车厢内施展法术”。";
+        const intent = detectAgentIntent(text);
+        expect(intent.kind).toBe("generate_image");
+        expect(intent.prompt).toBe(text);
+    });
 });

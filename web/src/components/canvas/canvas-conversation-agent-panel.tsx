@@ -86,6 +86,21 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
         void hydrate();
     }, [hydrate]);
 
+    const lastSessionRef = useRef<string | null | undefined>(undefined);
+    useEffect(() => {
+        if (lastSessionRef.current !== undefined && lastSessionRef.current !== activeSessionId) {
+            if (controllerRef.current) {
+                controllerRef.current.abort();
+                controllerRef.current = null;
+            }
+            setRunning(false);
+            setStreamingText("");
+            setRunningTool(null);
+            setSteps([]);
+        }
+        lastSessionRef.current = activeSessionId;
+    }, [activeSessionId, setSteps, setRunning, setStreamingText, setRunningTool]);
+
     useEffect(() => {
         if (!scrollRef.current) return;
         scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -279,21 +294,25 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
             } catch (err: unknown) {
                 const aborted = controller.signal.aborted;
                 const partial = useConversationAgentStore.getState().streamingText;
+                const isCurrentSession = useConversationAgentStore.getState().activeSessionId === sessionId;
                 if (aborted) {
-                    if (partial.trim()) {
+                    if (partial.trim() && isCurrentSession) {
                         appendMessages(sessionId, [{ id: nanoid(), role: "assistant", text: partial, promptBlocks: [], createdAt: Date.now() }]);
                     }
-                } else {
+                } else if (isCurrentSession) {
                     const raw = err instanceof Error ? err.message : String(err);
                     const errorMsg = isNetworkError(err) ? "网络连接异常，请重试" : raw;
                     appendMessages(sessionId, [{ id: nanoid(), role: "error", text: errorMsg, createdAt: Date.now() }]);
                     message.error(errorMsg);
                 }
             } finally {
-                setRunning(false);
-                setRunningTool(null);
-                setStreamingText("");
-                controllerRef.current = null;
+                const isCurrentSession = useConversationAgentStore.getState().activeSessionId === sessionId;
+                if (isCurrentSession) {
+                    setRunning(false);
+                    setRunningTool(null);
+                    setStreamingText("");
+                    controllerRef.current = null;
+                }
             }
         },
         [input, running, createSession, appendMessages, setStreamingText, setSteps, setRunning, buildContext, callModel, setRunningTool, message],
