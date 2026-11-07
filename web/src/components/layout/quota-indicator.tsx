@@ -36,7 +36,15 @@ export function QuotaIndicator({ style, className }: { style?: CSSProperties; cl
     const primaryLabel = t(CAPABILITY_KEYS[primary]);
     const dailyText = primaryUsage.dailyLimit > 0 ? `${primaryUsage.dailyUsed}/${primaryUsage.dailyLimit}` : null;
     const weeklyText = primaryUsage.weeklyLimit > 0 ? `${primaryUsage.weeklyUsed}/${primaryUsage.weeklyLimit}` : null;
-    const buttonText = status.exempt ? t("server.quota.exempt") : [dailyText ? `${t("server.quota.today")}${primaryLabel} ${dailyText}` : "", weeklyText ? `${t("server.quota.week")} ${weeklyText}` : ""].filter(Boolean).join(" · ");
+    const fullText = status.exempt
+        ? t("server.quota.exempt")
+        : [dailyText ? `${t("server.quota.today")}${primaryLabel} ${dailyText}` : "", weeklyText ? `${t("server.quota.week")} ${weeklyText}` : ""].filter(Boolean).join(" · ");
+    const compactText = status.exempt
+        ? t("server.quota.exempt")
+        : [dailyText ? `${t("server.quota.today")} ${dailyText}` : "", weeklyText ? `${weeklyText}` : ""].filter(Boolean).join(" · ");
+    const minText = status.exempt
+        ? t("server.quota.exempt")
+        : (dailyText ? `${t("server.quota.today")} ${dailyText}` : "");
 
     const content = (
         <div className="w-64 text-xs">
@@ -74,8 +82,12 @@ export function QuotaIndicator({ style, className }: { style?: CSSProperties; cl
     return (
         <Popover content={content} trigger="click" placement="bottomRight" arrow={false}>
             <button type="button" className={className} style={style} aria-label={t("server.quota.title")} title={t("server.quota.title")}>
-                <Gauge className="size-3.5" />
-                <span className="tabular-nums">{buttonText}</span>
+                <Gauge className="size-3.5 shrink-0" />
+                <span className="tabular-nums">
+                    <span className="hidden 2xl:inline">{fullText}</span>
+                    <span className="hidden sm:inline 2xl:hidden">{compactText}</span>
+                    <span className="sm:hidden">{minText || compactText}</span>
+                </span>
             </button>
         </Popover>
     );

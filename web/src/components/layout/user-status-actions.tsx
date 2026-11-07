@@ -40,13 +40,13 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
     const languageLabel = t("topNav.switchLanguage", { language: t(nextLocale === "zh-CN" ? "locale.zhCN" : "locale.enUS") });
 
     return (
-        <div className="inline-flex shrink-0 items-center gap-1">
+        <div className="inline-flex shrink-0 items-center gap-0.5 sm:gap-1">
             {onOpenPlugins ? (
                 <button type="button" className={naturalIconClass} style={iconStyle} onClick={onOpenPlugins} aria-label={t("topNav.plugins")} title={t("topNav.plugins")}>
                     <Puzzle className="size-4" />
                 </button>
             ) : null}
-            <a href={DOCS_URL} target="_blank" rel="noopener noreferrer" className={cn(naturalIconClass, "hidden sm:inline-flex")} style={iconStyle} aria-label={t("topNav.docs")} title={t("topNav.docs")}>
+            <a href={DOCS_URL} target="_blank" rel="noopener noreferrer" className={cn(naturalIconClass, "hidden md:inline-flex")} style={iconStyle} aria-label={t("topNav.docs")} title={t("topNav.docs")}>
                 <BookOpen className="size-4" />
             </a>
             {serverMode ? (
@@ -56,7 +56,7 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
                 />
             ) : null}
             {serverMode && isAdmin ? (
-                <Link to="/admin" className={cn(naturalIconClass, "hidden sm:inline-flex")} style={iconStyle} aria-label={t("server.admin.entry")} title={t("server.admin.entry")}>
+                <Link to="/admin" className={cn(naturalIconClass, "hidden md:inline-flex")} style={iconStyle} aria-label={t("server.admin.entry")} title={t("server.admin.entry")}>
                     <ShieldCheck className="size-4" />
                 </Link>
             ) : null}
@@ -71,8 +71,8 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
                 </button>
             </Tooltip>
             <AnimatedThemeToggler theme={theme} onThemeChange={setTheme} className={naturalIconClass} style={iconStyle} aria-label={t(theme === "dark" ? "topNav.lightTheme" : "topNav.darkTheme")} title={t(theme === "dark" ? "topNav.lightTheme" : "topNav.darkTheme")} />
-            <span className="hidden sm:inline-flex"><VersionReleaseModal style={versionStyle} /></span>
-            <span className="hidden sm:inline-flex"><GitHubLink className={cn("bg-transparent hover:bg-transparent dark:hover:bg-transparent", gitHubClassName)} style={gitHubStyle} /></span>
+            <span className="hidden md:inline-flex"><VersionReleaseModal style={versionStyle} /></span>
+            <span className="hidden md:inline-flex"><GitHubLink className={cn("bg-transparent hover:bg-transparent dark:hover:bg-transparent", gitHubClassName)} style={gitHubStyle} /></span>
             {onOpenShortcuts ? (
                 <button type="button" className={naturalIconClass} style={iconStyle} onClick={onOpenShortcuts} aria-label={t("topNav.shortcuts")} title={t("topNav.shortcuts")}>
                     <Keyboard className="size-4" />
