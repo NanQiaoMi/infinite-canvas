@@ -18,6 +18,7 @@
     --font-sans: var(--font-sans);
     --font-serif: var(--font-serif);
     --font-claude-serif: var(--font-claude-serif);
+    --font-mono: var(--font-mono);
     --color-sidebar-ring: var(--sidebar-ring);
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -52,8 +53,9 @@
 
 :root {
     --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-    --font-serif: "Copernicus", "Tiempos Text", "Charter", "Bitstream Charter", "Iowan Old Style", "Source Serif 4", "Source Serif Pro", "Georgia", "Cambria", "Songti SC", "Source Han Serif SC", "Source Han Serif CN", "Noto Serif CJK SC", "Noto Serif SC", "STSong", "AR PL New Sung", "SimSun", serif;
+    --font-serif: "Cascadia Mono", "Cascadia Code", "CascadiaMono", "CascadiaCode", "方正小标宋简体", "FZXiaoBiaoSong-B05S", "FZXBSJW--GB1-0", "FangZheng XiaoBiaoSong", "方正小标宋_GBK", "方正小标宋", "FZXiaoBiaoSong", "FZXBSK--GBK1-0", "FZXiaoBiaoSongS-B-Regular", "Songti SC", "Source Han Serif SC", "Source Han Serif CN", "Noto Serif CJK SC", "Noto Serif SC", "STSong", "AR PL New Sung", "SimSun", serif;
     --font-claude-serif: var(--font-serif);
+    --font-mono: "Cascadia Mono", "Cascadia Code", "CascadiaMono", "CascadiaCode", ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     --radius: 0.625rem;
     --border: oklch(0.922 0 0);
     --ring: oklch(0.708 0 0);
@@ -727,7 +729,7 @@
     border: 0;
     border-radius: 0;
     background: transparent !important;
-    font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
+    font-family: var(--font-mono) !important;
     font-size: 0.8rem;
     line-height: 1.25rem;
 }
@@ -769,7 +771,7 @@
     border: 0;
     border-radius: 0.35rem;
     background: color-mix(in srgb, currentColor 7%, transparent);
-    font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
+    font-family: var(--font-mono) !important;
     font-size: 0.88em;
 }
 
