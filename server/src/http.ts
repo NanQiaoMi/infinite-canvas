@@ -166,17 +166,20 @@ export function isSecureRequest(req: Request): boolean {
     return forwarded?.split(",")[0]?.trim() === "https";
 }
 
-/** 同源校验：Origin/Referer 存在时必须与当前站点主机一致；同源请求可省略。 */
+/** 同源校验：Origin/Referer 存在时必须与当前站点主机一致；兼容反向代理与 NAT 端口映射。 */
 export function assertSameOrigin(req: Request) {
     const origin = req.headers.get("origin");
     const referer = req.headers.get("referer");
-    const host = req.headers.get("host");
+    const host = req.headers.get("x-forwarded-host") || req.headers.get("host");
     if (!host) return;
+    const hostHostname = host.split(":")[0];
     const candidates = [origin, referer].filter(Boolean) as string[];
     for (const candidate of candidates) {
         try {
             const parsed = new URL(candidate);
-            if (parsed.host !== host) throw new HttpError(403, "cross_origin_denied", "跨站请求被拒绝");
+            if (parsed.host !== host && parsed.hostname !== hostHostname) {
+                throw new HttpError(403, "cross_origin_denied", "跨站请求被拒绝");
+            }
         } catch (error) {
             if (error instanceof HttpError) throw error;
         }
