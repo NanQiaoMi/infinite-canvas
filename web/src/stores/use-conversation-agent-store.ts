@@ -44,6 +44,18 @@ type ConversationAgentStore = {
     clearAll: () => void;
 };
 
+export function formatSessionTitle(text: string): string {
+    const cleaned = text
+        .replace(/^\/(prompt|image|edit|model)\s+/, "")
+        .replace(/^在画布上(?:批量)?(?:生成|创建)?/i, "")
+        .replace(/^(?:帮我|请帮我|请|给我)?(?:生成|画一张|画一个|制作)?(?:png)?(?:透明底|透明图片|透明背景)?[:：]?/i, "")
+        .trim();
+    const target = cleaned || text.trim();
+    if (!target) return "";
+    if (target.length <= 18) return target;
+    return `${target.slice(0, 18)}...`;
+}
+
 function createSessionRecord(): AgentSession {
     const now = Date.now();
     return { id: nanoid(), title: "", messages: [], createdAt: now, updatedAt: now };
@@ -123,7 +135,9 @@ export const useConversationAgentStore = create<ConversationAgentStore>()((set, 
             if (get().hydrated) return;
             try {
                 const saved = await storage.getItem<PersistedState>("state");
-                const sessions = sanitizeSessions(saved?.sessions);
+                const rawSessions = sanitizeSessions(saved?.sessions);
+                // 过滤掉既无内容也非当前唯一的幽灵空会话
+                const sessions = rawSessions.filter((s, idx) => s.messages.length > 0 || idx === 0);
                 const activeId = saved?.activeSessionId && sessions.some((session) => session.id === saved.activeSessionId) ? saved.activeSessionId : sessions[0]?.id ?? null;
                 set({ sessions, activeSessionId: activeId, hydrated: true });
             } catch {
@@ -131,6 +145,11 @@ export const useConversationAgentStore = create<ConversationAgentStore>()((set, 
             }
         },
         createSession: () => {
+            // 如果当前已有且仅有空的未命名对话（没有消息），直接复用，不重复生成幽灵会话
+            const currentActive = get().sessions.find((s) => s.id === get().activeSessionId);
+            if (currentActive && currentActive.messages.length === 0) {
+                return currentActive.id;
+            }
             const session = createSessionRecord();
             set((state) => ({ sessions: [session, ...state.sessions].slice(0, MAX_SESSIONS), activeSessionId: session.id, streamingText: "", runningTool: null }));
             schedulePersist();
@@ -162,7 +181,8 @@ export const useConversationAgentStore = create<ConversationAgentStore>()((set, 
                     if (session.id !== sessionId) return session;
                     const existing = new Set(session.messages.map((message) => message.id));
                     const merged = [...session.messages, ...messages.filter((message) => !existing.has(message.id))].slice(-MAX_MESSAGES);
-                    const title = session.title || messages.find((message) => message.role === "user")?.text.slice(0, 24) || "";
+                    const userMsg = merged.find((message) => message.role === "user");
+                    const title = session.title || (userMsg?.text ? formatSessionTitle(userMsg.text) : "");
                     return { ...session, messages: merged, title, updatedAt: Date.now() };
                 }),
             }));

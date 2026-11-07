@@ -363,7 +363,7 @@ export function buildIntentDirective(
         const lines = [
             `【意图路由·系统指令】系统已在本地判定：用户本轮的核心目标是${intentDesc}，不是单纯聊天、不是评价提示词，而是要拿到最终的生成成果。`,
             "执行要求：",
-            `1) 行动优先：必须在回复中直接输出 \`\`\`tool 代码块调用工具执行生成，严禁只输出理论说明、严禁反问推诿；`,
+            `1) 行动优先：回复的第 1 行必须直接输出 \`\`\`tool 代码块调用工具执行生成，严禁在工具调用前输出任何寒暄、问候、构思开场白或理论说明；严禁复读或提及上一轮已完成的内容；`,
             prompt ? `2) 提示词基础：使用用户给出的核心描述并结合专业设计规范扩展：${prompt}` : "2) 提示词策略：根据用户的用途定位，主动补充构图、视角、光影、材质与色彩细节，产出专业提示词；",
         ];
 
@@ -401,7 +401,7 @@ export function buildIntentDirective(
     const lines = [
         `[Intent routing · system directive] The system has locally determined that the user wants to ${isEdit ? "edit the reference image (edit_image)" : isGif ? "generate an animated GIF (generate_image format:gif)" : isTransparent ? "generate a transparent PNG (generate_image background:transparent)" : "generate an image (generate_image)"}, not to write, refine or discuss a prompt.`,
         "Requirements:",
-        `1) You must output a \`\`\`tool code block calling ${tool} directly; do not ask questions and do not reply with text only;`,
+        `1) You must output a \`\`\`tool code block calling ${tool} directly on line 1; do not output conversational preamble, do not repeat previous responses, and do not reply with text only;`,
         prompt ? `2) Use the user's original visual description as the prompt: ${prompt}` : "2) Use the user's original visual description as the prompt; complete it into a full prompt if needed.",
     ];
     if (usageScene) {

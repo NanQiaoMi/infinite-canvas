@@ -83,6 +83,7 @@ export default function ChatPage() {
     const stepSeqRef = useRef(0);
     const lastToolStepRef = useRef<string | null>(null);
     const [pageContext, setPageContext] = useState<string | undefined>(undefined);
+    const [runningIntent, setRunningIntent] = useState<AgentIntent | null>(null);
     const [listOpen, setListOpen] = useState(false);
     const controllerRef = useRef<AbortController | null>(null);
     const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -275,6 +276,7 @@ export default function ChatPage() {
             if (stepsTimerRef.current) window.clearTimeout(stepsTimerRef.current);
             const history = useConversationAgentStore.getState().sessions.find((session) => session.id === sessionId)?.messages ?? [];
             const intent = detectAgentIntent(text, { hasReferences: Boolean(attachments?.length), history });
+            setRunningIntent(intent);
             const initialLabel = getInitialUnderstandStepLabel(text, intent);
             setSteps([{ id: "understand", kind: "understand", label: initialLabel, status: "running" }]);
             setRunning(true);
@@ -293,13 +295,17 @@ export default function ChatPage() {
                             setStreamingText(event.text);
                             if (event.text.trim()) {
                                 setSteps((current) => {
+                                    const hasTool = current.some((step) => step.kind === "tool");
+                                    const isActionIntent = intent.kind === "generate_image" || intent.kind === "edit_image";
+                                    // 若本轮为生图动作且工具尚未运行，说明是大模型前置寒暄，此时不提前创建「组织回复内容」步骤
+                                    if (isActionIntent && !hasTool) return current;
+
                                     const next = current.map((step) =>
                                         (step.status === "running" && step.kind === "understand") || step.status === "correction"
                                             ? { ...step, status: "done" as const }
                                             : step,
                                     );
                                     if (!next.some((step) => step.status === "running")) {
-                                        const hasTool = next.some((step) => step.kind === "tool");
                                         next.push({
                                             id: `respond-${next.length}`,
                                             kind: hasTool ? "summarize" : "respond",
@@ -354,25 +360,34 @@ export default function ChatPage() {
                     references: attachments,
                 });
                 const finalSteps = currentStepsRef.current.map((s) => (s.status === "running" ? { ...s, status: "done" as const } : s));
-                const firstAssistantIdx = result.messages.findIndex((m) => m.role === "assistant");
-                let messagesWithSteps = result.messages.map((msg, idx) => {
-                    if (msg.role === "assistant" && idx === firstAssistantIdx && finalSteps.length > 0) {
-                        return { ...msg, steps: finalSteps };
-                    }
-                    return msg;
-                });
-                if (firstAssistantIdx === -1 && finalSteps.length > 0) {
-                    messagesWithSteps = [
-                        {
+                let messagesWithSteps = [...result.messages];
+                if (finalSteps.length > 0) {
+                    const firstToolIdx = messagesWithSteps.findIndex((m) => m.role === "tool");
+                    const firstAssistantIdx = messagesWithSteps.findIndex((m) => m.role === "assistant");
+                    // 确保步骤思维链（StepTrail）永远置顶呈现在本轮消息的最上方，保持生成中与生成完成后的视觉布局绝对稳定
+                    if (firstToolIdx !== -1 && (firstAssistantIdx === -1 || firstToolIdx < firstAssistantIdx)) {
+                        messagesWithSteps.unshift({
                             id: nanoid(),
                             role: "assistant",
                             text: "",
                             steps: finalSteps,
                             promptBlocks: [],
                             createdAt: Date.now(),
-                        },
-                        ...messagesWithSteps,
-                    ];
+                        });
+                    } else if (firstAssistantIdx !== -1) {
+                        messagesWithSteps = messagesWithSteps.map((msg, idx) =>
+                            idx === firstAssistantIdx ? { ...msg, steps: finalSteps } : msg,
+                        );
+                    } else {
+                        messagesWithSteps.unshift({
+                            id: nanoid(),
+                            role: "assistant",
+                            text: "",
+                            steps: finalSteps,
+                            promptBlocks: [],
+                            createdAt: Date.now(),
+                        });
+                    }
                 }
                 appendMessages(sessionId, messagesWithSteps);
                 if (result.roundLimitReached) appendMessages(sessionId, [{ id: nanoid(), role: "error", text: t("chat.errors.tooManyRounds"), createdAt: Date.now() }]);
@@ -388,6 +403,7 @@ export default function ChatPage() {
             } finally {
                 setRunning(false);
                 setRunningTool(null);
+                setRunningIntent(null);
                 setCompletedToolResult(null);
                 setExitingTool(null);
                 setStreamingText("");
@@ -526,7 +542,7 @@ export default function ChatPage() {
                                       <ChatMessage key={item.id} message={item} onRetry={item.role === "error" ? () => retryMessage(index) : undefined} />
                                   ))}
                             {steps.length ? <StepTrail steps={steps} running={running} /> : null}
-                            {running && streamingText && !completedToolResult && !runningTool ? (
+                            {running && streamingText && !completedToolResult && !runningTool && !(runningIntent?.kind === "generate_image" || runningIntent?.kind === "edit_image") ? (
                                 <div className="agent-message-in w-full">
                                     <SmoothStreamText rawText={streamingText} running={running} />
                                 </div>

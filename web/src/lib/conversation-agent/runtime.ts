@@ -38,21 +38,26 @@ export function isBoilerplateSummary(text: string): boolean {
 }
 
 /**
- * 检测并剥离大模型偶发的「复读上一轮回答开头」的问题。
+ * 检测并剥离大模型偶发的「复读上一轮回答」的问题（支持段落与长句多点命中）。
  */
 export function stripEchoedPrefix(currentText: string, previousText?: string): string {
     if (!previousText) return currentText;
     const trimmedPrev = previousText.trim();
     if (trimmedPrev.length < 6) return currentText;
-    const trimmedCurr = currentText.trimStart();
+    let trimmedCurr = currentText.trimStart();
     if (trimmedCurr.startsWith(trimmedPrev)) {
         return trimmedCurr.slice(trimmedPrev.length).replace(/^[，。；：\n\s]+/, "");
     }
-    const firstSentence = trimmedPrev.split(/[。\n！？!]/)[0]?.trim();
-    if (firstSentence && firstSentence.length >= 8 && trimmedCurr.startsWith(firstSentence)) {
-        return trimmedCurr.slice(firstSentence.length).replace(/^[，。；：\n\s]+/, "");
+    const sentences = trimmedPrev
+        .split(/[。\n！？!]/)
+        .map((s) => s.trim())
+        .filter((s) => s.length >= 8);
+    for (const sentence of sentences) {
+        if (trimmedCurr.startsWith(sentence)) {
+            trimmedCurr = trimmedCurr.slice(sentence.length).replace(/^[，。；：\n\s]+/, "");
+        }
     }
-    return currentText;
+    return trimmedCurr;
 }
 
 export function toModelMessages(messages: AgentMessage[]): AgentModelMessage[] {
@@ -205,6 +210,9 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
             tools: options.tools,
             signal: options.signal,
             onDelta: (text) => {
+                // 首轮生图/改图意图下，模型在工具调用前输出的前置构思/寒暄不外溢流出，
+                // 彻底避免「先出现文字回答 -> 突然消失卡顿等待出图 -> 出图后再出现文字」的时序倒错
+                if (round === 0 && intentTool) return;
                 const cleaned = stripEchoedPrefix(stripForStreaming(text), lastAssistantText);
                 options.onEvent?.({ type: "assistant-stream", text: cleaned });
             },
@@ -220,6 +228,7 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
         ];
         const calls = [...turn.toolCalls, ...parsed.toolCalls];
         if (calls.length) modelToolCallMade = true;
+
         newMessages.push({ id: nanoid(), role: "assistant", text: cleanedDisplayText, raw: turn.content, promptBlocks: parsed.promptBlocks, createdAt: Date.now() });
 
         for (const item of invalid) {

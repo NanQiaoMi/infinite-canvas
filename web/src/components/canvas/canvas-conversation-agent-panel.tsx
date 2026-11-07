@@ -195,6 +195,10 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
                             setStreamingText(event.text);
                             if (event.text.trim()) {
                                 setSteps((current) => {
+                                    const hasTool = current.some((s) => s.kind === "tool");
+                                    const isActionIntent = intent.kind === "generate_image" || intent.kind === "edit_image" || intent.isCanvas;
+                                    if (isActionIntent && !hasTool) return current;
+
                                     const next = current.map((s) =>
                                         (s.status === "running" && s.kind === "understand") || s.status === "correction"
                                             ? { ...s, status: "done" as const }
@@ -239,22 +243,33 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
 
                 const finalSteps = currentStepsRef.current.map((s) => (s.status === "running" ? { ...s, status: "done" as const } : s));
                 if (result.messages.length) {
-                    const firstAssistantIdx = result.messages.findIndex((m) => m.role === "assistant");
-                    let messagesToAppend = result.messages.map((m, idx) =>
-                        m.role === "assistant" && idx === firstAssistantIdx && finalSteps.length > 0 ? { ...m, steps: finalSteps } : m,
-                    );
-                    if (firstAssistantIdx === -1 && finalSteps.length > 0) {
-                        messagesToAppend = [
-                            {
+                    let messagesToAppend = [...result.messages];
+                    if (finalSteps.length > 0) {
+                        const firstToolIdx = messagesToAppend.findIndex((m) => m.role === "tool");
+                        const firstAssistantIdx = messagesToAppend.findIndex((m) => m.role === "assistant");
+                        if (firstToolIdx !== -1 && (firstAssistantIdx === -1 || firstToolIdx < firstAssistantIdx)) {
+                            messagesToAppend.unshift({
                                 id: nanoid(),
                                 role: "assistant",
                                 text: "",
                                 steps: finalSteps,
                                 promptBlocks: [],
                                 createdAt: Date.now(),
-                            },
-                            ...messagesToAppend,
-                        ];
+                            });
+                        } else if (firstAssistantIdx !== -1) {
+                            messagesToAppend = messagesToAppend.map((msg, idx) =>
+                                idx === firstAssistantIdx ? { ...msg, steps: finalSteps } : msg,
+                            );
+                        } else {
+                            messagesToAppend.unshift({
+                                id: nanoid(),
+                                role: "assistant",
+                                text: "",
+                                steps: finalSteps,
+                                promptBlocks: [],
+                                createdAt: Date.now(),
+                            });
+                        }
                     }
                     appendMessages(sessionId, messagesToAppend);
                 }
@@ -365,7 +380,20 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
                 {running && (
                     <div className="space-y-2">
                         {steps.length > 0 && <StepTrail steps={steps} running={running} defaultExpanded />}
-                        {streamingText && <SmoothStreamText rawText={streamingText} running={running} />}
+                        {runningTool && (
+                            <div className="agent-fade-in rounded-xl border border-stone-200/90 bg-stone-50/70 p-3 text-xs dark:border-stone-800 dark:bg-stone-900/60">
+                                <div className="flex items-center gap-2 text-stone-700 dark:text-stone-300 font-medium">
+                                    <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
+                                    <span>{formatAgentToolStepLabel(runningTool)}</span>
+                                </div>
+                                <div className="mt-1 text-[11px] text-stone-400">
+                                    {runningTool.tool === "canvas_batch_generate_nodes"
+                                        ? `正在画布排布并并行生成 ${Array.isArray(runningTool.arguments.tasks) ? runningTool.arguments.tasks.length : 4} 个节点...`
+                                        : "正在画布创建节点并启动精细渲染..."}
+                                </div>
+                            </div>
+                        )}
+                        {streamingText && !runningTool && <SmoothStreamText rawText={streamingText} running={running} />}
                     </div>
                 )}
             </div>
