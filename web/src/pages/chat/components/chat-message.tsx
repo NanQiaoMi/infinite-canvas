@@ -159,7 +159,7 @@ export function ChatMessage({ message, onRetry }: { message: AgentMessage; onRet
     if (message.role === "user") {
         return (
             <div className="agent-message-in flex flex-col items-end">
-                <div className="max-w-[82%] whitespace-pre-wrap break-words rounded-2xl bg-[#f0eee6] px-4.5 py-2.5 font-sans text-[15px] leading-relaxed text-stone-900 shadow-none dark:bg-[#2b2926] dark:text-stone-100">
+                <div className="max-w-[82%] whitespace-pre-wrap break-words rounded-2xl bg-[#f0eee6] px-4.5 py-2.5 font-serif text-[15px] leading-relaxed text-stone-900 shadow-none dark:bg-[#2b2926] dark:text-stone-100">
                     {message.text}
                 </div>
                 {message.attachments?.length ? <UserAttachments images={message.attachments} /> : null}

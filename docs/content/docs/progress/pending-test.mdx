@@ -7,7 +7,7 @@ description: Implemented changes that still need manual verification
 
 The current release needs manual verification in these areas:
 
-- AI 对话 Cascadia Mono 英文与方正小标宋排版对齐：AI 对话回复内容（Streamdown 渲染区域）中的英文字母、数字和符号呈现为清晰硬朗的 Cascadia Mono，中文字符呈现为端庄秀雅的方正小标宋简体（本地或系统字库加载，未安装环境优雅回退至经典宋体），行距保持 1.82 倍舒展排版，标题、列表、引用块和表格统一承载该字体组合；代码块与行内代码深度适配 Cascadia Mono；用户输入气泡与操作控制保持现代无衬线字体，呈现出鲜明的角色视觉层级。
+- AI 对话 Cascadia Mono 英文与方正小标宋排版对齐：项目已内置 Cascadia Mono 与方正小标宋简体 WOFF2 字体包并预加载，AI 对话回复内容（Streamdown 渲染区域）、用户提问气泡以及输入框中的英文字母与数字呈现为 Cascadia Mono，中文字符呈现为方正小标宋简体，行距舒展（1.82 倍），表格与代码块统一对齐适配。
 - 生图工作台、视频创作台与 AI 对话界面统一度：生图与视频工作台侧边栏应与 AI 对话一致，展示品牌 Logo、模块徽标（image / video）、方形笔风格的新建按钮、RECENTS 标题徽章与贴底通栏状态栏（模型与额度）；输入区聚焦高光、提示词操作胶囊与圆角参考图卡片一致；底部生成按钮采用高对比度深色质感；生图与视频结果卡片采用无底栏悬浮毛玻璃操作胶囊（下载、加入资产、参考图）、浮动规格标签、统一骨架等待动画与呼吸光晕空状态；移动端侧滑抽屉样式保持一致。
 
 - Saved model selection: save a canvas node with a model, then remove its provider or remove that model while another video model remains the default. Generation, retry and pending-video recovery should keep the unavailable model selected and open configuration instead of sending a request to the default or first provider. Re-selecting a valid model should allow generation. Changing only the API key on the same provider should preserve the model; switching a config node from a valid image model to video should still use the video default.

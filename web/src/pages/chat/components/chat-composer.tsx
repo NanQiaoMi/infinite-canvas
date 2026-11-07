@@ -224,7 +224,7 @@ export function ChatComposer({ value, onChange, onSend, onStop, running, modelLa
                     placeholder={t("chat.placeholder")}
                     autoSize={{ minRows: 2, maxRows: 10 }}
                     onKeyDown={handleComposerKeyDown}
-                    className="!border-0 !bg-transparent !px-1 !py-1 !text-sm !shadow-none"
+                    className="!border-0 !bg-transparent !px-1 !py-1 !text-sm !shadow-none font-serif"
                 />
                 <div className="mt-1 flex items-center justify-between gap-2 px-1">
                     <div className="flex items-center gap-1">

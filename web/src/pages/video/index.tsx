@@ -443,7 +443,7 @@ export default function VideoPage() {
                                     </div>
                                 </div>
                                 <div className="rounded-2xl border border-stone-300/80 bg-white p-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition-all duration-200 focus-within:border-stone-400 focus-within:shadow-[0_4px_18px_rgba(0,0,0,0.06)] dark:border-stone-700/80 dark:bg-stone-900 dark:focus-within:border-stone-500 dark:focus-within:shadow-[0_4px_18px_rgba(0,0,0,0.3)]">
-                                    <Input.TextArea variant="borderless" value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} className="!px-1 !py-1 !text-sm leading-relaxed" placeholder={t("videoWorkbench.promptPlaceholder")} />
+                                    <Input.TextArea variant="borderless" value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} className="!px-1 !py-1 !text-sm leading-relaxed font-serif" placeholder={t("videoWorkbench.promptPlaceholder")} />
                                 </div>
                             </div>
 

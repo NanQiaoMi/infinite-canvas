@@ -468,7 +468,7 @@ export default function ImagePage() {
                                     </div>
                                 </div>
                                 <div className="rounded-2xl border border-stone-300/80 bg-white p-2.5 shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-all duration-200 focus-within:border-stone-400/80 focus-within:shadow-[0_2px_14px_rgba(0,0,0,0.06)] dark:border-stone-700 dark:bg-stone-900 dark:focus-within:border-stone-600">
-                                    <Input.TextArea variant="borderless" value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} className="!px-1 !py-1 !text-sm" placeholder={t("imageWorkbench.promptPlaceholder")} />
+                                    <Input.TextArea variant="borderless" value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} className="!px-1 !py-1 !text-sm font-serif" placeholder={t("imageWorkbench.promptPlaceholder")} />
                                 </div>
                                 <div className="mt-2 flex flex-wrap items-center justify-between gap-2 px-1">
                                     <div className="flex min-w-0 items-center gap-1.5 text-xs text-stone-500 dark:text-stone-400">
