@@ -174,4 +174,18 @@ describe("本地意图识别", () => {
         expect(gif4.kind).toBe("generate_image");
         expect(gif4.format).toBe("gif");
     });
+
+    test("透明底与 PNG 透明图片意图准确识别", () => {
+        const trans1 = detectAgentIntent("生成png透明图片", { hasReferences: false });
+        expect(trans1.kind).toBe("generate_image");
+        expect(trans1.background).toBe("transparent");
+
+        const trans2 = detectAgentIntent("生成一个透明底的苹果图标", { hasReferences: false });
+        expect(trans2.kind).toBe("generate_image");
+        expect(trans2.background).toBe("transparent");
+
+        const trans3 = detectAgentIntent("generate a transparent png of a cute character", { hasReferences: false });
+        expect(trans3.kind).toBe("generate_image");
+        expect(trans3.background).toBe("transparent");
+    });
 });

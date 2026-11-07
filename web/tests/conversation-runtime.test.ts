@@ -354,4 +354,17 @@ describe("对话运行时", () => {
         expect(runner.toolCalls[0].arguments.format).toBe("gif");
         expect(result.directToolResult?.ok).toBe(true);
     });
+
+    test("透明PNG生成请求直连执行时自动带上 background: transparent", async () => {
+        const runner = createRunner({
+            turns: [],
+            messages: [{ id: "u1", role: "user", text: "生成png透明图片：一个红苹果，高光通透，单体居中", createdAt: 0 }],
+        });
+        const result = await runner.run();
+        expect(runner.calls).toHaveLength(0);
+        expect(runner.toolCalls).toHaveLength(1);
+        expect(runner.toolCalls[0].tool).toBe("generate_image");
+        expect(runner.toolCalls[0].arguments.background).toBe("transparent");
+        expect(result.directToolResult?.ok).toBe(true);
+    });
 });

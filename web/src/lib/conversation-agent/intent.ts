@@ -19,12 +19,17 @@ export type AgentIntent = {
     direct: boolean;
     /** 输出格式要求：gif 或 png */
     format?: "png" | "gif";
+    /** 背景模式：transparent 时下发透明底生成指令 */
+    background?: "transparent" | "auto";
 };
 
 export const CHAT_INTENT: AgentIntent = { kind: "chat", prompt: "", explicit: false, direct: false };
 
 /** 动图/GIF 意图关键词：命中时将 format 置为 gif 并调用支持动图的模型。 */
 export const GIF_INTENT_PATTERN = /动图|动态图|动态表情包|动效表情包|\bgif\b|会动的|animated\s+image|animated\s+gif|\banimation\b/i;
+
+/** 透明背景意图关键词：命中时将 background 置为 transparent，向模型与生图接口下发透明底指令。 */
+export const TRANSPARENT_INTENT_PATTERN = /透明底|透明背景|透明图|透明png|png透明|transparent\s*(background|png)?/i;
 
 /** 画面要素类别：命中越多，越可能是一段完整的生图提示词。 */
 const VISUAL_CATEGORY_PATTERNS: RegExp[] = [
@@ -73,7 +78,7 @@ const ENGLISH_EDIT_ACTION_PATTERN = /\b(edit|change|replace|remove|add)\b/i;
 
 /** 显式生成动作：用户明确要求出图（「生图工作台」是功能名，不算生成动作）。 */
 const GENERATE_ACTION_PATTERN =
-    /(?:生成|做|画|来|制作)\s*(?:一?\s*[个张幅份版])?[^。！？!?\n]{0,15}?(?:动图|动态表情包|动态图|\bgif\b|表情包)|生成图片|生成一张|生成一幅|生成几张|生成\s*\d+\s*[张幅个]|生成\s*[一二两三几]\s*[张幅个]|出图|出\s*\d+\s*[张幅个]|画一张|画个|画幅|画张|帮我画|来一张|再来一版|再生成|重新生成|换一版|做一张|做个|生成海报|生成插画|生成照片|生成头像|生成壁纸|生成封面|生图(?!\s*工作台)|generate\s+(an?\s+|the\s+)?(?:animated\s+)?(image|picture|photo|illustration|poster|gif)|draw\s+(me\s+)?|create\s+(an?\s+)?(?:animated\s+)?(image|picture|gif)|make\s+(an?\s+)?(?:animated\s+)?(image|picture|gif)/i;
+    /(?:生成|做|画|来|制作)\s*(?:一?\s*[个张幅份版])?[^。！？!?\n]{0,15}?(?:动图|动态表情包|动态图|\bgif\b|表情包|透明图|透明底|透明图片|透明png|png透明|透明素材)|生成图片|生成一张|生成一幅|生成几张|生成\s*\d+\s*[张幅个]|生成\s*[一二两三几]\s*[张幅个]|出图|出\s*\d+\s*[张幅个]|画一张|画个|画幅|画张|帮我画|来一张|再来一版|再生成|重新生成|换一版|做一张|做个|生成海报|生成插画|生成照片|生成头像|生成壁纸|生成封面|生图(?!\s*工作台)|generate\s+(an?\s+|the\s+)?(?:animated\s+|transparent\s+)?(image|picture|photo|illustration|poster|gif|png)|draw\s+(me\s+)?|create\s+(an?\s+)?(?:animated\s+|transparent\s+)?(image|picture|gif|png)|make\s+(an?\s+)?(?:animated\s+|transparent\s+)?(image|picture|gif|png)/i;
 
 /** 帮助/用法类提问：即使带「生图 / 生成图片」字样也不是出图请求，必须走聊天。 */
 const HELP_QUESTION_PATTERN =
@@ -81,14 +86,14 @@ const HELP_QUESTION_PATTERN =
 
 /** 冒号形式必须「生成指令词紧邻冒号」，避免把 16:9 这类比例冒号当成分隔符。 */
 const COLON_GENERATE_PATTERN =
-    /^(?:请|帮我|麻烦|给我)?\s*(?:生成|画|出|做|来|绘制)(?:一?[张幅个组])?(?:图片|图像|图|照片|插画|海报|头像|壁纸|封面|作品|动图|动态图|动态表情包|表情包|gif)?\s*[：:]\s*([\s\S]+)$/i;
+    /^(?:请|帮我|麻烦|给我)?\s*(?:生成|画|出|做|来|绘制)(?:一?[张幅个组])?(?:图片|图像|图|照片|插画|海报|头像|壁纸|封面|作品|动图|动态图|动态表情包|表情包|gif|透明图|透明底|透明图片|透明png|png透明|png透明图片|png透明图)?\s*[：:]\s*([\s\S]+)$/i;
 
 /** 开头的客套/连接词，提取正文时先去掉。 */
 const LEADING_FILLER_PATTERN = /^(?:请|麻烦|帮我|帮忙|给我|再|重新|继续|然后|现在|直接)+[\s，,。.!！、]*/;
 
 /** 生成类指令词 + 量词/对象词，提取正文时去掉（量词兼容「一张 / 2 张 / 两张」）。 */
 const LEADING_GENERATE_PATTERN =
-    /^(?:生成|创建|绘制|画|出图|出|做|来|制作|换)\s*(?:一?\s*[张幅个组份版]|几\s*[张幅个]|\d+\s*[张幅个]|[一二两三几]\s*[张幅个])?\s*(?:图片|图像|照片|插画|海报|头像|壁纸|封面|图|画|作品|动图|动态图|动态表情包|表情包|gif)?\s*[：:，,。.!！、\s]*/i;
+    /^(?:生成|创建|绘制|画|出图|出|做|来|制作|换)\s*(?:一?\s*[张幅个组份版]|几\s*[张幅个]|\d+\s*[张幅个]|[一二两三几]\s*[张幅个])?\s*(?:图片|图像|照片|插画|海报|头像|壁纸|封面|图|画|作品|动图|动态图|动态表情包|表情包|gif|透明图|透明底|透明图片|透明png|png透明|png透明图片|png透明图)?\s*[：:，,。.!！、\s]*/i;
 
 /** 指代型文本：这类内容不能当作提示词，交给运行时用历史 promptBlocks 兜底。 */
 const REFERENCE_PROMPT_PATTERN = /(提示词|这张图|那张图|这个|那个|上面|上述|刚才|之前|参考图)/i;
@@ -152,6 +157,7 @@ export function detectAgentIntent(text: string, options?: { hasReferences?: bool
         return { kind: "edit_image", prompt: input, explicit: true, direct: true };
     }
     const isGif = GIF_INTENT_PATTERN.test(input);
+    const isTransparent = TRANSPARENT_INTENT_PATTERN.test(input);
     const colonBody = extractColonBody(input);
     // ⑤ 帮助/用法类提问 → 聊天（冒号形式视为用户已显式给出正文，不做提问短路）
     if (!colonBody && (isQuestion(input) || HELP_QUESTION_PATTERN.test(input))) return CHAT_INTENT;
@@ -162,7 +168,14 @@ export function detectAgentIntent(text: string, options?: { hasReferences?: bool
         if (!prompt && countVisualCategories(input) >= 2 && input.length >= 24) prompt = input;
         prompt = sanitizeExtractedPrompt(prompt, input);
         const direct = Boolean(colonBody && prompt) || prompt.length >= 24 || countVisualCategories(prompt) >= 2;
-        return { kind: "generate_image", prompt, explicit: true, direct, ...(isGif ? { format: "gif" as const } : {}) };
+        return {
+            kind: "generate_image",
+            prompt,
+            explicit: true,
+            direct,
+            ...(isGif ? { format: "gif" as const } : {}),
+            ...(isTransparent ? { background: "transparent" as const } : {}),
+        };
     }
     // ⑦ 提到提示词但没有明确动作 → 聊天（例如「用这个提示词生成图片」已在⑥命中）
     if (/提示词|prompt/i.test(input)) return CHAT_INTENT;
@@ -173,7 +186,14 @@ export function detectAgentIntent(text: string, options?: { hasReferences?: bool
         input.replace(/\s+/g, "").length >= 30 &&
         countVisualCategories(input) >= 2
     ) {
-        return { kind: "generate_image", prompt: input, explicit: false, direct: true, ...(isGif ? { format: "gif" as const } : {}) };
+        return {
+            kind: "generate_image",
+            prompt: input,
+            explicit: false,
+            direct: true,
+            ...(isGif ? { format: "gif" as const } : {}),
+            ...(isTransparent ? { background: "transparent" as const } : {}),
+        };
     }
     // ⑨ 其余 → 聊天
     return CHAT_INTENT;

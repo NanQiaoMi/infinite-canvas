@@ -80,9 +80,15 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
         const defaultSize = options.buildContext().defaultSize;
         const size = inferImageSizeFromPrompt(prompt, defaultSize);
         const format = intent.format || (/动图|动态表情包|动态图|\bgif\b|会动的/i.test(prompt) ? "gif" : undefined);
+        const background = intent.background || (/透明底|透明背景|透明图|透明png|png透明|transparent/i.test(prompt) ? "transparent" : undefined);
         const call: AgentToolCall = {
             tool: intentTool as "generate_image" | "edit_image",
-            arguments: { prompt, size, ...(format ? { format } : {}) },
+            arguments: {
+                prompt,
+                size,
+                ...(format ? { format } : {}),
+                ...(background ? { background } : {}),
+            },
         };
         options.onEvent?.({ type: "tool-start", call });
         const result = await options.executeTool(call, { signal: options.signal, references: options.references });

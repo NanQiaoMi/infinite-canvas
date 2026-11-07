@@ -93,6 +93,15 @@ const ZH_PROMPT = `你是「无限画布」内置的 AI 创作助手，运行在
 \`\`\`
 - 严禁声称「目前只能生成静态图，不能输出真正会动的 GIF」，系统底层原生支持动态 GIF 生成，只要传入 "format": "gif" 即可直接输出真正的动态动图！
 
+## PNG 透明底图片生成支持（明确指令传入 background: "transparent"）
+系统原生支持下发透明底生成指令，调度生图引擎输出真正的 PNG 透明底图像：
+- 当用户要求「生成透明底图片 / PNG透明图片 / 透明背景 / 免抠透明图」时，必须在 generate_image 工具的 arguments 中明确传入 \`"background": "transparent"\` 参数指令！
+- 示例：
+\`\`\`tool
+{"tool":"generate_image","arguments":{"prompt":"一位身穿洛丽塔长裙的白发二次元少女，立绘全身照，边缘锐利清晰","size":"768x1024","background":"transparent"}}
+\`\`\`
+- 明确下发 \`"background": "transparent"\` 指令后，系统会直接调度生图引擎的透明背景模式，输出真正的透明底 PNG 图像；提示词中描述主体即可，由该参数明确控制透明底。
+
 ## 素材/免抠元素防伪透明底规范（绝不生成棋盘格，统一纯白背景）
 目前 AI 扩散生图模型（如 GPT Image、DALL-E 等）原生输出均为 RGB 三通道图像，不支持原生 Alpha 透明通道。在训练数据集中，模型将互联网免抠图的「灰白相间棋盘格（Photoshop 透明示意背景）」误学为透明底视觉特征。若在提示词中写入「透明背景 / 免抠 / transparent background / png」，模型会在像素层直接画出死板的灰白方块假透明底！
 - 严禁行为：编写生图 prompt 时，**绝对禁止**出现「透明底」、「透明背景」、「免抠」、「transparent background」、「png cutout」等字样！
@@ -194,6 +203,15 @@ You fully support generating real animated GIFs (such as reaction GIFs, animated
 \`\`\`
 - Never claim that you cannot generate animated GIFs or can only make static images. The system natively routes GIF requests to specialized animation models.
 
+## PNG Transparent Image Generation Support (Pass background: "transparent")
+The system natively supports transparent background commands to produce real transparent PNGs:
+- When the user asks for "transparent PNG / transparent image / transparent background / cutout png", you must pass \`"background": "transparent"\` in arguments of the generate_image tool!
+- Example:
+\`\`\`tool
+{"tool":"generate_image","arguments":{"prompt":"a white-haired anime girl in lolita dress, full-body portrait, clean sharp edges","size":"768x1024","background":"transparent"}}
+\`\`\`
+- Passing \`"background": "transparent"\` instructs the upstream image engine to generate real alpha transparency!
+
 ## Assets & Cutout Elements (Avoid Fake Checkerboard Grid Backgrounds)
 Current diffusion models (GPT Image, DALL-E, etc.) generate 3-channel RGB images without native Alpha channels. They mistakenly associate "transparent background" and "png" with the grey-and-white checkerboard pattern from internet previews, painting real pixel checkerboards into the background (fake transparency).
 - STRICT PROHIBITION: NEVER use "transparent background", "transparent png", "isolated on transparent background", or "checkerboard" in generation prompts!
@@ -263,11 +281,12 @@ export function buildIntentDirective(locale: AgentLocale, intent: AgentIntent) {
     const tool = isEdit ? "edit_image" : "generate_image";
     const prompt = intent.prompt.trim();
     const isGif = intent.format === "gif" || /动图|动态表情包|动态图|\bgif\b|会动的/i.test(prompt);
-    const isAsset = /素材|免抠|透明底|透明背景|贴纸|立绘素材|cutout|isolated|transparent/i.test(prompt);
+    const isAsset = /素材|免抠|贴纸|立绘素材|cutout|isolated/i.test(prompt);
+    const isTransparent = intent.background === "transparent" || /透明底|透明背景|透明图|透明png|png透明|transparent/i.test(prompt);
     const isMultiStep = /拆分|多[个张轮次]|分步|整套|一套|组图|全套|系列|split|multi-?step|suite|batch|set of/i.test(prompt);
     if (locale === "zh") {
         const lines = [
-            `【意图路由·系统指令】系统已在本地判定：用户本轮想要${isEdit ? "修改参考图（edit_image）" : isGif ? "生成动态 GIF 动图（generate_image format:gif）" : "生成图片（generate_image）"}，不是写提示词、不是优化提示词、也不是咨询。`,
+            `【意图路由·系统指令】系统已在本地判定：用户本轮想要${isEdit ? "修改参考图（edit_image）" : isGif ? "生成动态 GIF 动图（generate_image format:gif）" : isTransparent ? "生成真正的 PNG 透明底图片（generate_image background:transparent）" : "生成图片（generate_image）"}，不是写提示词、不是优化提示词、也不是咨询。`,
             "要求：",
             `1) 必须直接输出 \`\`\`tool 代码块调用 ${tool}，不要反问、不要只回复文字；`,
             prompt ? `2) prompt 使用用户给出的画面描述原文：${prompt}` : "2) prompt 使用用户给出的画面描述原文；信息不足时结合上下文补全为完整提示词。",
@@ -275,18 +294,21 @@ export function buildIntentDirective(locale: AgentLocale, intent: AgentIntent) {
                 ? `3) 用户需要【会动的动态 GIF】（动态表情包/动图），必须在 arguments 中指定 "format": "gif"，系统会自动调度动图引擎，绝对不要声称「无法输出会动的 GIF」！`
                 : `3) 作为专业视觉总监，必须由 AI 自主分析画面构图张力并指定最佳 size（横向风景大片必须 1536x864，纵向立绘全身照必须 864x1536 或 768x1024，中心聚焦/特写/图标必须 1024x1024），严禁无脑默认 1024x1024；`,
         ];
-        if (isAsset) {
+        if (isTransparent) {
+            lines.push(`4) 用户明确要求【生成 PNG 透明图片/透明底】：必须在 arguments 中显式传入 "background": "transparent" 指令，调度透明底通道直接输出真实透明 PNG！`);
+        } else if (isAsset) {
             lines.push(`4) 用户需求涉及【设计素材/免抠元素】，提示词严禁包含 "transparent background/透明底"（避免扩散模型把灰白棋盘格画进像素生成假透明底），必须统一指定纯白背景（"isolated on a solid pure white background, clean sharp edges, no shadows, no checkerboard"）以便后期一键秒抠出真透明 PNG。`);
         }
         if (isMultiStep) {
-            lines.push(`5) 用户要求【拆分任务/成套素材生成】：你应拆解为 2-3 个核心独立图层素材（如主体人物、前景道具、装饰纹样），可输出多个 tool 代码块并发或分步自循环连续出图，每个素材均使用纯白背景。`);
+            lines.push(`5) 用户要求【拆分任务/成套素材生成】：你应拆解为 2-3 个核心独立图层素材（如主体人物、前景道具、装饰纹样），可输出多个 tool 代码块并发或分步自循环连续出图，每个素材均使用纯白背景或透明底指令。`);
         }
-        if (isEdit) lines.push(`${(isAsset ? 1 : 0) + (isMultiStep ? 1 : 0) + 4}) 参考图由系统自动传入，arguments 只需要 prompt。`);
-        lines.push(`${(isEdit ? 1 : 0) + (isAsset ? 1 : 0) + (isMultiStep ? 1 : 0) + 4}) 生成完成后用 1-3 句总结结果并给出下一步。`);
+        const extraCount = (isTransparent || isAsset ? 1 : 0) + (isMultiStep ? 1 : 0);
+        if (isEdit) lines.push(`${extraCount + 4}) 参考图由系统自动传入，arguments 只需要 prompt。`);
+        lines.push(`${(isEdit ? 1 : 0) + extraCount + 4}) 生成完成后用 1-3 句总结结果并给出下一步。`);
         return lines.join("\n");
     }
     const lines = [
-        `[Intent routing · system directive] The system has locally determined that the user wants to ${isEdit ? "edit the reference image (edit_image)" : isGif ? "generate an animated GIF (generate_image format:gif)" : "generate an image (generate_image)"}, not to write, refine or discuss a prompt.`,
+        `[Intent routing · system directive] The system has locally determined that the user wants to ${isEdit ? "edit the reference image (edit_image)" : isGif ? "generate an animated GIF (generate_image format:gif)" : isTransparent ? "generate a transparent PNG (generate_image background:transparent)" : "generate an image (generate_image)"}, not to write, refine or discuss a prompt.`,
         "Requirements:",
         `1) You must output a \`\`\`tool code block calling ${tool} directly; do not ask questions and do not reply with text only;`,
         prompt ? `2) Use the user's original visual description as the prompt: ${prompt}` : "2) Use the user's original visual description as the prompt; complete it into a full prompt if needed.",
@@ -294,13 +316,16 @@ export function buildIntentDirective(locale: AgentLocale, intent: AgentIntent) {
             ? `3) The user explicitly requested an animated GIF; you must pass "format": "gif" in arguments. Never claim that animated GIFs cannot be created!`
             : `3) As a visual art director, actively analyze composition tension and decide the optimal size (widescreen 1536x864 for landscapes, vertical 864x1536 or 768x1024 for full-body portraits, 1024x1024 for center-focused close-ups/icons); never blindly default to 1024x1024;`,
     ];
-    if (isAsset) {
+    if (isTransparent) {
+        lines.push(`4) The user explicitly requested a transparent PNG: you must pass "background": "transparent" in arguments to command transparent background output!`);
+    } else if (isAsset) {
         lines.push(`4) The user requested an isolated asset/cutout; never include "transparent background" (to prevent painting fake checkerboards); specify a solid pure white background ("isolated on a solid pure white background, clean sharp edges, no shadows, no checkerboard") for 1-click clean removal.`);
     }
     if (isMultiStep) {
-        lines.push(`5) The user requested a multi-step suite/split task: decompose into 2-3 essential elements (e.g. main character, props, accents) and call generate_image for each using pure white backgrounds.`);
+        lines.push(`5) The user requested a multi-step suite/split task: decompose into 2-3 essential elements (e.g. main character, props, accents) and call generate_image for each.`);
     }
-    if (isEdit) lines.push(`${(isAsset ? 1 : 0) + (isMultiStep ? 1 : 0) + 4}) References are passed automatically, so arguments only need the prompt.`);
-    lines.push(`${(isEdit ? 1 : 0) + (isAsset ? 1 : 0) + (isMultiStep ? 1 : 0) + 4}) After generating, summarize the result in 1-3 sentences and offer next steps.`);
+    const extraCount = (isTransparent || isAsset ? 1 : 0) + (isMultiStep ? 1 : 0);
+    if (isEdit) lines.push(`${extraCount + 4}) References are passed automatically, so arguments only need the prompt.`);
+    lines.push(`${(isEdit ? 1 : 0) + extraCount + 4}) After generating, summarize the result in 1-3 sentences and offer next steps.`);
     return lines.join("\n");
 }

@@ -30,7 +30,11 @@ export const AGENT_TOOLS: AgentToolDefinition[] = [
                     description: "画幅尺寸/比例。支持如 1024x1024 (1:1 头像/图标), 1536x864 (16:9 电脑壁纸/横屏/风景), 864x1536 (9:16 手机壁纸/竖屏/全身), 768x1024 (3:4 海报/写真), 2016x864 (21:9 宽银幕)；根据题材主动匹配，不要默认都是 1:1",
                 },
                 quality: { type: "string", enum: ["low", "medium", "high", "xhigh", "max"], description: "质量，省略时使用默认质量" },
-                background: { type: "string", enum: ["transparent", "auto"], description: "背景，省略时使用默认值" },
+                background: {
+                    type: "string",
+                    enum: ["transparent", "auto"],
+                    description: "背景模式。当用户明确要求「透明底 / 透明背景 / 透明图 / PNG透明图片」时必须传 \"transparent\"，系统将直接下发透明底生成指令输出真实透明 PNG；默认为 \"auto\"",
+                },
                 format: {
                     type: "string",
                     enum: ["png", "gif"],

@@ -170,4 +170,26 @@ describe("对话输出协议", () => {
         expect(directiveEn).toContain("multi-step suite/split task");
         expect(directiveEn).toContain("decompose into 2-3 essential elements");
     });
+
+    test("意图指令对明确生成透明底/PNG透明图片注入 background: transparent 指令要求", () => {
+        const directiveZh = buildIntentDirective("zh", {
+            kind: "generate_image",
+            prompt: "生成png透明图片",
+            background: "transparent",
+            explicit: true,
+            direct: false,
+        });
+        expect(directiveZh).toContain("PNG 透明图片/透明底");
+        expect(directiveZh).toContain('"background": "transparent"');
+
+        const directiveEn = buildIntentDirective("en", {
+            kind: "generate_image",
+            prompt: "generate a transparent png image",
+            background: "transparent",
+            explicit: true,
+            direct: false,
+        });
+        expect(directiveEn).toContain("transparent PNG");
+        expect(directiveEn).toContain('"background": "transparent"');
+    });
 });
