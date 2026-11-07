@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { nativeToolCallsToAgent, parseAgentOutput, serializeToolResult, stripForStreaming, validateArguments } from "@/lib/conversation-agent/protocol";
+import { buildIntentDirective } from "@/lib/conversation-agent/system-prompt";
 
 describe("对话输出协议", () => {
     test("普通文本不产生工具调用", () => {
@@ -126,5 +127,27 @@ describe("对话输出协议", () => {
         expect(text).toContain('<tool_result name="generate_image" status="ok">');
         expect(text).toContain('"id":"img_1"');
         expect(text).not.toContain("secret-key");
+    });
+
+    test("意图指令对素材/免抠元素注入纯白背景与禁棋盘格防伪透明底规则", () => {
+        const directiveZh = buildIntentDirective("zh", {
+            kind: "generate_image",
+            prompt: "帮我生成海报素材",
+            explicit: true,
+            direct: false,
+        });
+        expect(directiveZh).toContain("设计素材/免抠元素");
+        expect(directiveZh).toContain("严禁包含 \"transparent background/透明底\"");
+        expect(directiveZh).toContain("纯白背景");
+
+        const directiveEn = buildIntentDirective("en", {
+            kind: "generate_image",
+            prompt: "generate cutout asset for poster",
+            explicit: true,
+            direct: false,
+        });
+        expect(directiveEn).toContain("isolated asset/cutout");
+        expect(directiveEn).toContain("never include \"transparent background\"");
+        expect(directiveEn).toContain("solid pure white background");
     });
 });

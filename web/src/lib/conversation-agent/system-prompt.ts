@@ -93,6 +93,12 @@ const ZH_PROMPT = `你是「无限画布」内置的 AI 创作助手，运行在
 \`\`\`
 - 严禁声称「目前只能生成静态图，不能输出真正会动的 GIF」，系统底层原生支持动态 GIF 生成，只要传入 "format": "gif" 即可直接输出真正的动态动图！
 
+## 素材/免抠元素防伪透明底规范（绝不生成棋盘格，统一纯白背景）
+目前 AI 扩散生图模型（如 GPT Image、DALL-E 等）原生输出均为 RGB 三通道图像，不支持原生 Alpha 透明通道。在训练数据集中，模型将互联网免抠图的「灰白相间棋盘格（Photoshop 透明示意背景）」误学为透明底视觉特征。若在提示词中写入「透明背景 / 免抠 / transparent background / png」，模型会在像素层直接画出死板的灰白方块假透明底！
+- 严禁行为：编写生图 prompt 时，**绝对禁止**出现「透明底」、「透明背景」、「免抠」、「transparent background」、「png cutout」等字样！
+- 正确规范：当用户要求「生成素材 / 海报素材 / 人物素材 / 贴纸 / 立绘素材」时，prompt 必须统一指定为**纯净单一纯白背景、无杂乱阴影、主体边缘清晰利落**（例如：\`isolated on a solid pure white background, clean sharp edges, studio lighting, no shadows, no checkerboard pattern\` 或 \`纯白背景，单体主体居中，边缘清晰完整，无杂质，无阴影，无棋盘格\`）。
+- 这种纯白底素材在设计软件、PS 或系统抠图工具中可以一键秒抠成真实 Alpha 透明 PNG，彻底杜绝伪透明方格污染！
+
 ## 工具调用协议（必须严格遵守）
 你可以使用以下工具：
 
@@ -179,6 +185,12 @@ You fully support generating real animated GIFs (such as reaction GIFs, animated
 \`\`\`
 - Never claim that you cannot generate animated GIFs or can only make static images. The system natively routes GIF requests to specialized animation models.
 
+## Assets & Cutout Elements (Avoid Fake Checkerboard Grid Backgrounds)
+Current diffusion models (GPT Image, DALL-E, etc.) generate 3-channel RGB images without native Alpha channels. They mistakenly associate "transparent background" and "png" with the grey-and-white checkerboard pattern from internet previews, painting real pixel checkerboards into the background (fake transparency).
+- STRICT PROHIBITION: NEVER use "transparent background", "transparent png", "isolated on transparent background", or "checkerboard" in generation prompts!
+- CORRECT PRACTICE: When users request "assets / cutouts / stickers / poster elements / isolated characters", explicitly specify a pure solid white background with clean edges: \`isolated on a solid pure white background, clean sharp edges, studio lighting, no shadows, no checkerboard pattern\`.
+- This clean white background allows seamless one-click background removal in any design software without dirty checkerboard pixels!
+
 ## Tool protocol (must follow strictly)
 You can use these tools:
 
@@ -233,6 +245,7 @@ export function buildIntentDirective(locale: AgentLocale, intent: AgentIntent) {
     const tool = isEdit ? "edit_image" : "generate_image";
     const prompt = intent.prompt.trim();
     const isGif = intent.format === "gif" || /动图|动态表情包|动态图|\bgif\b|会动的/i.test(prompt);
+    const isAsset = /素材|免抠|透明底|透明背景|贴纸|立绘素材|cutout|isolated|transparent/i.test(prompt);
     if (locale === "zh") {
         const lines = [
             `【意图路由·系统指令】系统已在本地判定：用户本轮想要${isEdit ? "修改参考图（edit_image）" : isGif ? "生成动态 GIF 动图（generate_image format:gif）" : "生成图片（generate_image）"}，不是写提示词、不是优化提示词、也不是咨询。`,
@@ -243,8 +256,11 @@ export function buildIntentDirective(locale: AgentLocale, intent: AgentIntent) {
                 ? `3) 用户需要【会动的动态 GIF】（动态表情包/动图），必须在 arguments 中指定 "format": "gif"，系统会自动调度动图引擎，绝对不要声称「无法输出会动的 GIF」！`
                 : `3) 作为专业视觉总监，必须由 AI 自主分析画面构图张力并指定最佳 size（横向风景大片必须 1536x864，纵向立绘全身照必须 864x1536 或 768x1024，中心聚焦/特写/图标必须 1024x1024），严禁无脑默认 1024x1024；`,
         ];
-        if (isEdit) lines.push("4) 参考图由系统自动传入，arguments 只需要 prompt。");
-        lines.push(`${isEdit ? 5 : 4}) 生成完成后用 1-3 句总结结果并给出下一步。`);
+        if (isAsset) {
+            lines.push(`4) 用户需求涉及【设计素材/免抠元素】，提示词严禁包含 "transparent background/透明底"（避免扩散模型把灰白棋盘格画进像素生成假透明底），必须统一指定纯白背景（"isolated on a solid pure white background, clean sharp edges, no shadows, no checkerboard"）以便后期一键秒抠出真透明 PNG。`);
+        }
+        if (isEdit) lines.push(`${isAsset ? 5 : 4}) 参考图由系统自动传入，arguments 只需要 prompt。`);
+        lines.push(`${(isEdit ? 1 : 0) + (isAsset ? 1 : 0) + 4}) 生成完成后用 1-3 句总结结果并给出下一步。`);
         return lines.join("\n");
     }
     const lines = [
@@ -256,7 +272,10 @@ export function buildIntentDirective(locale: AgentLocale, intent: AgentIntent) {
             ? `3) The user explicitly requested an animated GIF; you must pass "format": "gif" in arguments. Never claim that animated GIFs cannot be created!`
             : `3) As a visual art director, actively analyze composition tension and decide the optimal size (widescreen 1536x864 for landscapes, vertical 864x1536 or 768x1024 for full-body portraits, 1024x1024 for center-focused close-ups/icons); never blindly default to 1024x1024;`,
     ];
-    if (isEdit) lines.push("4) References are passed automatically, so arguments only need the prompt.");
-    lines.push(`${isEdit ? 5 : 4}) After generating, summarize the result in 1-3 sentences and offer next steps.`);
+    if (isAsset) {
+        lines.push(`4) The user requested an isolated asset/cutout; never include "transparent background" (to prevent painting fake checkerboards); specify a solid pure white background ("isolated on a solid pure white background, clean sharp edges, no shadows, no checkerboard") for 1-click clean removal.`);
+    }
+    if (isEdit) lines.push(`${isAsset ? 5 : 4}) References are passed automatically, so arguments only need the prompt.`);
+    lines.push(`${(isEdit ? 1 : 0) + (isAsset ? 1 : 0) + 4}) After generating, summarize the result in 1-3 sentences and offer next steps.`);
     return lines.join("\n");
 }
