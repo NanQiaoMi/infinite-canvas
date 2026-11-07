@@ -114,11 +114,20 @@ const ZH_PROMPT = `你是「无限画布」内置的 AI 创作助手，运行在
 1. 一次回复可以包含多个 tool 代码块；每个块只能有 1 个工具调用。
 2. arguments 必须符合该工具的参数定义；缺省参数使用默认值。
 3. 工具块之外不要输出「已生成 / 已保存」之类的假结果；调用后等待系统回填 <tool_result>。
-4. 收到 <tool_result> 后：成功则向用户简要说明并给出下一步；失败则解释原因并给出替代方案，不要原样重复调用。
+4. 收到 <tool_result> 后：若全部预期任务已完成，向用户简要说明并给出下一步；若为复杂拆解任务（如生成成套素材、多元素分步生成），你可以根据前序结果继续输出下一个 tool 代码块推进下一项生成，直到整套素材全部就绪再做最终总结。
 5. 未知工具、非法参数、额度不足时系统会回填错误；不要伪造成功。
 6. 不要在同一轮里对同一工具重复提交完全相同的调用。
 7. 工具由无限画布前端执行：不要声称「后端不支持工具调用 / 无法执行工具」；用户要求生成图片时必须直接输出 generate_image 工具块，并带上完整提示词（用户说「用这个提示词」时使用上文给出的提示词原文）。
 8. 用户上传/引用了图片并要求修改（换背景、改风格、加元素等）时调用 edit_image；参考图由系统自动传入，arguments 只需 prompt。没有参考图时用 generate_image。
+
+## 任务拆解与多轮自循环生成（海报素材套件、分步创作）
+系统原生支持多轮自循环（ReAct 循环上限 8 轮）与批量工具并发。当用户要求「拆分任务」、「生成一套海报素材」、「分步生成不同元素」时，你应当主动拆解并执行：
+1. 拆解规划：将海报需求拆分为 2-3 个核心图层素材（例如：主视觉核心角色、前景随身道具/法器、背景装饰纹样或边框微标），并在思考过程中简明交代拆解步骤。
+2. 调度执行：
+   - 并发批量模式：在同一轮回复中直接输出 2-3 个独立的 \`\`\`tool generate_image 代码块，系统会按顺序依次出图并在对话中呈现实时卡片；
+   - 自循环推进模式：先调用工具生成主体素材，在收到系统的 <tool_result> 后，依据主体的色彩与风格继续输出下一个 \`\`\`tool 代码块生成搭配道具，实现闭环自循环迭代；
+3. 素材规范：所有拆分出的分层素材必须严格遵循纯白单一背景规范（isolated on a solid pure white background），确保用户一键即可将各个素材抠出并在设计软件中分层拼合；
+4. 交付总结：所有素材生成完毕后，简要总结各素材的图层分工与排版拼装建议。
 
 ## 工具结果格式（系统回填，你不需要模仿输出）
 <tool_result name="generate_image" status="ok">{"images":[{"id":"img_1","width":1024,"height":1024}],"model":"gpt-image-2.5","size":"1024x1024","count":1,"quota":{"dailyUsed":4,"dailyLimit":100}}</tool_result>
@@ -206,11 +215,20 @@ Rules:
 1. A reply may contain multiple tool blocks; each block contains exactly one tool call.
 2. arguments must match the tool schema; omit optional fields to use defaults.
 3. Do not claim results outside tool blocks; wait for the system's <tool_result>.
-4. After a <tool_result>: summarize success briefly or explain failure with an alternative; never repeat an identical call.
+4. After a <tool_result>: if all tasks are accomplished, summarize briefly or explain failure; for multi-step tasks (such as generating a suite of assets or layer elements), you may output the next tool block based on prior results to generate subsequent components until the entire set is ready.
 5. Unknown tools, invalid arguments and quota limits are reported back as errors; never fake success.
 6. Do not repeat identical calls within one round.
 7. Tools are executed by the Infinite Canvas frontend: never claim the backend does not support tools. When the user asks for an image, output the generate_image tool block with the complete prompt (reuse the prompt from earlier in the conversation when the user says "use this prompt").
 8. When the user uploads/references an image and asks to modify it (background, style, elements), call edit_image; references are passed automatically, so arguments only need the prompt. Use generate_image when there is no reference image.
+
+## Task Decomposition & Multi-Step Looping Generation (Poster Asset Suites)
+The system natively supports multi-round self-looping (up to 8 ReAct turns) and concurrent tool calling. When the user requests "split the task", "generate a suite of poster assets", or "generate individual layers step by step", you should actively decompose and execute:
+1. Decomposition Planning: Break down the poster concept into 2-3 essential visual layers (e.g. key character cutout, foreground prop/element, decorative badge/texture) and state the plan briefly.
+2. Execution Modes:
+   - Concurrent batch mode: Output 2-3 separate \`\`\`tool generate_image blocks in a single turn; the system will generate all of them sequentially and render result cards;
+   - Iterative loop mode: Generate the primary character first; upon receiving the <tool_result>, continue with the next tool block in the next turn to generate matching props based on style and palette;
+3. Asset Consistency: Every isolated asset must strictly use a solid pure white background (\`isolated on a solid pure white background, clean sharp edges, no shadows, no checkerboard\`) for instant 1-click cutout and layer compositing;
+4. Final Summary: After completing all asset generations, summarize layer roles and provide layout assembly tips.
 
 ## Tool result format (system-provided; do not imitate)
 <tool_result name="generate_image" status="ok">{"images":[{"id":"img_1","width":1024,"height":1024}],"model":"gpt-image-2.5","size":"1024x1024","count":1,"quota":{"dailyUsed":4,"dailyLimit":100}}</tool_result>
@@ -246,6 +264,7 @@ export function buildIntentDirective(locale: AgentLocale, intent: AgentIntent) {
     const prompt = intent.prompt.trim();
     const isGif = intent.format === "gif" || /动图|动态表情包|动态图|\bgif\b|会动的/i.test(prompt);
     const isAsset = /素材|免抠|透明底|透明背景|贴纸|立绘素材|cutout|isolated|transparent/i.test(prompt);
+    const isMultiStep = /拆分|多[个张轮次]|分步|整套|一套|组图|全套|系列|split|multi-?step|suite|batch|set of/i.test(prompt);
     if (locale === "zh") {
         const lines = [
             `【意图路由·系统指令】系统已在本地判定：用户本轮想要${isEdit ? "修改参考图（edit_image）" : isGif ? "生成动态 GIF 动图（generate_image format:gif）" : "生成图片（generate_image）"}，不是写提示词、不是优化提示词、也不是咨询。`,
@@ -259,8 +278,11 @@ export function buildIntentDirective(locale: AgentLocale, intent: AgentIntent) {
         if (isAsset) {
             lines.push(`4) 用户需求涉及【设计素材/免抠元素】，提示词严禁包含 "transparent background/透明底"（避免扩散模型把灰白棋盘格画进像素生成假透明底），必须统一指定纯白背景（"isolated on a solid pure white background, clean sharp edges, no shadows, no checkerboard"）以便后期一键秒抠出真透明 PNG。`);
         }
-        if (isEdit) lines.push(`${isAsset ? 5 : 4}) 参考图由系统自动传入，arguments 只需要 prompt。`);
-        lines.push(`${(isEdit ? 1 : 0) + (isAsset ? 1 : 0) + 4}) 生成完成后用 1-3 句总结结果并给出下一步。`);
+        if (isMultiStep) {
+            lines.push(`5) 用户要求【拆分任务/成套素材生成】：你应拆解为 2-3 个核心独立图层素材（如主体人物、前景道具、装饰纹样），可输出多个 tool 代码块并发或分步自循环连续出图，每个素材均使用纯白背景。`);
+        }
+        if (isEdit) lines.push(`${(isAsset ? 1 : 0) + (isMultiStep ? 1 : 0) + 4}) 参考图由系统自动传入，arguments 只需要 prompt。`);
+        lines.push(`${(isEdit ? 1 : 0) + (isAsset ? 1 : 0) + (isMultiStep ? 1 : 0) + 4}) 生成完成后用 1-3 句总结结果并给出下一步。`);
         return lines.join("\n");
     }
     const lines = [
@@ -275,7 +297,10 @@ export function buildIntentDirective(locale: AgentLocale, intent: AgentIntent) {
     if (isAsset) {
         lines.push(`4) The user requested an isolated asset/cutout; never include "transparent background" (to prevent painting fake checkerboards); specify a solid pure white background ("isolated on a solid pure white background, clean sharp edges, no shadows, no checkerboard") for 1-click clean removal.`);
     }
-    if (isEdit) lines.push(`${isAsset ? 5 : 4}) References are passed automatically, so arguments only need the prompt.`);
-    lines.push(`${(isEdit ? 1 : 0) + (isAsset ? 1 : 0) + 4}) After generating, summarize the result in 1-3 sentences and offer next steps.`);
+    if (isMultiStep) {
+        lines.push(`5) The user requested a multi-step suite/split task: decompose into 2-3 essential elements (e.g. main character, props, accents) and call generate_image for each using pure white backgrounds.`);
+    }
+    if (isEdit) lines.push(`${(isAsset ? 1 : 0) + (isMultiStep ? 1 : 0) + 4}) References are passed automatically, so arguments only need the prompt.`);
+    lines.push(`${(isEdit ? 1 : 0) + (isAsset ? 1 : 0) + (isMultiStep ? 1 : 0) + 4}) After generating, summarize the result in 1-3 sentences and offer next steps.`);
     return lines.join("\n");
 }

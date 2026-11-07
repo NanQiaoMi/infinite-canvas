@@ -150,4 +150,24 @@ describe("对话输出协议", () => {
         expect(directiveEn).toContain("never include \"transparent background\"");
         expect(directiveEn).toContain("solid pure white background");
     });
+
+    test("意图指令对任务拆分与成套素材生成注入多步骤拆解要求", () => {
+        const directiveZh = buildIntentDirective("zh", {
+            kind: "generate_image",
+            prompt: "生成海报素材，拆分任务为多次素材生成",
+            explicit: true,
+            direct: false,
+        });
+        expect(directiveZh).toContain("拆分任务/成套素材生成");
+        expect(directiveZh).toContain("拆解为 2-3 个核心独立图层素材");
+
+        const directiveEn = buildIntentDirective("en", {
+            kind: "generate_image",
+            prompt: "generate a poster asset suite with multiple split steps",
+            explicit: true,
+            direct: false,
+        });
+        expect(directiveEn).toContain("multi-step suite/split task");
+        expect(directiveEn).toContain("decompose into 2-3 essential elements");
+    });
 });
