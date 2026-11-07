@@ -192,4 +192,34 @@ describe("对话输出协议", () => {
         expect(directiveEn).toContain("transparent PNG");
         expect(directiveEn).toContain('"background": "transparent"');
     });
+
+    test("解析输出时提取 ChatGPT 富文本 AsyncImage 标签并转化为 promptBlocks", () => {
+        const textWithAsyncImage = `好的，为你生成头像：
+<AsyncImage query="赛博朋克霓虹猫咪头像，正面大特写" aspectRatio="1:1" />
+<AsyncImage query="复古蒸汽波机械猫咪头像" aspectRatio="1:1" />
+请查看以上预览。`;
+        const result = parseAgentOutput(textWithAsyncImage);
+        expect(result.promptBlocks).toHaveLength(2);
+        expect(result.promptBlocks[0]).toBe("赛博朋克霓虹猫咪头像，正面大特写");
+        expect(result.promptBlocks[1]).toBe("复古蒸汽波机械猫咪头像");
+        // AsyncImage 标签应在展示文本中被清洗移除
+        expect(result.displayText).not.toContain("<AsyncImage");
+        expect(result.displayText).toContain("好的，为你生成头像：");
+    });
+
+    test("意图指令对画布多节点/并排生成注入 canvas_batch_generate_nodes 约束", () => {
+        const directiveZh = buildIntentDirective("zh", {
+            kind: "generate_image",
+            prompt: "在画布上批量生成4张赛博朋克猫咪头像，并排排开",
+            isCanvas: true,
+            decompose: true,
+            layout: "horizontal",
+            batchCount: 4,
+            explicit: true,
+            direct: false,
+        });
+        expect(directiveZh).toContain("画布任务·强约束指令");
+        expect(directiveZh).toContain("canvas_batch_generate_nodes");
+        expect(directiveZh).toContain('"layout": "horizontal"');
+    });
 });

@@ -43,6 +43,9 @@ const QUICK_PROMPTS = [
     { label: "🔍 查看画布节点", text: "获取当前画布的状态和所有节点信息" },
 ];
 
+const NETWORK_ERROR_PATTERN = /network error|failed to fetch|load failed|networkerror|econnreset|socket hang up|fetch failed/i;
+const isNetworkError = (error: unknown) => NETWORK_ERROR_PATTERN.test(error instanceof Error ? error.message : String(error));
+
 export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCodex?: () => void }) {
     const { t } = useTranslation();
     const { message } = App.useApp();
@@ -108,8 +111,8 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
             defaultQuality: config.quality || "standard",
             defaultCount: config.count || "1",
             quota,
-            pageContext: "canvas",
-            toolChannel: "native" as const,
+            pageContext: "canvas" as const,
+            toolChannel: "text" as const,
         };
     }, []);
 
@@ -122,19 +125,36 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
             onDelta: (text: string) => void;
         }) => {
             const config = useConfigStore.getState().config;
-            const textChannel = config.channels.find((channel) => channel.id === (config.textModel.split("::")[0] || ""));
+            const textOptions = selectableModelsByCapability(config, "text");
+            const effectiveModel = config.textModel || textOptions[0] || "";
+            if (!effectiveModel) {
+                throw new Error("请先在设置中配置文本对话模型");
+            }
+            const textChannel = config.channels.find((channel) => channel.id === (effectiveModel.split("::")[0] || ""));
             const nativeTools = textChannel?.toolProtocol === "native";
 
-            const turn = await requestConversationTurn(
-                { ...config, model: config.textModel },
-                req.messages.map((item) => ({ role: item.role, content: item.content })),
-                {
-                    systemPrompt: req.systemPrompt,
-                    tools: nativeTools ? req.tools.map((t) => ({ name: t.name, description: t.description, parameters: t.parameters })) : [],
-                    onDelta: req.onDelta,
-                    signal: req.signal,
-                },
-            );
+            const run = () =>
+                requestConversationTurn(
+                    { ...config, model: effectiveModel },
+                    req.messages.map((item) => ({ role: item.role, content: item.content })),
+                    {
+                        systemPrompt: req.systemPrompt,
+                        tools: nativeTools ? req.tools.map((t) => ({ name: t.name, description: t.description, parameters: t.parameters })) : [],
+                        onDelta: req.onDelta,
+                        signal: req.signal,
+                    },
+                );
+
+            let turn;
+            try {
+                turn = await run();
+            } catch (error) {
+                if (req.signal.aborted || !isNetworkError(error)) throw error;
+                // Wait briefly and retry once on network error
+                await new Promise((resolve) => setTimeout(resolve, 900));
+                turn = await run();
+            }
+
             const native = nativeToolCallsToAgent(turn.toolCalls.map((c) => ({ name: c.name, arguments: c.arguments })));
             return { content: turn.content, toolCalls: native.calls, toolCallErrors: native.errors };
         },
@@ -175,7 +195,11 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
                             setStreamingText(event.text);
                             if (event.text.trim()) {
                                 setSteps((current) => {
-                                    const next = current.map((s) => (s.status === "running" && s.kind === "understand" ? { ...s, status: "done" as const } : s));
+                                    const next = current.map((s) =>
+                                        (s.status === "running" && s.kind === "understand") || s.status === "correction"
+                                            ? { ...s, status: "done" as const }
+                                            : s,
+                                    );
                                     if (!next.some((s) => s.status === "running")) {
                                         next.push({ id: `respond-${next.length}`, kind: "respond", label: "组织回复与排版说明", status: "running" });
                                     }
@@ -186,9 +210,23 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
                             setStreamingText("");
                             setRunningTool(event.call);
                             setSteps((current) => {
-                                const next = current.map((s) => (s.status === "running" ? { ...s, status: "done" as const } : s));
+                                const next = current.map((s) => (s.status === "running" || s.status === "correction" ? { ...s, status: "done" as const } : s));
                                 stepSeqRef.current += 1;
                                 return [...next, { id: `tool-${stepSeqRef.current}`, kind: "tool" as const, label: formatAgentToolStepLabel(event.call), status: "running" as const }];
+                            });
+                        } else if (event.type === "correction-start") {
+                            setSteps((current) => {
+                                const next = current.map((s) => (s.status === "running" ? { ...s, status: "done" as const } : s));
+                                stepSeqRef.current += 1;
+                                return [
+                                    ...next,
+                                    {
+                                        id: `correction-${stepSeqRef.current}`,
+                                        kind: "correction" as const,
+                                        label: "检测到指令偏差 · 重新解析并执行",
+                                        status: "correction" as const,
+                                    },
+                                ];
                             });
                         } else if (event.type === "tool-end") {
                             setRunningTool(null);
@@ -199,15 +237,30 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
                     maxRounds: 8,
                 });
 
+                const finalSteps = currentStepsRef.current.map((s) => (s.status === "running" ? { ...s, status: "done" as const } : s));
                 if (result.messages.length) {
                     appendMessages(
                         sessionId,
-                        result.messages.map((m) => (m.role === "assistant" ? { ...m, steps: currentStepsRef.current } : m)),
+                        result.messages.map((m, idx) =>
+                            m.role === "assistant" && idx === result.messages.length - 1 && finalSteps.length > 0 ? { ...m, steps: finalSteps } : m,
+                        ),
                     );
                 }
+                if (result.roundLimitReached) {
+                    appendMessages(sessionId, [{ id: nanoid(), role: "error", text: "已达最大循环轮次，任务中止", createdAt: Date.now() }]);
+                }
             } catch (err: unknown) {
-                if (!controller.signal.aborted) {
-                    message.error(err instanceof Error ? err.message : "AI 执行出错");
+                const aborted = controller.signal.aborted;
+                const partial = useConversationAgentStore.getState().streamingText;
+                if (aborted) {
+                    if (partial.trim()) {
+                        appendMessages(sessionId, [{ id: nanoid(), role: "assistant", text: partial, promptBlocks: [], createdAt: Date.now() }]);
+                    }
+                } else {
+                    const raw = err instanceof Error ? err.message : String(err);
+                    const errorMsg = isNetworkError(err) ? "网络连接异常，请重试" : raw;
+                    appendMessages(sessionId, [{ id: nanoid(), role: "error", text: errorMsg, createdAt: Date.now() }]);
+                    message.error(errorMsg);
                 }
             } finally {
                 setRunning(false);

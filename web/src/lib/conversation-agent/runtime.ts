@@ -56,10 +56,39 @@ function lastAssistantPromptBlock(messages: AgentMessage[]) {
  * - direct 的生成/改图意图直接执行工具，不调用模型；
  * - 其余生成/改图意图首轮注入意图指令，模型仍未调用工具时兜底强制执行一次。
  */
-const REFUSAL_PATTERN = /(无法|不能|不支持|不具备|没法).{0,16}(执行|调用|使用)?(工具|图片生成|生成图片)|cannot execute|unable to execute|can't execute|don't have (the )?(ability|access).{0,20}tool|not able to (execute|call).{0,20}tool/i;
-const GENERATION_INTENT_PATTERN = /(生成|出图|画一|画个|画张|改图|修改|编辑|参考图|image|generate|edit)/i;
+const REFUSAL_PATTERN =
+    /(无法|不能|不支持|不具备|没法|没有|未连接|临时聊天|切换到普通).{0,20}(执行|调用|使用|连接|具备)?(工具|生图|批量生图|图片生成|生成图片|功能|入口)|cannot execute|unable to execute|can't execute|don't have (the )?(ability|access).{0,20}tool|not able to (execute|call).{0,20}tool/i;
+const GENERATION_INTENT_PATTERN = /(生成|出图|画一|画个|画张|改图|修改|编辑|参考图|image|generate|edit|画布|节点|并排|排开)/i;
 const CORRECTION_TEXT =
-    "【系统纠错】你具备工具调用能力，工具由无限画布前端执行，不要说「无法执行工具 / 后端不支持」。请直接按协议输出 ```tool 代码块（严格 JSON）。用户要求生成或修改图片时，调用 generate_image（修改已有图片用 edit_image）；用户要求填入工作台时调用 apply_prompt。";
+    "【系统纠错】你具备工具调用能力，工具由无限画布前端执行，绝对不要说「无法执行工具 / 后端不支持 / 临时聊天 / 未连接画布工具」。请直接按协议输出 ```tool 代码块（严格 JSON）。在画布中生成或排布图片时，调用 canvas_batch_generate_nodes（批量）或 canvas_create_image_node（单张）；在对话中生成调用 generate_image；修改已有图片调用 edit_image。";
+
+function extractNumberedPrompts(text: string, count: number, basePrompt: string): Array<{ title: string; prompt: string }> {
+    const lines = text.split("\n");
+    const items: Array<{ title: string; prompt: string }> = [];
+    const itemPattern = /^(?:[0-9]+[、.｜|\s]+|\*+\s*[0-9]+[、.｜|\s]+|\*+)?(?:(?:\d+[\s.、|｜]|风格\d+[:：]|方案\d+[:：])?\s*\**([^*：:\n]+)\**\s*[：:]\s*(.+))$/;
+    for (const line of lines) {
+        const trimmed = line.trim();
+        const match = trimmed.match(itemPattern);
+        if (match) {
+            const rawTitle = match[1].replace(/^\d+[\s.、|｜]+/, "").trim();
+            const detail = match[2].trim();
+            const prompt = basePrompt ? `${basePrompt}，${rawTitle}：${detail}` : `${rawTitle}：${detail}`;
+            items.push({ title: rawTitle || `素材 ${items.length + 1}`, prompt });
+        }
+        if (items.length >= count) break;
+    }
+    if (items.length >= 2) return items;
+
+    const result: Array<{ title: string; prompt: string }> = [];
+    const targetCount = Math.max(2, Math.min(8, count || 4));
+    for (let i = 0; i < targetCount; i += 1) {
+        result.push({
+            title: `方案 ${i + 1}`,
+            prompt: `${basePrompt}，风格方案 ${i + 1}`,
+        });
+    }
+    return result;
+}
 
 export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentTurnResult> {
     const maxRounds = Math.max(1, options.maxRounds ?? 8);
@@ -97,7 +126,7 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
         return result;
     };
 
-    if (options.signal.aborted) return { messages: newMessages, aborted: true, roundLimitReached: false };
+    if (options.signal?.aborted) return { messages: newMessages, aborted: true, roundLimitReached: false };
     /** 意图指令只注入首轮模型调用，一次即弃，避免总结轮再次看到「必须调用工具」而重复生成。 */
     let pendingDirective: string | null = null;
     if (intentTool && intent.direct && intent.prompt.trim()) {
@@ -112,7 +141,7 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
     }
 
     for (let round = 0; round < maxRounds; round += 1) {
-        if (options.signal.aborted) return { messages: newMessages, aborted: true, roundLimitReached: false };
+        if (options.signal?.aborted) return { messages: newMessages, aborted: true, roundLimitReached: false };
         const turn = await options.callModel({
             systemPrompt: buildSystemPrompt({ locale: options.locale, context: options.buildContext(), tools: options.tools }),
             messages: [...toModelMessages([...options.messages, ...newMessages]), ...modelOnlyMessages, ...(pendingDirective ? [{ role: "user" as const, content: pendingDirective }] : [])],
@@ -121,7 +150,7 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
             onDelta: (text) => options.onEvent?.({ type: "assistant-stream", text: stripForStreaming(text) }),
         });
         pendingDirective = null;
-        if (options.signal.aborted) return { messages: newMessages, aborted: true, roundLimitReached: false };
+        if (options.signal?.aborted) return { messages: newMessages, aborted: true, roundLimitReached: false };
 
         const parsed = parseAgentOutput(turn.content);
         const invalid: Array<{ call: AgentToolCall; error: string }> = [
@@ -147,22 +176,83 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
             // 确定性兜底：模型一次工具都没调用时，按本地意图强制执行一次生成/改图，再让模型总结。
             // 优先采用模型在当前轮次构思的 promptBlocks，其次采用意图提取结果或历史提示词卡片。
             if (!intentHandled && !modelToolCallMade && intentTool) {
-                const historyPrompt = lastAssistantPromptBlock(options.messages);
-                const candidatePrompt = parsed.promptBlocks[0] || intent.prompt.trim() || historyPrompt;
-                const prompt = candidatePrompt.trim();
-                const hasReferenceForEdit = intentTool !== "edit_image" || (options.references ?? []).some((reference) => reference.storageKey);
-                if (prompt && hasReferenceForEdit) {
+                const hasCanvasTools = options.tools.some((t) => t.name === "canvas_batch_generate_nodes");
+                const isCanvasTarget = hasCanvasTools && (intent.isCanvas || options.buildContext().pageContext === "canvas");
+
+                if (isCanvasTarget) {
                     intentHandled = true;
-                    const result = await runIntentTool(prompt);
-                    if (result.ok === false && result.code === "canceled") return { messages: newMessages, aborted: true, roundLimitReached: false };
-                    continue;
+                    if (intent.decompose || (intent.batchCount && intent.batchCount > 1) || parsed.promptBlocks.length > 1) {
+                        const count = intent.batchCount || (parsed.promptBlocks.length > 1 ? parsed.promptBlocks.length : 4);
+                        const layout = intent.layout || "horizontal";
+                        let tasks: Array<{ prompt: string; title: string; size: string; background?: "transparent" }>;
+                        if (parsed.promptBlocks.length >= 2) {
+                            tasks = parsed.promptBlocks.slice(0, count).map((p, idx) => ({
+                                prompt: p,
+                                title: `方案 ${idx + 1}`,
+                                size: inferImageSizeFromPrompt(p, "1024x1024"),
+                                ...(intent.background ? { background: intent.background } : {}),
+                            }));
+                        } else {
+                            const subItems = extractNumberedPrompts(parsed.displayText, count, intent.prompt);
+                            tasks = subItems.map((item) => ({
+                                prompt: item.prompt,
+                                title: item.title,
+                                size: inferImageSizeFromPrompt(item.prompt, "1024x1024"),
+                                ...(intent.background ? { background: intent.background } : {}),
+                            }));
+                        }
+                        const call: AgentToolCall = {
+                            tool: "canvas_batch_generate_nodes",
+                            arguments: { tasks, layout, run: true },
+                        };
+                        options.onEvent?.({ type: "tool-start", call });
+                        const result = await options.executeTool(call, { signal: options.signal, references: options.references });
+                        options.onEvent?.({ type: "tool-end", call, result });
+                        newMessages.push({ id: nanoid(), role: "tool", call, result, text: serializeToolResult(call, result), createdAt: Date.now() });
+                        if (result.ok === false && result.code === "canceled") return { messages: newMessages, aborted: true, roundLimitReached: false };
+                        continue;
+                    } else {
+                        const historyPrompt = lastAssistantPromptBlock(options.messages);
+                        const candidatePrompt = parsed.promptBlocks[0] || intent.prompt.trim() || historyPrompt;
+                        const prompt = candidatePrompt.trim();
+                        if (prompt) {
+                            const size = inferImageSizeFromPrompt(prompt, options.buildContext().defaultSize);
+                            const call: AgentToolCall = {
+                                tool: "canvas_create_image_node",
+                                arguments: {
+                                    prompt,
+                                    size,
+                                    title: intent.usageScene ? `${intent.usageScene}` : "AI 生图节点",
+                                    ...(intent.background ? { background: intent.background } : {}),
+                                    run: true,
+                                },
+                            };
+                            options.onEvent?.({ type: "tool-start", call });
+                            const result = await options.executeTool(call, { signal: options.signal, references: options.references });
+                            options.onEvent?.({ type: "tool-end", call, result });
+                            newMessages.push({ id: nanoid(), role: "tool", call, result, text: serializeToolResult(call, result), createdAt: Date.now() });
+                            if (result.ok === false && result.code === "canceled") return { messages: newMessages, aborted: true, roundLimitReached: false };
+                            continue;
+                        }
+                    }
+                } else {
+                    const historyPrompt = lastAssistantPromptBlock(options.messages);
+                    const candidatePrompt = parsed.promptBlocks[0] || intent.prompt.trim() || historyPrompt;
+                    const prompt = candidatePrompt.trim();
+                    const hasReferenceForEdit = intentTool !== "edit_image" || (options.references ?? []).some((reference) => reference.storageKey);
+                    if (prompt && hasReferenceForEdit) {
+                        intentHandled = true;
+                        const result = await runIntentTool(prompt);
+                        if (result.ok === false && result.code === "canceled") return { messages: newMessages, aborted: true, roundLimitReached: false };
+                        continue;
+                    }
                 }
             }
             return { messages: newMessages, aborted: false, roundLimitReached: false };
         }
 
         for (const call of calls.slice(0, 3)) {
-            if (options.signal.aborted) return { messages: newMessages, aborted: true, roundLimitReached: false };
+            if (options.signal?.aborted) return { messages: newMessages, aborted: true, roundLimitReached: false };
             options.onEvent?.({ type: "tool-start", call });
             const result = await options.executeTool(call, { signal: options.signal, references: options.references });
             options.onEvent?.({ type: "tool-end", call, result });

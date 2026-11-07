@@ -53,6 +53,19 @@ export function sanitizeAssistantText(text: string) {
         .trim();
 }
 
+/**
+ * 从 ChatGPT 原生输出中提取 <AsyncImage query="..." aspectRatio="..." /> 标签。
+ */
+export function extractAsyncImages(raw: string): Array<{ prompt: string; size: string; title: string }> {
+    const matches = [...raw.matchAll(/<AsyncImage\s+[^>]*query=["']([^"']+)["'](?:[^>]*aspectRatio=["']([^"']+)["'])?[^>]*\/?>/gi)];
+    return matches.map((m, idx) => {
+        const prompt = m[1].trim();
+        const ratio = m[2]?.trim();
+        const size = ratio === "16:9" ? "1536x864" : ratio === "9:16" ? "864x1536" : ratio === "3:4" ? "768x1024" : ratio === "21:9" ? "2016x864" : "1024x1024";
+        return { prompt, size, title: `方案 ${idx + 1}` };
+    });
+}
+
 export function parseAgentOutput(raw: string): ParsedAgentOutput {
     const toolCalls: AgentToolCall[] = [];
     const promptBlocks: string[] = [];
@@ -71,6 +84,17 @@ export function parseAgentOutput(raw: string): ParsedAgentOutput {
         })
         .replace(/\n{3,}/g, "\n\n")
         .trim();
+
+    // 如果模型没有输出 ```tool 代码块，但输出了 ChatGPT 原生 <AsyncImage query="..." /> 标签，将其转化为提示词块
+    if (!toolCalls.length) {
+        const asyncImages = extractAsyncImages(raw);
+        for (const item of asyncImages) {
+            if (item.prompt && !promptBlocks.includes(item.prompt)) {
+                promptBlocks.push(item.prompt);
+            }
+        }
+    }
+
     return { displayText: sanitizeAssistantText(displayText), toolCalls, promptBlocks, invalidCalls };
 }
 
