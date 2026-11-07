@@ -8,6 +8,8 @@
  * 4. 为模型与运行时提供结构化的意图元数据与指令路由。
  */
 
+import type { AgentToolCall } from "./types";
+
 export type AgentIntentKind = "chat" | "generate_image" | "edit_image" | "apply_prompt";
 
 export type AgentIntent = {

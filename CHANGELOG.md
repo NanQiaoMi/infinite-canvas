@@ -2,6 +2,8 @@
 
 ## Unreleased
 
++ [修复] 修复 AI 对话页面 useMemo 未定义导致的运行时白屏异常：为 `web/src/pages/chat/components/image-result-card.tsx` 与 `web/src/pages/chat/index.tsx` 补齐 `useMemo` 与 `AgentIntent` 导入，消除 React 运行时 `ReferenceError: useMemo is not defined` 报错；清理过期旧单一清理调用 `setCompletedToolResult`，保持渐进式渲染数组 `completedToolResults` 状态一致性。
+
 + [修复] 彻底杜绝批量生图提示词畸变、误加表情包场景与历史设计稿断裂：窄化业务用途推断规则，仅当用户显式提及「表情包」时才匹配表情包场景，彻底消除普通动物或日常生图被误强加「微信表情包」设定的问题；升级意图剥离与数量解析规则，将「共X张」「再生成一次」等纯数量与动作短语彻底过滤，杜绝「一次，共5张」残留并污染下游生图提示词；在多方案与规格清单提取器中引入元信息黑名单过滤，坚决剔除「主角/风格/比例/五种状态」等说明标签，并从状态枚举中精准拼装出独立完整的角色状态提示词；在用户追加「生成三张设计稿」时优先直接继承上一轮助手已构思好的 3 个高质量英文 promptBlocks，杜绝退化为泛化占位提示词；升级历史画布会话多维特征启发式识别，彻底杜绝无 scope 的存量历史会话串入 /chat 侧边栏；在 /chat 批量生图时采用渐进式卡片数组（completedToolResults），前序已生成图片持续保持显示，杜绝等待下一张图时的空白跳动。
 
 + [修复] 彻底实现画布助手与普通对话物理环境隔离、消除多轮自循环与上游额度推诿复读：为会话增加 scope（chat / canvas）与 canvasProjectId 维度，画布对话在画布工程内闭环流转，普通 /chat 侧边栏彻底过滤画布会话，杜绝两套环境交叉污染与活跃会话串流；修复会话创建与挂载时控制器自中止（AbortController）的竞态缺陷，确保画布助手批量排布与生图指令稳定推进；强化选项追问与指令意图识别，支持「要双爪合十求抱抱」「来个X」「换成X」等选择类指令精准继承上一轮提示词并组合微调要求；扩大 REFUSAL_PATTERN 覆盖上游额度限制借口（resets in 35 minutes / 这次暂时无法调用），在发生推诿时自动调度底层工具执行确定性闭环兜底并剥离推诿文本；重构 isBoilerplateSummary 与 stripEchoedPrefix，消除开头带 Emoji（如 🐈）的生图总结卡片与整块文本循环复读，保障对话自然流畅。
