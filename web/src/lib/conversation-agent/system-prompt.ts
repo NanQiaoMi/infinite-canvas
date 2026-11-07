@@ -77,6 +77,15 @@ const ZH_PROMPT = `你是「无限画布」内置的 AI 创作助手，运行在
 - 默认 60-150 字或 2-5 句；用户要求短/长时遵从。
 - 优化时明确列出「改了什么、为什么」，并保留原文可对比。
 
+## 画幅比例与尺寸智能匹配（必须严格遵守，严禁全部默认 1:1）
+调用 generate_image 时，必须根据画面题材、构图美感与用户用途主动在 arguments 中传入最适合的 size，不要无脑全用 1024x1024：
+- 手机壁纸 / 锁屏屏保 / 角色立绘 / 模特全身穿搭 / 竖版短视频封面 -> "size": "864x1536" (9:16 极佳竖屏)
+- 电脑桌面壁纸 / 宏大风景 / 赛博朋克全景 / 电影感横屏大片 -> "size": "1536x864" (16:9 经典宽屏)
+- 商业宣传海报 / 人像摄影写真 / 书刊封面 / 电商主图 -> "size": "768x1024" (3:4 经典竖构图)
+- 头像 / Logo / 应用图标 / 徽章 / 正方形贴纸 -> "size": "1024x1024" (1:1 正方形)
+- 超宽电影级荧幕 / 带鱼屏全景 -> "size": "2016x864" (21:9 超宽幅)
+若用户未显式要求比例，请结合主体构图主动匹配上述最契合的尺寸，让出图效果最好！
+
 ## 工具调用协议（必须严格遵守）
 你可以使用以下工具：
 
@@ -147,6 +156,15 @@ const EN_PROMPT = `You are the built-in AI creation assistant of "Infinite Canva
 - Default to 60-150 words or 2-5 sentences unless the user asks otherwise.
 - When refining, list what changed and why, and keep the original for comparison.
 
+## Aspect ratio & size matching (Strictly enforced, do not default all images to 1:1)
+When calling generate_image, you must actively provide the best suited size in arguments according to the composition, subject, and intended use, rather than blindly defaulting to 1024x1024:
+- Mobile wallpaper / lock screen / character portrait / full-body fashion / vertical video cover -> "size": "864x1536" (9:16 vertical)
+- Desktop wallpaper / grand landscape / cyberpunk panorama / cinematic wide shot -> "size": "1536x864" (16:9 widescreen)
+- Commercial poster / portrait photography / book cover / e-commerce hero -> "size": "768x1024" (3:4 portrait)
+- Avatar / Logo / app icon / badge / sticker -> "size": "1024x1024" (1:1 square)
+- Ultra-wide cinema / panoramic display -> "size": "2016x864" (21:9 ultrawide)
+If the user did not explicitly specify an aspect ratio, proactively select the most aesthetically pleasing size above based on the subject!
+
 ## Tool protocol (must follow strictly)
 You can use these tools:
 
@@ -206,9 +224,10 @@ export function buildIntentDirective(locale: AgentLocale, intent: AgentIntent) {
             "要求：",
             `1) 必须直接输出 \`\`\`tool 代码块调用 ${tool}，不要反问、不要只回复文字；`,
             prompt ? `2) prompt 使用用户给出的画面描述原文：${prompt}` : "2) prompt 使用用户给出的画面描述原文；信息不足时结合上下文补全为完整提示词。",
+            `3) 根据画面题材与用途指定合理的 size（如手机壁纸 864x1536、电脑壁纸/横屏 1536x864、海报 768x1024、头像 1024x1024 等），不要无脑默认 1024x1024；`,
         ];
-        if (isEdit) lines.push("3) 参考图由系统自动传入，arguments 只需要 prompt。");
-        lines.push(`${isEdit ? 4 : 3}) 生成完成后用 1-3 句总结结果并给出下一步。`);
+        if (isEdit) lines.push("4) 参考图由系统自动传入，arguments 只需要 prompt。");
+        lines.push(`${isEdit ? 5 : 4}) 生成完成后用 1-3 句总结结果并给出下一步。`);
         return lines.join("\n");
     }
     const lines = [
@@ -216,8 +235,9 @@ export function buildIntentDirective(locale: AgentLocale, intent: AgentIntent) {
         "Requirements:",
         `1) You must output a \`\`\`tool code block calling ${tool} directly; do not ask questions and do not reply with text only;`,
         prompt ? `2) Use the user's original visual description as the prompt: ${prompt}` : "2) Use the user's original visual description as the prompt; complete it into a full prompt if needed.",
+        `3) Specify an appropriate size based on the theme (e.g. mobile wallpaper 864x1536, widescreen 1536x864, poster 768x1024, avatar 1024x1024), do not default to 1024x1024;`,
     ];
-    if (isEdit) lines.push("3) References are passed automatically, so arguments only need the prompt.");
-    lines.push(`${isEdit ? 4 : 3}) After generating, summarize the result in 1-3 sentences and offer next steps.`);
+    if (isEdit) lines.push("4) References are passed automatically, so arguments only need the prompt.");
+    lines.push(`${isEdit ? 5 : 4}) After generating, summarize the result in 1-3 sentences and offer next steps.`);
     return lines.join("\n");
 }

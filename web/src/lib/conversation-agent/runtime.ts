@@ -1,5 +1,6 @@
 import { nanoid } from "nanoid";
 
+import { inferImageSizeFromPrompt } from "./aspect-ratio";
 import { detectAgentIntent, type AgentIntent } from "./intent";
 import { parseAgentOutput, serializeToolResult, stripForStreaming } from "./protocol";
 import { buildIntentDirective, buildSystemPrompt } from "./system-prompt";
@@ -76,7 +77,9 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
     let modelToolCallMade = false;
 
     const runIntentTool = async (prompt: string) => {
-        const call: AgentToolCall = { tool: intentTool as "generate_image" | "edit_image", arguments: { prompt } };
+        const defaultSize = options.buildContext().defaultSize;
+        const size = inferImageSizeFromPrompt(prompt, defaultSize);
+        const call: AgentToolCall = { tool: intentTool as "generate_image" | "edit_image", arguments: { prompt, size } };
         options.onEvent?.({ type: "tool-start", call });
         const result = await options.executeTool(call, { signal: options.signal, references: options.references });
         options.onEvent?.({ type: "tool-end", call, result });
