@@ -61,6 +61,10 @@ const VISUAL_CATEGORY_PATTERNS: RegExp[] = [
     /色彩|色调|配色|color|palette|tone/i,
     // 人物主体
     /少女|女孩|女性|男生|男孩|人物|肖像|角色|神仙|神话|西游记|古典|孙悟空|猪八戒|唐僧|沙僧|沙和尚|哪吒|二郎神|白骨精|牛魔王|法术|仙侠|武侠|机甲|精灵|妖怪|woman|girl|man|boy|portrait|character/i,
+    // 动物与宠物
+    /猫|狗|小猫|大猫|胖猫|橘猫|柯基|柴犬|宠物|萌宠|动物|小动物|鸟|龙|小熊|兔子|cat|dog|kitten|puppy|animal|pet/i,
+    // 静物与道具
+    /物体|静物|食物|水果|苹果|饮品|花卉|植物|机甲|武器|道具|药水|瓶子|图标|徽标|汽车|飞机|飞船|object|food|flower|weapon|potion/i,
     // 服装
     /水手服|校服|JK|连衣裙|百褶裙|服装|穿搭|毛衣|outfit|uniform|dress/i,
     // 场景/背景
@@ -104,7 +108,7 @@ const USAGE_SCENE_RULES: Array<{ scene: string; pattern: RegExp }> = [
     { scene: "电商产品/广告主图", pattern: /电商|淘宝|京东|亚马逊|商品图|产品主图|产品白底|瓶身特写|商业广告/i },
     { scene: "海报设计/视觉封面", pattern: /海报|宣传海报|活动海报|电影海报|封面|杂志封面|书籍封面|banner|横幅/i },
     { scene: "游戏原画/角色立绘", pattern: /游戏原画|原画|角色立绘|立绘|机甲|二次元|三视图|概念设定|游戏ui/i },
-    { scene: "微信表情包", pattern: /表情包|动态表情包|微信表情|搞笑表情|萌宠表情/i },
+    { scene: "微信表情包", pattern: /(?:微信)?表情包|动态表情包|微信表情/i },
     { scene: "Logo/图标设计", pattern: /logo|标志|徽标|图标|icon|ui图标|矢量图标/i },
     { scene: "手机壁纸/电脑桌面", pattern: /手机壁纸|壁纸|锁屏|电脑桌面|横屏壁纸|4k壁纸/i },
     { scene: "社交头像", pattern: /头像|微信头像|情侣头像|卡通头像|动漫头像/i },
@@ -124,7 +128,7 @@ const LEADING_FILLER_PATTERN =
 
 /** 生成类指令词 + 量词/对象词，提取正文时去掉。 */
 const LEADING_GENERATE_PATTERN =
-    /^(?:(?:在画布上?|在画板上?|在无限画布上?)\s*)?(?:批量)?(?:生成|创建|绘制|画|出图|出|做|来|制作|换|设计|搞|整|安排|弄)\s*(?:一套\s*(?:\d+|[一二两三四五六七八九])\s*[个张幅]|一套|一组|一?\s*[张幅个组份版套]|几\s*[张幅个套]|\d+\s*[张幅个套]|[一二两三四五六七八九几]\s*[张幅个套])?\s*(?:(?:透明底|透明背景|透明图|透明png|png透明|png透明图片|png透明图)?\s*(?:图片|图像|照片|插画|海报|头像|壁纸|封面|图|画|作品|动图|动态图|动态表情包|表情包|gif|素材|图标))?\s*[：:，,。.!！、\s]*/i;
+    /^(?:(?:在画布上?|在画板上?|在无限画布上?)\s*)?(?:批量)?(?:生成|创建|绘制|画|出图|出|做|来|制作|换|设计|搞|整|安排|弄)\s*(?:一套\s*(?:\d+|[一二两三四五六七八九])\s*[个张幅次]|一套|一组|一?\s*[张幅个组份版套次]|几\s*[张幅个套次]|\d+\s*[张幅个套次]|[一二两三四五六七八九几]\s*[张幅个套次])?\s*(?:(?:透明底|透明背景|透明图|透明png|png透明|png透明图片|png透明图)?\s*(?:图片|图像|照片|插画|海报|头像|壁纸|封面|图|画|作品|动图|动态图|动态表情包|表情包|gif|素材|图标))?\s*[：:，,。.!！、\s]*/i;
 
 /** 指代型文本：这类内容不能当作提示词，交给运行时用历史 promptBlocks 兜底。 */
 export const REFERENCE_PROMPT_PATTERN = /(提示词|这张图|那张图|这个|那个|上面|上述|刚才|之前|参考图)/i;
@@ -154,10 +158,10 @@ function extractColonBody(text: string) {
 
 /** 提取期望批量生成的张数（如「4张」「一套3个」） */
 function extractBatchCount(text: string): number | undefined {
-    const numMatch = text.match(/(\d+)\s*[张幅个套组]/);
+    const numMatch = text.match(/(?:共|一共|总共)?\s*(\d+)\s*[张幅个套组次]/);
     if (numMatch) return Math.min(8, Math.max(1, parseInt(numMatch[1], 10)));
     const cnMap: Record<string, number> = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
-    const cnMatch = text.match(/([一二两三四五六七八九])\s*[张幅个套组]/);
+    const cnMatch = text.match(/(?:共|一共|总共)?\s*([一二两三四五六七八九])\s*[张幅个套组次]/);
     if (cnMatch && cnMap[cnMatch[1]]) return cnMap[cnMatch[1]];
     return undefined;
 }
@@ -183,6 +187,10 @@ export function stripInstructionPrefix(text: string) {
     let trimmed = text.trim().replace(LEADING_FILLER_PATTERN, "").trim();
     trimmed = trimmed.replace(LEADING_GENERATE_PATTERN, "").replace(LEADING_EN_PATTERN, "").trim();
     trimmed = trimmed.replace(/^(?:透明底|透明背景|透明图|透明png|png透明|png透明图片|png透明图)+[\s，,。.!！、]*/i, "").trim();
+    trimmed = trimmed.replace(/^(?:再|重新)?(?:生成|来|做|出|搞)?\s*一?次[，,。.!！、\s]*/i, "").trim();
+    trimmed = trimmed.replace(/^(?:共|一共|总共)?\s*(?:\d+|[一二两三四五六七八九几])\s*[张幅个套组次][，,。.!！、\s]*/i, "").trim();
+    trimmed = trimmed.replace(/[，,。.!！、\s]*(?:共|一共|总共)?\s*(?:\d+|[一二两三四五六七八九几])\s*[张幅个套组次]$/i, "").trim();
+    trimmed = trimmed.replace(/[，,。.!！、\s]*(?:再|重新)?(?:生成|来|做|出|搞)?\s*一?次$/i, "").trim();
     const stripped = trimmed.replace(/^[，,。.!！、：:\s]+/, "").trim();
     if ((stripped === "素材" || !stripped) && /海报/i.test(text)) {
         return "海报设计素材（主体核心元素、装饰边框与纹样）";
@@ -195,16 +203,19 @@ export function stripInstructionPrefix(text: string) {
 
 /** 提取续作/增补中的微调要求（如从「换个姿势再来一个」中提取「换个姿势」，从「要双爪合十求抱抱」中提取「双爪合十求抱抱」） */
 export function extractFollowUpModification(input: string): string {
-    return input
-        .replace(/^(?:我?想要?|来个|整个|搞个|做个|换成|选|我选)\s*/i, "")
-        .replace(/(?:再|另外再?|重新|接着|继续)?(?:生成|画|来|做|出|整|搞)?\s*(?:一?[个张幅组套版]|几[个张幅]|同款)?$/i, "")
-        .replace(/^[，,。.!！、：:\s]+|[，,。.!！、：:\s]+$/g, "")
-        .trim();
+    let text = input.trim();
+    text = text.replace(/^(?:我?想要?|来个|整个|搞个|做个|换成|选|我选)\s*/i, "");
+    text = text.replace(/^(?:再|另外再?|重新|接着|继续)?(?:生成|画|来|做|出|整|搞)?\s*(?:一?[个张幅组套版次]|几[个张幅次]|同款)?[，,。.!！、\s]*/i, "");
+    text = text.replace(/(?:[，,。.!！、\s]*(?:共|一共|总共)?\s*(?:\d+|[一二两三四五六七八九几])\s*[张幅个套组次])+/gi, "");
+    text = text.replace(/(?:[，,。.!！、\s]*(?:再|重新|另外再?|接着|继续)?(?:生成|画|来|做|出|整|搞)?\s*(?:一?[个张幅组套版次]|几[个张幅次]|同款)?)+$/gi, "");
+    text = text.replace(/^[，,。.!！、：:\s]+|[，,。.!！、：:\s]+$/g, "");
+    if (/^(?:再|重新|继续|再来|再出|再做|再生成)?(?:一?次|一?张|一?版)?$/i.test(text)) return "";
+    return text;
 }
 
 /** 延续上一轮生成的追问/增补指令：如「再生成一个」「再来一张」「换个姿势再来一个」「不改变她原来的脸，再来一张」「要双爪合十求抱抱」 */
 export const FOLLOW_UP_PATTERN =
-    /^(?:我?想要?|来个|整个|搞个|做个|换成|选|我选)\s*([^。！？!?\n]{2,30})|(?:再|另外再?|重新|接着|继续|换[个一]|换种|换套|换身|按[照这个]?风格再?|延续[这个]?风格再?)(?:生成|画|来|做|出|整|搞)?\s*(?:一?[个张幅组套版]|几[个张幅]|同款)?|不改变.*再来|换个.*再[来画生成]|延续.*再[来画生成]|按.*风格.*再/i;
+    /^(?:我?想要?|来个|整个|搞个|做个|换成|选|我选)\s*([^。！？!?\n]{2,30})|(?:再|另外再?|重新|接着|继续|换[个一次]|换种|换套|换身|按[照这个]?风格再?|延续[这个]?风格再?)(?:生成|画|来|做|出|整|搞)?\s*(?:一?[个张幅组套版次]|几[个张幅次]|同款)?|不改变.*再来|换个.*再[来画生成]|延续.*再[来画生成]|按.*风格.*再|再生成一次|再来一次/i;
 
 /** 提取上一轮助手回复中推荐的选项（如「摸摸」或者「双爪合十求抱抱」） */
 export function extractAssistantSuggestions(history?: Array<{ role: string; text?: string }>): string[] {
@@ -227,7 +238,9 @@ export function extractAssistantSuggestions(history?: Array<{ role: string; text
 /** 追溯历史会话中最近一次的生成提示词，用于「再生成一个」「换个姿势再来一张」等延续生成意图 */
 export function findLastGenerationPrompt(history?: Array<{ role: string; text?: string; call?: AgentToolCall; promptBlocks?: string[] }>): string {
     if (!history || !history.length) return "";
-    for (let index = history.length - 1; index >= 0; index -= 1) {
+    // 若最后一条为当前 user 消息，排除之（只往前追溯真实历史）
+    const endIndex = history[history.length - 1]?.role === "user" ? history.length - 2 : history.length - 1;
+    for (let index = endIndex; index >= 0; index -= 1) {
         const item = history[index];
         if (item.call && typeof item.call === "object") {
             const call = item.call;
@@ -251,7 +264,7 @@ export function findLastGenerationPrompt(history?: Array<{ role: string; text?: 
                 continue;
             }
             const stripped = stripInstructionPrefix(item.text);
-            if (stripped.length >= 8 && (countVisualCategories(stripped) >= 1 || stripped.length >= 16)) {
+            if (stripped.length >= 3 && (countVisualCategories(stripped) >= 1 || stripped.length >= 8)) {
                 return stripped;
             }
         }
@@ -297,13 +310,16 @@ export function detectAgentIntent(
     const historyDecomposeContext = recentMessages.some(
         (m) => m.role === "user" && DECOMPOSE_INTENT_PATTERN.test(m.text || ""),
     );
+    const historyStickerContext = recentMessages.some(
+        (m) => /表情包|微信表情/i.test(m.text || ""),
+    );
 
     const isGif = GIF_INTENT_PATTERN.test(input) || historyGifContext;
     const isTransparent = TRANSPARENT_INTENT_PATTERN.test(input) || historyTransparentContext;
     const isDecompose = DECOMPOSE_INTENT_PATTERN.test(input) || historyDecomposeContext;
     const isCanvas = CANVAS_ACTION_PATTERN.test(input);
     const layout = /并排|横排|横向/i.test(input) ? ("horizontal" as const) : /竖排|纵排|纵向/i.test(input) ? ("vertical" as const) : isCanvas ? ("grid" as const) : undefined;
-    const usageScene = detectUsageScene(input) || (historyGifContext ? "微信表情包" : undefined);
+    const usageScene = detectUsageScene(input) || (!GENERATE_ACTION_PATTERN.test(input) && historyStickerContext ? "微信表情包" : undefined);
     const batchCount = extractBatchCount(input);
     const colonBody = extractColonBody(input);
 
@@ -316,7 +332,7 @@ export function detectAgentIntent(
     const previousPrompt = findLastGenerationPrompt(options?.history);
     const assistantSuggestions = extractAssistantSuggestions(options?.history);
     const matchesSuggestion = assistantSuggestions.some((s) => input.includes(s) || s.includes(input));
-    const isFollowUp = (FOLLOW_UP_PATTERN.test(input) || /^(再来|再出|换一版|换个风格|换个姿势)$/.test(input) || matchesSuggestion) && Boolean(previousPrompt);
+    const isFollowUp = (FOLLOW_UP_PATTERN.test(input) || /^(再来|再出|换一版|换个风格|换个姿势|再生成一次|再来一次)$/.test(input) || matchesSuggestion) && Boolean(previousPrompt);
     if (isFollowUp && previousPrompt) {
         const modification = extractFollowUpModification(input);
         const combined = modification ? `${previousPrompt}，${modification}` : previousPrompt;
@@ -327,9 +343,11 @@ export function detectAgentIntent(
             direct: false,
             ...(isGif ? { format: "gif" as const } : {}),
             ...(isTransparent ? { background: "transparent" as const } : {}),
+            ...(isDecompose ? { decompose: true } : {}),
             ...(isCanvas ? { isCanvas: true } : {}),
             ...(layout ? { layout } : {}),
             ...(usageScene ? { usageScene } : {}),
+            ...(batchCount ? { batchCount } : {}),
         };
     }
 
@@ -337,7 +355,11 @@ export function detectAgentIntent(
     if (GENERATE_ACTION_PATTERN.test(input)) {
         const stripped = stripInstructionPrefix(input);
         let prompt = colonBody ?? stripped;
-        if (!prompt && countVisualCategories(input) >= 2 && input.length >= 24) prompt = input;
+        if (!prompt && previousPrompt) {
+            prompt = previousPrompt;
+        } else if (!prompt && countVisualCategories(input) >= 2 && input.length >= 24) {
+            prompt = input;
+        }
         prompt = sanitizeExtractedPrompt(prompt, input);
         // 如果是拆解任务、画布排布任务、或者有明确用途但描述较短，交给模型进行深度分析与拆解规划；若是详细提示词则直接执行
         const direct = Boolean(colonBody && prompt) || (!isDecompose && !isCanvas && (prompt.length >= 24 || countVisualCategories(prompt) >= 2));
@@ -356,15 +378,16 @@ export function detectAgentIntent(
         };
     }
 
-    // ⑧ 延续上下文的偏好答复（例如针对动图/表情包的简短神态回复「邪魅坏笑：一看就没憋好事」）
-    if (historyGifContext && !SMALL_TALK_PATTERN.test(input) && input.length >= 2) {
+    // ⑧ 延续动图上下文的神态偏好回复
+    if (historyGifContext && !SMALL_TALK_PATTERN.test(input) && input.length >= 2 && /表情|神态|动作|笑|哭|生气|贴贴|抱抱/.test(input)) {
         return {
             kind: "generate_image",
-            prompt: `一只超级搞怪的魔性表情包，${input}，循环动态动作`,
+            prompt: previousPrompt ? `${previousPrompt}，${input}，循环动态动作` : `生动搞怪表情，${input}，循环动态动作`,
             explicit: true,
             direct: false,
             format: "gif",
-            usageScene: "微信表情包",
+            ...(isTransparent ? { background: "transparent" as const } : {}),
+            ...(usageScene ? { usageScene } : {}),
         };
     }
 

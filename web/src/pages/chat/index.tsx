@@ -77,7 +77,7 @@ export default function ChatPage() {
         });
     }, []);
     const [exitingTool, setExitingTool] = useState<AgentToolCall | null>(null);
-    const [completedToolResult, setCompletedToolResult] = useState<{ call: AgentToolCall; result: AgentToolResult } | null>(null);
+    const [completedToolResults, setCompletedToolResults] = useState<Array<{ id: string; call: AgentToolCall; result: AgentToolResult }>>([]);
     const exitTimerRef = useRef<number | null>(null);
     const stepsTimerRef = useRef<number | null>(null);
     const stepSeqRef = useRef(0);
@@ -132,7 +132,7 @@ export default function ChatPage() {
             setRunning(false);
             setStreamingText("");
             setRunningTool(null);
-            setCompletedToolResult(null);
+            setCompletedToolResults([]);
             setExitingTool(null);
             setStepsState([]);
             setRunningIntent(null);
@@ -289,7 +289,7 @@ export default function ChatPage() {
             setReferences([]);
             setInput("");
             setStreamingText("");
-            setCompletedToolResult(null);
+            setCompletedToolResults([]);
             setTurnStartedAt(Date.now());
             if (stepsTimerRef.current) window.clearTimeout(stepsTimerRef.current);
             const history = useConversationAgentStore.getState().sessions.find((session) => session.id === sessionId)?.messages ?? [];
@@ -370,7 +370,7 @@ export default function ChatPage() {
                             setSteps((current) => current.map((step) => (step.id === lastToolStepRef.current && step.status === "running" ? { ...step, status: "done" as const } : step)));
                             lastToolStepRef.current = null;
                             if (event.call.tool === "generate_image" || event.call.tool === "edit_image") {
-                                setCompletedToolResult({ call: event.call, result: event.result });
+                                setCompletedToolResults((prev) => [...prev, { id: nanoid(), call: event.call, result: event.result }]);
                             }
                         }
                     },
@@ -425,7 +425,7 @@ export default function ChatPage() {
                     setRunning(false);
                     setRunningTool(null);
                     setRunningIntent(null);
-                    setCompletedToolResult(null);
+                    setCompletedToolResults([]);
                     setExitingTool(null);
                     setStreamingText("");
                     controllerRef.current = null;
@@ -564,7 +564,12 @@ export default function ChatPage() {
                                       <ChatMessage key={item.id} message={item} onRetry={item.role === "error" ? () => retryMessage(index) : undefined} />
                                   ))}
                             {steps.length ? <StepTrail steps={steps} running={running} /> : null}
-                            {running && streamingText && !completedToolResult && !runningTool && !(runningIntent?.kind === "generate_image" || runningIntent?.kind === "edit_image") ? (
+                            {completedToolResults.map((item) => (
+                                <div key={item.id} className="agent-message-in w-full space-y-2">
+                                    <ToolResultBody result={item.result} />
+                                </div>
+                            ))}
+                            {running && streamingText && completedToolResults.length === 0 && !runningTool && !(runningIntent?.kind === "generate_image" || runningIntent?.kind === "edit_image") ? (
                                 <div className="agent-message-in w-full">
                                     <SmoothStreamText rawText={streamingText} running={running} />
                                 </div>
@@ -572,12 +577,7 @@ export default function ChatPage() {
                             {runningTool && (runningTool.tool === "generate_image" || runningTool.tool === "edit_image") ? (
                                 <GenerationWaiting call={runningTool} startedAt={turnStartedAt || Date.now()} />
                             ) : null}
-                            {!runningTool && completedToolResult && (completedToolResult.call.tool === "generate_image" || completedToolResult.call.tool === "edit_image") ? (
-                                <div className="agent-message-in w-full space-y-2">
-                                    <ToolResultBody result={completedToolResult.result} />
-                                </div>
-                            ) : null}
-                            {running && streamingText && completedToolResult ? (
+                            {running && streamingText && completedToolResults.length > 0 ? (
                                 <div className="agent-message-in w-full">
                                     <SmoothStreamText rawText={streamingText} running={running} />
                                 </div>
@@ -590,7 +590,7 @@ export default function ChatPage() {
                                     </div>
                                 </div>
                             ) : null}
-                            {running && !streamingText && !runningTool && !completedToolResult && !steps.length ? <ThinkingLine startedAt={turnStartedAt || Date.now()} /> : null}
+                            {running && !streamingText && !runningTool && completedToolResults.length === 0 && !steps.length ? <ThinkingLine startedAt={turnStartedAt || Date.now()} /> : null}
                         </div>
                     </div>
                     {/* 底部向上渐变遮罩，使接近输入框的文字柔和淡化，不再生硬切断 */}

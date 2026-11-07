@@ -78,19 +78,43 @@ function sanitizeMessages(value: unknown): AgentMessage[] {
     });
 }
 
+function isCanvasSessionHeuristic(item: Record<string, unknown>): boolean {
+    if (item.scope === "canvas") return true;
+    if (item.canvasProjectId) return true;
+    const title = String(item.title || "");
+    if (/在画布|画布|画板/i.test(title)) return true;
+    const messages = Array.isArray(item.messages) ? item.messages : [];
+    for (const msg of messages) {
+        if (!msg || typeof msg !== "object") continue;
+        const record = msg as Record<string, unknown>;
+        const call = record.call as Record<string, unknown> | undefined;
+        if (call && typeof call === "object" && typeof call.tool === "string" && call.tool.startsWith("canvas_")) {
+            return true;
+        }
+        if (record.role === "user") {
+            const text = String(record.text || "");
+            if (/^在画布上/i.test(text)) return true;
+        }
+    }
+    return false;
+}
+
 function sanitizeSessions(value: unknown): AgentSession[] {
     if (!Array.isArray(value)) return [];
     return value
         .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"))
-        .map((item) => ({
-            id: String(item.id || nanoid()),
-            title: String(item.title || ""),
-            scope: item.scope === "canvas" ? ("canvas" as const) : ("chat" as const),
-            ...(item.canvasProjectId ? { canvasProjectId: String(item.canvasProjectId) } : {}),
-            messages: sanitizeMessages(item.messages).map((message) => (message.role === "assistant" ? { ...message, promptBlocks: Array.isArray(message.promptBlocks) ? message.promptBlocks : [] } : message)),
-            createdAt: Number(item.createdAt) || Date.now(),
-            updatedAt: Number(item.updatedAt) || Date.now(),
-        }))
+        .map((item) => {
+            const isCanvas = isCanvasSessionHeuristic(item);
+            return {
+                id: String(item.id || nanoid()),
+                title: String(item.title || ""),
+                scope: isCanvas ? ("canvas" as const) : ("chat" as const),
+                ...(item.canvasProjectId ? { canvasProjectId: String(item.canvasProjectId) } : {}),
+                messages: sanitizeMessages(item.messages).map((message) => (message.role === "assistant" ? { ...message, promptBlocks: Array.isArray(message.promptBlocks) ? message.promptBlocks : [] } : message)),
+                createdAt: Number(item.createdAt) || Date.now(),
+                updatedAt: Number(item.updatedAt) || Date.now(),
+            };
+        })
         .slice(0, MAX_SESSIONS);
 }
 
