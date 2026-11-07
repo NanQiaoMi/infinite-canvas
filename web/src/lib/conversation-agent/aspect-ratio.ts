@@ -45,6 +45,24 @@ const SQUARE_AVATAR_PATTERNS = [
 /** 超宽屏 21:9 */
 const ULTRAWIDE_PATTERNS = [/超宽屏|带鱼屏|电影宽银幕|ultrawide|cinemascope/i];
 
+/** 横向广阔场景语义特征（天然适合 16:9 宽屏） */
+const HORIZONTAL_SCENIC_SEMANTICS = [
+    /群山|山脉|雪山|峰峦|山峦|大草原|平原|荒漠|沙漠|戈壁|海滩|海岸|沙滩|海洋|海浪|海面|湖泊|江河|天际线|地平线|全景|广角|远景|俯瞰|鸟瞰|航拍|星空|银河|极光|云海|夕阳余晖|日落余晖|日出|驾驶舱|街道全景|城市风光|夜景全貌|公路延伸|赛博朋克城市/i,
+    /landscape|panorama|panoramic|widescreen|mountains?|ocean|sea|horizon|coast|desert|galaxy|milky way|aurora|skyline|bird'?s[- ]eye|aerial view/i,
+];
+
+/** 纵向修长主体语义特征（天然适合 9:16 或 3:4 竖屏） */
+const VERTICAL_SUBJECT_SEMANTICS = [
+    /全身|立绘|站立|站姿|亭亭玉立|修长|高耸|摩天大楼|参天|瀑布|飞流|长裙|旗袍|和服|汉服|风衣|大衣|全身穿搭|模特走秀|跳跃身姿|直插云霄|高塔/i,
+    /full[- ]body|standing|statuesque|towering|skyscraper|waterfall|fashion model|runway/i,
+];
+
+/** 适合 1:1 中心聚焦的主体（特写、徽标、单体） */
+const SQUARE_FOCUS_SEMANTICS = [
+    /特写|面部特写|眼神特写|微距|大头照|表情包|单体静物|logo|icon|头像|徽章|徽标|贴纸|圆形印章/i,
+    /close[- ]?up|macro|profile|avatar|emoticon|meme|sticker/i,
+];
+
 /**
  * 从提示词文本中智能推断最佳生图尺寸：
  * 1. 优先提取显式标注的比例（如 16:9、9:16、3:4 等）；
@@ -102,7 +120,21 @@ export function inferImageSizeFromPrompt(prompt: string, fallbackSize?: string):
         return ASPECT_RATIO_PRESETS["16:9"];
     }
 
-    // 8. 默认回退
+    // 8. 主体深度构图语义分析（AI 视觉特征自适应推导）
+    // (a) 横向广阔场景 -> 16:9
+    if (HORIZONTAL_SCENIC_SEMANTICS.some((p) => p.test(text))) {
+        return ASPECT_RATIO_PRESETS["16:9"];
+    }
+    // (b) 纵向修长主体/立绘/全身 -> 9:16
+    if (VERTICAL_SUBJECT_SEMANTICS.some((p) => p.test(text))) {
+        return ASPECT_RATIO_PRESETS["9:16"];
+    }
+    // (c) 中心特写/单体/表情 -> 1:1
+    if (SQUARE_FOCUS_SEMANTICS.some((p) => p.test(text))) {
+        return ASPECT_RATIO_PRESETS["1:1"];
+    }
+
+    // 9. 默认回退
     if (fallbackSize && fallbackSize.trim() && fallbackSize.toLowerCase() !== "auto") {
         return fallbackSize.trim();
     }

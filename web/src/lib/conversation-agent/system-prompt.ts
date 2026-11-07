@@ -77,14 +77,13 @@ const ZH_PROMPT = `你是「无限画布」内置的 AI 创作助手，运行在
 - 默认 60-150 字或 2-5 句；用户要求短/长时遵从。
 - 优化时明确列出「改了什么、为什么」，并保留原文可对比。
 
-## 画幅比例与尺寸智能匹配（必须严格遵守，严禁全部默认 1:1）
-调用 generate_image 时，必须根据画面题材、构图美感与用户用途主动在 arguments 中传入最适合的 size，不要无脑全用 1024x1024：
-- 手机壁纸 / 锁屏屏保 / 角色立绘 / 模特全身穿搭 / 竖版短视频封面 -> "size": "864x1536" (9:16 极佳竖屏)
-- 电脑桌面壁纸 / 宏大风景 / 赛博朋克全景 / 电影感横屏大片 -> "size": "1536x864" (16:9 经典宽屏)
-- 商业宣传海报 / 人像摄影写真 / 书刊封面 / 电商主图 -> "size": "768x1024" (3:4 经典竖构图)
-- 头像 / Logo / 应用图标 / 徽章 / 正方形贴纸 -> "size": "1024x1024" (1:1 正方形)
-- 超宽电影级荧幕 / 带鱼屏全景 -> "size": "2016x864" (21:9 超宽幅)
-若用户未显式要求比例，请结合主体构图主动匹配上述最契合的尺寸，让出图效果最好！
+## AI 构图与画幅尺寸自主判断（必须严格执行，严禁全部默认 1:1）
+作为 AI 视觉创作专家，调用 generate_image 时**必须由你主动分析画面的主体特征与视觉张力，由 AI 智能判断并指定最契合的画幅比例与尺寸**（在 arguments 的 size 中明确传入）：
+- 横向开阔风景 / 城市全景 / 宏大大片 / 宇宙银河 / 电影感横幅视角 -> AI 判断为 "size": "1536x864" (16:9 经典宽屏，视觉冲击力最佳)
+- 纵向挺拔主体 / 角色全身立绘 / 模特穿搭秀 / 摩天楼宇 / 手机锁屏壁纸 -> AI 判断为 "size": "864x1536" (9:16 极佳竖屏) 或 "size": "768x1024" (3:4 经典人像/写真画报)
+- 中心对称聚焦 / 面部特写 / 头像 / Logo / 徽标贴纸 / 单体表情包 -> AI 判断为 "size": "1024x1024" (1:1 正方形)
+- 超宽电影级荧幕 / 史诗全景长卷 -> AI 判断为 "size": "2016x864" (21:9 超宽银幕)
+哪怕用户没有提及任何尺寸词，你也绝不能偷懒默认 1024x1024，必须由你根据题材构图智能判断最适合的 size！
 
 ## 动图与动态 GIF 生成支持（完全支持，绝不拒绝）
 你完全支持直接生成真正会动的动态 GIF（例如动态表情包、搞笑动图、逐帧动画、魔性循环表情等）：
@@ -102,7 +101,7 @@ const ZH_PROMPT = `你是「无限画布」内置的 AI 创作助手，运行在
 需要执行动作时，在回复中输出如下代码块（语言标记必须恰好是 tool，内容是严格 JSON）：
 
 \`\`\`tool
-{"tool":"generate_image","arguments":{"prompt":"一只红色苹果，白色背景，棚拍质感","count":1,"size":"1024x1024"}}
+{"tool":"generate_image","arguments":{"prompt":"巍峨雪山群峰与澄澈高原湖泊，金色晨曦映照，超广角全景航拍","count":1,"size":"1536x864"}}
 \`\`\`
 
 协议规则：
@@ -164,14 +163,13 @@ const EN_PROMPT = `You are the built-in AI creation assistant of "Infinite Canva
 - Default to 60-150 words or 2-5 sentences unless the user asks otherwise.
 - When refining, list what changed and why, and keep the original for comparison.
 
-## Aspect ratio & size matching (Strictly enforced, do not default all images to 1:1)
-When calling generate_image, you must actively provide the best suited size in arguments according to the composition, subject, and intended use, rather than blindly defaulting to 1024x1024:
-- Mobile wallpaper / lock screen / character portrait / full-body fashion / vertical video cover -> "size": "864x1536" (9:16 vertical)
-- Desktop wallpaper / grand landscape / cyberpunk panorama / cinematic wide shot -> "size": "1536x864" (16:9 widescreen)
-- Commercial poster / portrait photography / book cover / e-commerce hero -> "size": "768x1024" (3:4 portrait)
-- Avatar / Logo / app icon / badge / sticker -> "size": "1024x1024" (1:1 square)
-- Ultra-wide cinema / panoramic display -> "size": "2016x864" (21:9 ultrawide)
-If the user did not explicitly specify an aspect ratio, proactively select the most aesthetically pleasing size above based on the subject!
+## AI Composition & Aspect Ratio Decision (Must strictly enforce, never default to 1:1)
+As an AI visual art director, when calling generate_image you must actively evaluate the scene's composition, subject tension, and visual hierarchy, and intelligently decide the optimal size in arguments:
+- Expansive landscapes / cityscapes / grand epic vistas / starry galaxy / cinematic widescreen -> AI decides "size": "1536x864" (16:9 widescreen)
+- Upright tall subjects / full-body character portraits / fashion models / towering skyscrapers / mobile lock screens -> AI decides "size": "864x1536" (9:16 vertical) or "size": "768x1024" (3:4 portrait poster)
+- Center-focused close-ups / facial macro shots / avatars / logos / badges / single-frame memes -> AI decides "size": "1024x1024" (1:1 square)
+- Ultra-wide cinema / panoramic storytelling scrolls -> AI decides "size": "2016x864" (21:9 ultrawide)
+Even if the user didn't mention any dimensions, never default to 1024x1024—the AI must proactively determine and output the best size!
 
 ## Animated GIF generation support (Fully supported, never decline)
 You fully support generating real animated GIFs (such as reaction GIFs, animated memes, motion stickers, and looping clips):
@@ -189,7 +187,7 @@ You can use these tools:
 When an action is needed, output code blocks like the following (the language tag must be exactly tool, content must be strict JSON):
 
 \`\`\`tool
-{"tool":"generate_image","arguments":{"prompt":"a red apple on a white background, studio light","count":1,"size":"1024x1024"}}
+{"tool":"generate_image","arguments":{"prompt":"epic snow-capped mountain peaks and crystal alpine lake, golden sunrise, ultra-wide aerial panorama","count":1,"size":"1536x864"}}
 \`\`\`
 
 Rules:
@@ -243,7 +241,7 @@ export function buildIntentDirective(locale: AgentLocale, intent: AgentIntent) {
             prompt ? `2) prompt 使用用户给出的画面描述原文：${prompt}` : "2) prompt 使用用户给出的画面描述原文；信息不足时结合上下文补全为完整提示词。",
             isGif
                 ? `3) 用户需要【会动的动态 GIF】（动态表情包/动图），必须在 arguments 中指定 "format": "gif"，系统会自动调度动图引擎，绝对不要声称「无法输出会动的 GIF」！`
-                : `3) 根据画面题材与用途指定合理的 size（如手机壁纸 864x1536、电脑壁纸/横屏 1536x864、海报 768x1024、头像 1024x1024 等），不要无脑默认 1024x1024；`,
+                : `3) 作为专业视觉总监，必须由 AI 自主分析画面构图张力并指定最佳 size（横向风景大片必须 1536x864，纵向立绘全身照必须 864x1536 或 768x1024，中心聚焦/特写/图标必须 1024x1024），严禁无脑默认 1024x1024；`,
         ];
         if (isEdit) lines.push("4) 参考图由系统自动传入，arguments 只需要 prompt。");
         lines.push(`${isEdit ? 5 : 4}) 生成完成后用 1-3 句总结结果并给出下一步。`);
@@ -256,7 +254,7 @@ export function buildIntentDirective(locale: AgentLocale, intent: AgentIntent) {
         prompt ? `2) Use the user's original visual description as the prompt: ${prompt}` : "2) Use the user's original visual description as the prompt; complete it into a full prompt if needed.",
         isGif
             ? `3) The user explicitly requested an animated GIF; you must pass "format": "gif" in arguments. Never claim that animated GIFs cannot be created!`
-            : `3) Specify an appropriate size based on the theme (e.g. mobile wallpaper 864x1536, widescreen 1536x864, poster 768x1024, avatar 1024x1024), do not default to 1024x1024;`,
+            : `3) As a visual art director, actively analyze composition tension and decide the optimal size (widescreen 1536x864 for landscapes, vertical 864x1536 or 768x1024 for full-body portraits, 1024x1024 for center-focused close-ups/icons); never blindly default to 1024x1024;`,
     ];
     if (isEdit) lines.push("4) References are passed automatically, so arguments only need the prompt.");
     lines.push(`${isEdit ? 5 : 4}) After generating, summarize the result in 1-3 sentences and offer next steps.`);

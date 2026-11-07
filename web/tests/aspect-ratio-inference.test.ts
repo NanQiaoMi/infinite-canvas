@@ -39,6 +39,21 @@ describe("inferImageSizeFromPrompt - 智能画幅比例推断", () => {
         expect(inferImageSizeFromPrompt("深邃宇宙银河星云壁纸")).toBe("1536x864");
     });
 
+    it("基于主体视觉构图语义自适应推断画幅（AI 深度构图分析）", () => {
+        // 横向广阔场景（无壁纸或横屏字样，纯场景特征）
+        expect(inferImageSizeFromPrompt("一只雄鹰在苍茫群山与雪峰间翱翔，航拍俯瞰")).toBe("1536x864");
+        expect(inferImageSizeFromPrompt("落日余晖下的金色海滩，潮水缓缓漫过细沙，地平线延伸")).toBe("1536x864");
+        expect(inferImageSizeFromPrompt("深邃银河横跨夜空，戈壁公路无尽延伸")).toBe("1536x864");
+
+        // 纵向修长主体（无竖屏字样，纯人物站立/修长结构）
+        expect(inferImageSizeFromPrompt("红衣少女手持长剑亭亭玉立，修长身材，汉服长裙随风飘逸")).toBe("864x1536");
+        expect(inferImageSizeFromPrompt("摩天大楼直插云霄，仰视仰拍视角")).toBe("864x1536");
+
+        // 中心聚焦/特写/表情
+        expect(inferImageSizeFromPrompt("猫咪面部特写，水汪汪的大眼睛和胡须微距")).toBe("1024x1024");
+        expect(inferImageSizeFromPrompt("搞怪猫咪表情包，斜视坏笑")).toBe("1024x1024");
+    });
+
     it("无明显场景倾向时使用 fallback 或 1024x1024", () => {
         expect(inferImageSizeFromPrompt("一只红色苹果，白色背景")).toBe("1024x1024");
         expect(inferImageSizeFromPrompt("一只小狗", "1024x1024")).toBe("1024x1024");
