@@ -121,6 +121,25 @@ export function createRelayHandler(deps: RelayDeps) {
             throw new HttpError(502, "upstream_unreachable", `上游接口不可达：${message}`);
         }
 
+        // 当上游不支持 /v1/responses（返回 404）时，自动降级并转换为标准的 /v1/chat/completions
+        if (upstream.status === 404 && target.pathname.endsWith("/responses") && method === "POST" && bodyBytes) {
+            try {
+                const fallbackTarget = new URL(target.toString().replace(/\/responses$/, "/chat/completions"));
+                const parsedBody = JSON.parse(new TextDecoder().decode(bodyBytes)) as Record<string, unknown>;
+                const chatBody = translateResponsesToChatCompletions(parsedBody);
+                const chatBodyBytes = new TextEncoder().encode(JSON.stringify(chatBody));
+                const fallbackResponse = await fetchUpstream(req, fallbackTarget, channel, method, chatBodyBytes, deps.config);
+                if (fallbackResponse.status >= 200 && fallbackResponse.status < 300) {
+                    await upstream.body?.cancel().catch(() => undefined);
+                    upstream = await adaptChatCompletionsResponse(fallbackResponse, Boolean(parsedBody.stream));
+                } else {
+                    await fallbackResponse.body?.cancel().catch(() => undefined);
+                }
+            } catch (fallbackError) {
+                log.warn("responses fallback to chat/completions failed", { error: String(fallbackError) });
+            }
+        }
+
         const success = upstream.status >= 200 && upstream.status < 300;
         if (eventId !== null) {
             settleQuota(deps.db, eventId, success ? "committed" : policy.refundOnFailure ? "released" : "committed", upstream.status);
@@ -360,4 +379,221 @@ function quotaExceededResponse(deps: RelayDeps, policy: QuotaPolicy, client: Cli
         },
         headers,
     );
+}
+
+export function translateResponsesToChatCompletions(body: Record<string, unknown>): Record<string, unknown> {
+    const messages: Array<Record<string, unknown>> = [];
+    if (Array.isArray(body.input)) {
+        for (const item of body.input) {
+            if (!item || typeof item !== "object") continue;
+            const record = item as Record<string, unknown>;
+            if (record.type === "function_call") {
+                messages.push({
+                    role: "assistant",
+                    tool_calls: [
+                        {
+                            id: record.call_id || record.id || `call_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
+                            type: "function",
+                            function: {
+                                name: record.name || "",
+                                arguments: typeof record.arguments === "string" ? record.arguments : JSON.stringify(record.arguments || {}),
+                            },
+                        },
+                    ],
+                });
+            } else if (record.type === "function_call_output") {
+                messages.push({
+                    role: "tool",
+                    tool_call_id: record.call_id || record.id || "",
+                    content: typeof record.output === "string" ? record.output : JSON.stringify(record.output ?? ""),
+                });
+            } else if (record.role) {
+                let content = record.content;
+                if (Array.isArray(content)) {
+                    content = content.map((part) => {
+                        if (part && typeof part === "object") {
+                            const p = part as Record<string, unknown>;
+                            if (p.type === "input_text" && typeof p.text === "string") {
+                                return { type: "text", text: p.text };
+                            }
+                            if (p.type === "input_image" && typeof p.image_url === "string") {
+                                return { type: "image_url", image_url: { url: p.image_url } };
+                            }
+                        }
+                        return part;
+                    });
+                }
+                messages.push({
+                    role: record.role,
+                    content,
+                });
+            }
+        }
+    } else if (Array.isArray(body.messages)) {
+        messages.push(...(body.messages as Array<Record<string, unknown>>));
+    }
+
+    const result: Record<string, unknown> = {
+        model: body.model,
+        messages,
+        stream: body.stream ?? false,
+    };
+
+    if (body.temperature !== undefined) result.temperature = body.temperature;
+    if (body.top_p !== undefined) result.top_p = body.top_p;
+    if (body.max_tokens !== undefined) result.max_tokens = body.max_tokens;
+
+    if (Array.isArray(body.tools) && body.tools.length > 0) {
+        result.tools = body.tools.map((t) => {
+            if (t && typeof t === "object") {
+                const toolRecord = t as Record<string, unknown>;
+                if (toolRecord.function && typeof toolRecord.function === "object") return toolRecord;
+                return {
+                    type: "function",
+                    function: {
+                        name: toolRecord.name,
+                        description: toolRecord.description,
+                        parameters: toolRecord.parameters,
+                        ...(toolRecord.strict !== undefined ? { strict: toolRecord.strict } : {}),
+                    },
+                };
+            }
+            return t;
+        });
+        if (body.tool_choice !== undefined) {
+            result.tool_choice = body.tool_choice;
+        }
+    }
+
+    return result;
+}
+
+function adaptChatCompletionsStream(inputStream: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
+    const reader = inputStream.getReader();
+    const decoder = new TextDecoder();
+    const encoder = new TextEncoder();
+    let buffer = "";
+    let accumulatedText = "";
+    const toolCallsMap = new Map<number, { id: string; name: string; arguments: string }>();
+
+    function processLine(trimmed: string, controller: ReadableStreamDefaultController<Uint8Array>) {
+        if (!trimmed || !trimmed.startsWith("data:")) return;
+        const rawData = trimmed.slice(5).trim();
+        if (!rawData || rawData === "[DONE]") return;
+        try {
+            const chunk = JSON.parse(rawData);
+            const choice = chunk.choices?.[0];
+            const delta = choice?.delta;
+            if (typeof delta?.content === "string" && delta.content) {
+                accumulatedText += delta.content;
+                const deltaEvent = {
+                    type: "response.output_text.delta",
+                    delta: delta.content,
+                };
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify(deltaEvent)}\n\n`));
+            }
+            if (Array.isArray(delta?.tool_calls)) {
+                for (const tc of delta.tool_calls) {
+                    const idx = typeof tc.index === "number" ? tc.index : toolCallsMap.size;
+                    let existing = toolCallsMap.get(idx);
+                    if (!existing) {
+                        existing = { id: tc.id || "", name: tc.function?.name || "", arguments: "" };
+                        toolCallsMap.set(idx, existing);
+                    }
+                    if (tc.id) existing.id = tc.id;
+                    if (tc.function?.name) existing.name = tc.function.name;
+                    if (tc.function?.arguments) existing.arguments += tc.function.arguments;
+                }
+            }
+        } catch {
+            // ignore non-json line
+        }
+    }
+
+    return new ReadableStream<Uint8Array>({
+        async pull(controller) {
+            try {
+                for (;;) {
+                    const { done, value } = await reader.read();
+                    if (done) {
+                        if (buffer.trim()) {
+                            processLine(buffer.trim(), controller);
+                        }
+                        const toolCalls = Array.from(toolCallsMap.values()).filter((item) => item.name);
+                        const completedPayload = {
+                            type: "response.completed",
+                            response: {
+                                id: "resp_completed",
+                                output: [
+                                    ...(accumulatedText ? [{ type: "message", content: [{ type: "output_text", text: accumulatedText }] }] : []),
+                                    ...toolCalls.map((item) => ({
+                                        type: "function_call",
+                                        call_id: item.id || `call_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
+                                        name: item.name,
+                                        arguments: item.arguments || "{}",
+                                    })),
+                                ],
+                                output_text: accumulatedText,
+                            },
+                        };
+                        controller.enqueue(encoder.encode(`data: ${JSON.stringify(completedPayload)}\n\n`));
+                        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                        controller.close();
+                        return;
+                    }
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split(/\r?\n/);
+                    buffer = lines.pop() ?? "";
+                    for (const line of lines) {
+                        processLine(line.trim(), controller);
+                    }
+                }
+            } catch (err) {
+                controller.error(err);
+            }
+        },
+        cancel(reason) {
+            return reader.cancel(reason);
+        },
+    });
+}
+
+async function adaptChatCompletionsResponse(response: Response, stream: boolean): Promise<Response> {
+    const headers = new Headers(response.headers);
+    if (stream && response.body) {
+        headers.set("content-type", "text/event-stream; charset=utf-8");
+        return new Response(adaptChatCompletionsStream(response.body), {
+            status: response.status,
+            headers,
+        });
+    }
+    const text = await response.text();
+    try {
+        const chatData = JSON.parse(text) as Record<string, unknown>;
+        const choice = (Array.isArray(chatData.choices) ? chatData.choices[0] : undefined) as Record<string, unknown> | undefined;
+        const message = (choice?.message || {}) as Record<string, unknown>;
+        const content = typeof message.content === "string" ? message.content : "";
+        const rawToolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
+        const toolCalls = rawToolCalls.map((tc: any) => ({
+            type: "function_call",
+            call_id: tc.id || `call_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
+            name: tc.function?.name || "",
+            arguments: typeof tc.function?.arguments === "string" ? tc.function.arguments : JSON.stringify(tc.function?.arguments || {}),
+        }));
+        const payload = {
+            id: typeof chatData.id === "string" ? chatData.id : "resp_compat",
+            output: [
+                ...(content ? [{ type: "message", content: [{ type: "output_text", text: content }] }] : []),
+                ...toolCalls,
+            ],
+            output_text: content,
+        };
+        headers.set("content-type", "application/json; charset=utf-8");
+        return new Response(JSON.stringify(payload), {
+            status: response.status,
+            headers,
+        });
+    } catch {
+        return new Response(text, { status: response.status, headers: response.headers });
+    }
 }

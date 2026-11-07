@@ -25,6 +25,17 @@ beforeAll(() => {
             const url = new URL(req.url);
             upstreamCalls.push({ path: url.pathname, authorization: req.headers.get("authorization") });
             if (url.pathname.endsWith("/models")) return Response.json({ object: "list", data: [{ id: "img-1" }, { id: "txt-1" }] });
+            if (url.pathname.endsWith("/responses")) return new Response(JSON.stringify({ detail: "Not Found" }), { status: 404, headers: { "content-type": "application/json" } });
+            if (url.pathname.endsWith("/chat/completions")) {
+                const accept = req.headers.get("accept") || "";
+                if (accept.includes("text/event-stream")) {
+                    const chunk = JSON.stringify({ id: "chunk-1", choices: [{ index: 0, delta: { content: "hello from fallback" } }] });
+                    return new Response(`data: ${chunk}\n\ndata: [DONE]\n\n`, {
+                        headers: { "content-type": "text/event-stream" },
+                    });
+                }
+                return Response.json({ id: "c-1", choices: [{ message: { role: "assistant", content: "hello non-stream" } }] });
+            }
             return Response.json({ created: 1, data: [{ b64_json: "QUJD" }] });
         },
     });
@@ -359,6 +370,63 @@ describe("中转与额度", () => {
 
         setNowForTests(Date.UTC(2026, 10, 6, 4, 0, 0));
         expect((await relayImage(ctx, cookie)).status).toBe(200);
+        ctx.cleanup();
+    });
+
+    test("当上游 /responses 返回 404 时，自动降级至 /chat/completions 并适配流式输出", async () => {
+        const ctx = await setup();
+        const adminCookie = await adminLogin(ctx);
+        await configureChannel(ctx, adminCookie);
+        const { cookie } = await createSession(ctx);
+
+        const response = await request(ctx, `/api/relay?url=${encodeURIComponent(`${upstreamBase}/v1/responses`)}`, {
+            method: "POST",
+            headers: {
+                "content-type": "application/json",
+                accept: "text/event-stream",
+                cookie,
+            },
+            body: JSON.stringify({
+                model: "txt-1",
+                input: [{ role: "user", content: "hello" }],
+                stream: true,
+            }),
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.headers.get("content-type")).toContain("text/event-stream");
+        const bodyText = await response.text();
+        expect(bodyText).toContain("response.output_text.delta");
+        expect(bodyText).toContain("hello from fallback");
+        expect(bodyText).toContain("response.completed");
+        expect(bodyText).toContain("[DONE]");
+        ctx.cleanup();
+    });
+
+    test("当上游 /responses 返回 404 时，自动降级至 /chat/completions 并适配非流式输出", async () => {
+        const ctx = await setup();
+        const adminCookie = await adminLogin(ctx);
+        await configureChannel(ctx, adminCookie);
+        const { cookie } = await createSession(ctx);
+
+        const response = await request(ctx, `/api/relay?url=${encodeURIComponent(`${upstreamBase}/v1/responses`)}`, {
+            method: "POST",
+            headers: {
+                "content-type": "application/json",
+                cookie,
+            },
+            body: JSON.stringify({
+                model: "txt-1",
+                input: [{ role: "user", content: "hello" }],
+                stream: false,
+            }),
+        });
+
+        expect(response.status).toBe(200);
+        const json = (await response.json()) as any;
+        expect(json.output_text).toBe("hello non-stream");
+        expect(json.output[0].type).toBe("message");
+        expect(json.output[0].content[0].text).toBe("hello non-stream");
         ctx.cleanup();
     });
 });

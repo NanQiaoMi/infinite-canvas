@@ -455,6 +455,21 @@ function consumeResponseStreamBlock(block: string, state: ResponseStreamState, o
         state.text = event.text;
         onDelta?.(state.text);
     }
+    if (Array.isArray(event.choices)) {
+        const choice = event.choices[0] as Record<string, unknown> | undefined;
+        if (choice) {
+            const delta = choice.delta as Record<string, unknown> | undefined;
+            if (delta && typeof delta.content === "string") {
+                state.text += delta.content;
+                onDelta?.(state.text);
+            }
+            const message = choice.message as Record<string, unknown> | undefined;
+            if (message && typeof message.content === "string" && !state.text) {
+                state.text = message.content;
+                onDelta?.(state.text);
+            }
+        }
+    }
     if (type === "response.completed" && isRecord(event.response)) {
         state.payload = event.response as ResponseApiPayload;
     } else if (Array.isArray(event.output)) {
