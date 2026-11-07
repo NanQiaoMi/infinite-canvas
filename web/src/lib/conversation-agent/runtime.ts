@@ -1,7 +1,7 @@
 import { nanoid } from "nanoid";
 
 import { inferImageSizeFromPrompt } from "./aspect-ratio";
-import { detectAgentIntent, extractFollowUpModification, findLastGenerationPrompt, REFERENCE_PROMPT_PATTERN, type AgentIntent } from "./intent";
+import { detectAgentIntent, extractFollowUpModification, findLastGenerationPrompt, FOLLOW_UP_PATTERN, REFERENCE_PROMPT_PATTERN, type AgentIntent } from "./intent";
 import { parseAgentOutput, serializeToolResult, stripForStreaming } from "./protocol";
 import { buildIntentDirective, buildSystemPrompt } from "./system-prompt";
 import type { AgentContextInput, AgentEvent, AgentImageRef, AgentMessage, AgentModelCall, AgentModelMessage, AgentToolCall, AgentToolDefinition, AgentToolExecutor, AgentToolResult, AgentTurnResult } from "./types";
@@ -40,6 +40,9 @@ export function isBoilerplateSummary(text: string): boolean {
     if (/^已为您在画布上(?:创建生图节点并启动精细渲染|批量创建节点并排布[，, ]正在并行启动渲染)[。.]?$/i.test(trimmed)) return true;
     // 去除开头装饰性 Emoji 与标点符号
     const clean = trimmed.replace(/^[\p{Extended_Pictographic}\s*•\-—~#✨🎨📦🔍🐈🐾❤️💙💚💛💜🧡🤍🖤]+/u, "").trim();
+    if (/^(?:生成成功|已成功生成|创作完成|生成完毕)/i.test(clean)) {
+        if (/画幅|尺寸|模型|GPT\s*Image|构图|像素|风格|背景|细节|继续生成/i.test(clean)) return true;
+    }
     if (/^(?:生成成功\s*)?已(?:为[您你])?生成(?:一只|一个|一张|一组|多张|[\d]+张)?/i.test(clean)) {
         // 如果包含尺寸、模型、构图或比例说明，属于典型生图后置总结卡片，从模型历史中过滤
         if (/尺寸|模型|GPT\s*Image|构图|像素|风格|背景/i.test(clean)) return true;
@@ -408,8 +411,9 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
                         continue;
                     } else {
                         const historyPrompt = findLastGenerationPrompt(options.messages);
+                        const isFollowUpOrRef = Boolean(FOLLOW_UP_PATTERN.test(lastUserText) || REFERENCE_PROMPT_PATTERN.test(lastUserText));
                         const followUpMod = lastUserText && !REFERENCE_PROMPT_PATTERN.test(lastUserText) ? extractFollowUpModification(lastUserText) : "";
-                        const candidatePrompt = parsed.promptBlocks[0] || intent.prompt.trim() || (historyPrompt ? (followUpMod ? `${historyPrompt}，${followUpMod}` : historyPrompt) : "");
+                        const candidatePrompt = parsed.promptBlocks[0] || intent.prompt.trim() || (isFollowUpOrRef && historyPrompt ? (followUpMod ? `${historyPrompt}，${followUpMod}` : historyPrompt) : "");
                         const prompt = candidatePrompt.trim();
                         if (prompt) {
                             const size = inferImageSizeFromPrompt(prompt, options.buildContext().defaultSize);
@@ -461,8 +465,9 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
                         }
                     }
 
+                    const isFollowUpOrRef = Boolean(FOLLOW_UP_PATTERN.test(lastUserText) || REFERENCE_PROMPT_PATTERN.test(lastUserText));
                     const followUpMod = lastUserText && !REFERENCE_PROMPT_PATTERN.test(lastUserText) ? extractFollowUpModification(lastUserText) : "";
-                    const candidatePrompt = parsed.promptBlocks[0] || intent.prompt.trim() || (historyPrompt ? (followUpMod ? `${historyPrompt}，${followUpMod}` : historyPrompt) : "");
+                    const candidatePrompt = parsed.promptBlocks[0] || intent.prompt.trim() || (isFollowUpOrRef && historyPrompt ? (followUpMod ? `${historyPrompt}，${followUpMod}` : historyPrompt) : "");
                     const prompt = candidatePrompt.trim();
                     const hasReferenceForEdit = intentTool !== "edit_image" || (options.references ?? []).some((reference) => reference.storageKey);
                     if (prompt && hasReferenceForEdit) {

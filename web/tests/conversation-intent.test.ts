@@ -301,4 +301,12 @@ describe("本地意图识别", () => {
         const overflowSample = detectAgentIntent("批量生成20张复古胶片街拍");
         expect(overflowSample.batchCount).toBe(12);
     });
+
+    test("公众人物与生动工作场所场景描述精准识别为独立生图意图", () => {
+        const prompt = "山姆·奥特曼、唐纳德·特朗普和埃隆·马斯克在一家繁忙电影院的柜台后面工作";
+        const intent = detectAgentIntent(prompt);
+        expect(intent.kind).toBe("generate_image");
+        expect(intent.prompt).toBe(prompt);
+        expect(intent.direct).toBe(true);
+    });
 });

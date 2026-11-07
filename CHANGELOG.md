@@ -2,6 +2,8 @@
 
 ## Unreleased
 
++ [修复] 彻底杜绝生图场景描述被误判为闲聊、消除生图总结卡片复读与历史污染：大幅扩展视觉要素词库，纳入公众人物/角色（如奥特曼、马斯克、特朗普、柜员等）、空间场所（电影院、柜台、前台、餐厅等）、动态活动（工作、繁忙、服务等）及空间方位结构，将无显式动作指令的纯场景描述精准识别为独立生图意图并直连执行，杜绝误判为闲聊；重构 `isBoilerplateSummary` 过滤机制，精准识别并拦截以「生成成功」开头且含画幅、规格等信息的后置总结卡片，防止其作为历史消息进入后续回合；严格约束兜底继承机制，仅在用户显式指代或续作微调时才继承上一轮提示词，杜绝全新独立生图请求被污染继承旧图内容。
+
 + [优化] 扩展批量排布与并发生图上限至 12 张：升级 AI 对话与画布助手的任务拆解及意图数量识别上限至 12 张，原生支持「十张」「十二张」「一套十个」等中文数字解析；扩容画布批量排布工具 `canvas_batch_generate_nodes` 上限至 12 个节点，并将 10–12 个节点的网格排布自适应优化为 4 列 × 3 行，更契合宽屏画布视觉美感。
 
 + [修复] 修复 AI 对话页面 useMemo 未定义导致的运行时白屏异常：为 `web/src/pages/chat/components/image-result-card.tsx` 与 `web/src/pages/chat/index.tsx` 补齐 `useMemo` 与 `AgentIntent` 导入，消除 React 运行时 `ReferenceError: useMemo is not defined` 报错；清理过期旧单一清理调用 `setCompletedToolResult`，保持渐进式渲染数组 `completedToolResults` 状态一致性。
