@@ -2,6 +2,7 @@
 
 ## Unreleased
 
++ [新增] 无限画布全面接入原生 AI 对话助手与节点控制：在画布页面集成与 `/chat` 统一的内置 AI 对话面板，免去本地外部 Codex 服务繁琐配置；提供 `canvas_create_image_node`、`canvas_batch_generate_nodes`、`canvas_create_text_node`、`canvas_update_node`、`canvas_connect_nodes`、`canvas_delete_nodes`、`canvas_focus_nodes` 与 `canvas_get_context` 全套画布智能工具体系；支持复杂多任务拆解自循环与网格/并排智能防重叠排布，并在顶栏实时联动 AI 助手执行状态。
 + [优化] 净化 AI 对话生图结果显现图层：移除原先覆盖在图片上方的白色掠影动画层（避免后台标签页暂停动画时残留半透明白蒙层），并将显现动画优化为纯净自然的缩放淡入，保证生成图片真实细节与高对比度原貌呈现。
 
 + [优化] 优化全局顶栏导航间距与弹性布局：顶栏容器放宽至流式最大宽度（1720px），大幅降低导航项间距并适配中等屏幕缩放，防止右侧工具栏在 1280px–1440px 视口下挤压截断「我的资产」等导航文字；额度胶囊按视口智能精简，彻底杜绝文字与文档/额度图标的重叠遮挡。

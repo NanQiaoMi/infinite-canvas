@@ -22,6 +22,29 @@ export type AgentToolResult =
     | { tool: "generate_image"; ok: true; images: AgentImageRef[]; model: string; size: string; count: number; quota?: AgentQuotaSnapshot }
     | { tool: "edit_image"; ok: true; images: AgentImageRef[]; model: string; size: string; count: number; quota?: AgentQuotaSnapshot }
     | { tool: "apply_prompt"; ok: true; target: "image" | "video"; prompt: string }
+    | {
+          tool: "canvas_get_context";
+          ok: true;
+          projectId: string;
+          title: string;
+          nodeCount: number;
+          selectedNodeIds: string[];
+          nodes: Array<{ id: string; type: string; title: string; prompt: string; x: number; y: number; width: number; height: number; hasImage: boolean }>;
+          connections: Array<{ id: string; fromNodeId: string; toNodeId: string }>;
+      }
+    | { tool: "canvas_create_image_node"; ok: true; nodeId: string; title: string; prompt: string; size: string; position: { x: number; y: number } }
+    | {
+          tool: "canvas_batch_generate_nodes";
+          ok: true;
+          count: number;
+          layout: string;
+          nodes: Array<{ nodeId: string; title: string; prompt: string; size: string; position: { x: number; y: number } }>;
+      }
+    | { tool: "canvas_create_text_node"; ok: true; nodeId: string; title: string; text: string; position: { x: number; y: number } }
+    | { tool: "canvas_update_node"; ok: true; nodeId: string; updatedFields: string[]; rerun?: boolean }
+    | { tool: "canvas_connect_nodes"; ok: true; fromNodeId: string; toNodeId: string }
+    | { tool: "canvas_delete_nodes"; ok: true; deletedCount: number; deletedIds: string[] }
+    | { tool: "canvas_focus_nodes"; ok: true; focusedCount: number }
     | { tool: string; ok: false; code: AgentToolErrorCode; error: string };
 
 export type AgentToolCall = { tool: string; arguments: Record<string, unknown> };

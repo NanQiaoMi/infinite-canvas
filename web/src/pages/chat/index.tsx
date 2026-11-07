@@ -27,21 +27,10 @@ import { GenerationWaiting, ThinkingLine } from "./components/generation-waiting
 import { SmoothStreamText } from "./components/smooth-stream-text";
 
 const modelLabelOf = (option: string) => option.split("::").pop() || option;
+import { formatAgentToolStepLabel } from "@/lib/conversation-agent/formatters";
+
 const NETWORK_ERROR_PATTERN = /network error|failed to fetch|load failed|networkerror|econnreset|socket hang up|fetch failed/i;
 const isNetworkError = (error: unknown) => NETWORK_ERROR_PATTERN.test(error instanceof Error ? error.message : String(error));
-
-function toolStepLabel(call: AgentToolCall, t: (key: string) => string) {
-    const names: Record<string, string> = {
-        generate_image: t("chat.tools.names.generate_image"),
-        edit_image: t("chat.tools.names.edit_image"),
-        apply_prompt: t("chat.tools.names.apply_prompt"),
-    };
-    const label = names[call.tool] || call.tool;
-    const prompt = typeof call.arguments.prompt === "string" ? call.arguments.prompt : "";
-    const size = typeof call.arguments.size === "string" ? call.arguments.size : "";
-    const meta = size ? ` ${size}` : "";
-    return prompt ? `${label} · "${prompt.slice(0, 32)}"${meta}` : `${label}${meta}`;
-}
 
 export default function ChatPage() {
     const { t } = useTranslation();
@@ -331,7 +320,7 @@ export default function ChatPage() {
                                 stepSeqRef.current += 1;
                                 const stepId = `tool-${stepSeqRef.current}`;
                                 lastToolStepRef.current = stepId;
-                                return [...next, { id: stepId, kind: "tool" as const, label: toolStepLabel(event.call, t), status: "running" as const }];
+                                return [...next, { id: stepId, kind: "tool" as const, label: formatAgentToolStepLabel(event.call), status: "running" as const }];
                             });
                         } else if (event.type === "correction-start") {
                             setSteps((current) => {

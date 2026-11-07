@@ -3,6 +3,7 @@ import { motion } from "motion/react";
 import { useTranslation } from "react-i18next";
 
 import { LocalAgentPanel } from "./local-agent-panel";
+import { CanvasConversationAgentPanel } from "@/components/canvas/canvas-conversation-agent-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { CANVAS_AGENT_PANEL_MOTION_MS, useAgentStore } from "@/stores/use-agent-store";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -14,6 +15,7 @@ export function AgentPanel() {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const width = useAgentStore((state) => state.width);
     const [resizing, setResizing] = useState(false);
+    const [agentMode, setAgentMode] = useState<"conversation" | "codex">("conversation");
     const panelMounted = useAgentStore((state) => state.panelMounted);
     const panelOpen = useAgentStore((state) => state.panelOpen);
     const panelClosing = useAgentStore((state) => state.panelClosing);
@@ -57,7 +59,25 @@ export function AgentPanel() {
                 style={{ width, background: theme.node.panel, borderColor: theme.node.stroke, color: theme.node.text }}
             >
                 <button type="button" className="absolute inset-y-0 left-0 z-40 w-4 -translate-x-1/2 cursor-col-resize" onPointerDown={startResize} aria-label={t("agent.panel.resize")} />
-                <LocalAgentPanel embedded />
+                {agentMode === "conversation" ? (
+                    <CanvasConversationAgentPanel onSwitchToCodex={() => setAgentMode("codex")} />
+                ) : (
+                    <div className="relative flex h-full w-full flex-col">
+                        <div className="flex h-9 shrink-0 items-center justify-between border-b px-3 text-xs" style={{ borderColor: theme.node.stroke }}>
+                            <span className="font-semibold text-stone-500">外部本地 Codex 面板</span>
+                            <button
+                                type="button"
+                                className="text-emerald-600 hover:underline dark:text-emerald-400"
+                                onClick={() => setAgentMode("conversation")}
+                            >
+                                返回内置 AI 助手
+                            </button>
+                        </div>
+                        <div className="flex-1 overflow-hidden">
+                            <LocalAgentPanel embedded />
+                        </div>
+                    </div>
+                )}
             </motion.aside>
         </motion.div>
     );
