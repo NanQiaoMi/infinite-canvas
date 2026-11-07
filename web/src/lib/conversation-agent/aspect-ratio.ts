@@ -24,10 +24,10 @@ const MOBILE_VERTICAL_PATTERNS = [
     /phone\s*wallpaper|mobile\s*wallpaper|vertical\s*wallpaper|portrait\s*orientation|vertical\s*screen/i,
 ];
 
-/** 16:9 极佳适配场景：电脑壁纸、横屏、电影感大片、风景全景、宽屏 */
+/** 16:9 极佳适配场景：电脑壁纸、横屏、电影感大片、风景全景、宽屏、设计稿/桌面端 */
 const DESKTOP_HORIZONTAL_PATTERNS = [
-    /电脑壁纸|桌面壁纸|pc壁纸|横屏|横版|横图|宽屏|宽幅|全景|电影感|横幅|风景大片|宽银幕/i,
-    /desktop\s*wallpaper|pc\s*wallpaper|widescreen|cinematic\s*(?:shot|view|frame)?|landscape\s*orientation/i,
+    /电脑壁纸|桌面壁纸|pc壁纸|横屏|横版|横图|宽屏|宽幅|全景|电影感|横幅|风景大片|宽银幕|设计稿|桌面端|网页设计|网站设计/i,
+    /desktop\s*wallpaper|pc\s*wallpaper|widescreen|cinematic\s*(?:shot|view|frame)?|landscape\s*orientation|ui\s*design/i,
 ];
 
 /** 3:4 / 2:3 适配场景：海报、人像写真、模特穿搭、传统封面 */
