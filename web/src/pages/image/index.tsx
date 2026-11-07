@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, Clapperboard, ClipboardPaste, Download, FolderPlus, History, ImagePlus, LoaderCircle, PenLine, Plus, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, Clapperboard, ClipboardPaste, Download, FolderPlus, History, ImagePlus, LoaderCircle, Maximize2, PenLine, Plus, SlidersHorizontal, Sparkles, SquarePen, Trash2, Upload } from "lucide-react";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { App, Button, Checkbox, Drawer, Empty, Image, Input, InputNumber, Modal, Switch, Tag, Tooltip, Typography } from "antd";
 import localforage from "localforage";
@@ -408,9 +408,9 @@ export default function ImagePage() {
     };
 
     return (
-        <div className="flex h-full flex-col overflow-hidden bg-[#faf9f5] text-stone-900 dark:bg-[#1c1b19] dark:text-stone-100">
-            <main className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[260px_minmax(0,1fr)] lg:overflow-hidden">
-                <aside className="hidden min-h-0 flex-col overflow-hidden border-r border-stone-200/70 bg-[#f2efe8] dark:border-stone-800 dark:bg-[#171614] lg:flex p-3">
+        <div className="agent-page-in flex h-full flex-col overflow-hidden bg-[#faf9f5] text-stone-900 dark:bg-[#1c1b19] dark:text-stone-100">
+            <main className="flex min-h-0 flex-1 overflow-hidden">
+                <aside className="hidden w-[260px] shrink-0 min-h-0 flex-col overflow-hidden border-r border-stone-200/70 bg-[#f2efe8] dark:border-stone-800 dark:bg-[#171614] lg:flex">
                     <LogPanel
                         modelLabel={effectiveConfig.imageModel.split("::").pop() || effectiveConfig.imageModel}
                         quotaCapability="image"
@@ -424,7 +424,7 @@ export default function ImagePage() {
                     />
                 </aside>
 
-                <section className="grid lg:min-h-0 lg:overflow-hidden xl:grid-cols-[420px_minmax(0,1fr)]">
+                <section className="grid min-w-0 flex-1 lg:min-h-0 lg:overflow-hidden xl:grid-cols-[420px_minmax(0,1fr)]">
                     <div className="thin-scrollbar flex flex-col border-stone-200/70 px-5 py-5 dark:border-stone-800 lg:min-h-0 lg:overflow-y-auto lg:border-r">
                         <div>
                             <div className="flex items-start justify-between gap-3">
@@ -553,9 +553,18 @@ export default function ImagePage() {
                             </div>
                         </div>
 
-                        <div className="sticky bottom-0 z-10 -mx-5 mt-auto border-t border-stone-200/70 bg-[#faf9f5] px-5 py-3 dark:border-stone-800 dark:bg-[#1c1b19]">
-                            <Button type="primary" size="large" block className="!h-11 !rounded-xl" icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
-                                {t("workbench.generate")}
+                        <div className="sticky bottom-0 z-10 -mx-5 mt-auto border-t border-stone-200/70 bg-[#faf9f5]/95 px-5 py-3.5 backdrop-blur-md dark:border-stone-800 dark:bg-[#1c1b19]/95">
+                            <Button
+                                type="primary"
+                                size="large"
+                                block
+                                className="!h-11 !rounded-xl !bg-[#1f1e1d] hover:!bg-[#33312c] !text-white dark:!bg-[#f2efe8] dark:!text-stone-900 dark:hover:!bg-white !border-none !font-medium !shadow-2xs hover:!shadow-xs transition-all duration-200 active:scale-[0.99]"
+                                icon={<Sparkles className="size-4" />}
+                                loading={running}
+                                disabled={!canGenerate || running}
+                                onClick={() => void generate()}
+                            >
+                                {running ? t("workbench.generating") : t("workbench.generate")}
                             </Button>
                         </div>
                     </div>
@@ -563,12 +572,16 @@ export default function ImagePage() {
                     <div className="thin-scrollbar px-5 py-5 lg:min-h-0 lg:overflow-y-auto">
                         <div className="mb-4 flex items-center justify-between gap-3">
                             <div>
-                                <h2 className="text-sm font-semibold tracking-tight">{t("workbench.results")}</h2>
+                                <h2 className="text-sm font-semibold tracking-tight text-stone-950 dark:text-stone-100">{t("workbench.results")}</h2>
                             </div>
-                            {running ? <span className="rounded-full border border-stone-200 px-2 py-0.5 text-[11px] tabular-nums text-stone-400 dark:border-stone-700 dark:text-stone-500">{t("workbench.waiting", { time: formatDuration(elapsedMs) })}</span> : null}
+                            {running ? (
+                                <span className="rounded-full border border-stone-200/90 bg-white/70 px-2.5 py-0.5 text-[11px] tabular-nums text-stone-500 shadow-2xs backdrop-blur-xs dark:border-stone-700/80 dark:bg-stone-800/70 dark:text-stone-400">
+                                    {t("workbench.waiting", { time: formatDuration(elapsedMs) })}
+                                </span>
+                            ) : null}
                         </div>
                         {results.length ? (
-                            <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+                            <div className="grid gap-3.5 sm:grid-cols-2 2xl:grid-cols-3">
                                 {results.map((result, index) =>
                                     result.status === "success" && result.image ? (
                                         <ResultImageCard key={result.id} image={result.image} index={index} onEdit={addResultToReferences} onDownload={downloadImage} onSaveAsset={saveResultToAssets} />
@@ -580,9 +593,15 @@ export default function ImagePage() {
                                 )}
                             </div>
                         ) : (
-                            <div className="flex min-h-[320px] flex-col items-center justify-center text-center lg:min-h-[520px]">
-                                <ImagePlus className="mb-4 size-11 text-stone-400" />
-                                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("imageWorkbench.empty")} />
+                            <div className="agent-fade-in flex min-h-[360px] flex-col items-center justify-center py-16 text-center lg:min-h-[520px]">
+                                <div className="relative mb-5 flex size-14 items-center justify-center">
+                                    <div className="absolute inset-0 animate-[pulse_3s_ease-in-out_infinite] rounded-full bg-stone-200/60 blur-md dark:bg-stone-700/40" />
+                                    <div className="relative flex size-12 items-center justify-center rounded-2xl border border-stone-200/90 bg-gradient-to-b from-white to-stone-100/90 shadow-xs dark:border-stone-700/80 dark:from-stone-800 dark:to-stone-900">
+                                        <ImagePlus className="size-5.5 text-stone-600 dark:text-stone-300" />
+                                    </div>
+                                </div>
+                                <p className="text-sm font-medium text-stone-700 dark:text-stone-300">{t("imageWorkbench.empty")}</p>
+                                <p className="mt-1 text-xs text-stone-400 dark:text-stone-500">{t("imageWorkbench.promptPlaceholder")}</p>
                             </div>
                         )}
                     </div>
@@ -599,16 +618,24 @@ export default function ImagePage() {
                     event.target.value = "";
                 }}
             />
-            <Drawer title={t("workbench.logs")} placement="bottom" size="large" open={logsOpen} onClose={() => setLogsOpen(false)}>
+            <Drawer
+                open={logsOpen}
+                placement="left"
+                width={280}
+                onClose={() => setLogsOpen(false)}
+                styles={{ body: { padding: 0, background: "var(--color-card)" } }}
+            >
                 <LogPanel
                     modelLabel={effectiveConfig.imageModel.split("::").pop() || effectiveConfig.imageModel}
                     quotaCapability="image"
-                    showTitle={false}
                     logs={logs}
                     selectedLogIds={selectedLogIds}
                     activeLogId={previewLog?.id}
                     onSelectedLogIdsChange={setSelectedLogIds}
-                    onCreateSession={createSession}
+                    onCreateSession={() => {
+                        createSession();
+                        setLogsOpen(false);
+                    }}
                     onDeleteSelected={() => setDeleteConfirmOpen(true)}
                     onPreviewLog={(log) => void previewGenerationLog(log)}
                 />
