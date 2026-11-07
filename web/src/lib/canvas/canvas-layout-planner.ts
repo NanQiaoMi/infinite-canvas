@@ -71,8 +71,8 @@ export function computeBatchLayoutPositions(
     const startPos = computeNextNodePosition(existingNodes, viewport, nodeSize);
     const positions: Array<{ x: number; y: number }> = [];
 
-    // 列数计算：针对 grid，如果 4 张图用 2x2，如果 6 张图用 3x2，依此类推
-    const cols = layout === "horizontal" ? count : layout === "vertical" ? 1 : count <= 4 ? 2 : 3;
+    // 列数计算：针对 grid，如果 4 张图用 2x2，6-9 张图用 3 列，10-12 张用 4 列（4x3 网格更契合宽屏）
+    const cols = layout === "horizontal" ? count : layout === "vertical" ? 1 : count <= 4 ? 2 : count <= 9 ? 3 : 4;
 
     for (let i = 0; i < count; i++) {
         const col = i % cols;

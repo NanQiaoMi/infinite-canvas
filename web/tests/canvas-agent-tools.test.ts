@@ -66,6 +66,15 @@ describe("画布智能布局规划器 (canvas-layout-planner)", () => {
         expect(positions[2].y).toBe(positions[3].y);
         expect(positions[2].y).toBeGreaterThan(positions[0].y);
         expect(positions[1].x).toBeGreaterThan(positions[0].x);
+
+        // 12 个节点使用 4 列 x 3 行网格
+        const positions12 = computeBatchLayoutPositions(12, "grid", []);
+        expect(positions12.length).toBe(12);
+        expect(positions12[0].y).toBe(positions12[3].y); // 第 1 行 4 个节点同一高度
+        expect(positions12[4].y).toBe(positions12[7].y); // 第 2 行
+        expect(positions12[8].y).toBe(positions12[11].y); // 第 3 行
+        expect(positions12[4].y).toBeGreaterThan(positions12[0].y);
+        expect(positions12[8].y).toBeGreaterThan(positions12[4].y);
     });
 
     it("计算包裹指定节点的视口变换并平滑缩放", () => {
@@ -199,6 +208,21 @@ describe("画布专属工具集 (Canvas Agent Tools)", () => {
         const runOps = appliedOps.filter((op) => op.type === "run_generation");
         expect(addOps.length).toBe(3);
         expect(runOps.length).toBe(3);
+
+        // 验证支持批量排布最多 12 个节点
+        const tasks12 = Array.from({ length: 12 }, (_, i) => ({
+            prompt: `生肖图标 ${i + 1}`,
+            title: `生肖 ${i + 1}`,
+        }));
+        const res12 = await executeCanvasAgentTool({
+            tool: "canvas_batch_generate_nodes",
+            arguments: { tasks: tasks12, layout: "grid", run: true },
+        });
+        expect(res12.ok).toBe(true);
+        if (res12.ok && res12.tool === "canvas_batch_generate_nodes") {
+            expect(res12.count).toBe(12);
+            expect(res12.nodes.length).toBe(12);
+        }
     });
 
     it("canvas_create_text_node 与 canvas_connect_nodes：创建便签并连线", async () => {

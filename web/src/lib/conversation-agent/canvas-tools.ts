@@ -51,7 +51,7 @@ export const CANVAS_AGENT_TOOLS: AgentToolDefinition[] = [
             properties: {
                 tasks: {
                     type: "array",
-                    description: "要生成的子任务列表（1-8项）",
+                    description: "要生成的子任务列表（1-12项）",
                     items: {
                         type: "object",
                         properties: {
@@ -259,7 +259,7 @@ export async function executeCanvasAgentTool(call: AgentToolCall): Promise<Agent
             const rawTasks = Array.isArray(args.tasks) ? args.tasks : [];
             if (!rawTasks.length) return failure("canvas_batch_generate_nodes", "invalid_args", "批量生成任务列表不能为空");
 
-            const tasks = rawTasks.slice(0, 8);
+            const tasks = rawTasks.slice(0, 12);
             const layout = (args.layout as LayoutMode) || "grid";
             const run = args.run !== false;
 
