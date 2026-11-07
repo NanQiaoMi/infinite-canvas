@@ -167,9 +167,6 @@ export function ImageResultCard({
                     className="h-full w-full object-cover transition-transform duration-500 ease-out group-hover:scale-[1.02] agent-developing"
                 />
 
-                {/* 显现瞬间的掠影高光 */}
-                <div className="agent-shine-sweep pointer-events-none absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent dark:via-white/20" />
-
                 {/* 动图 GIF 徽章 */}
                 {isGif ? (
                     <span className="pointer-events-none absolute left-2.5 top-2.5 z-10 rounded-md bg-black/60 px-1.5 py-0.5 font-mono text-[10px] font-semibold tracking-wider text-white backdrop-blur-sm shadow-xs">
