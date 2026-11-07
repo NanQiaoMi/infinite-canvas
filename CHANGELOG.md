@@ -2,6 +2,7 @@
 
 ## Unreleased
 
++ [优化] 全站字体全面统一切换至 Cascadia Mono 与方正小标宋简体：移除了此前写在 main.tsx body style 上的 SF Pro / 苹方硬编码，将应用基础字族（--font-sans、--font-primary、Ant Design 主题 token、全局 HTML 与 Body）彻底设为 Cascadia Mono（英文与数字）+ 方正小标宋简体（中文），实现整站界面与 AI 对话字体风格的高度统一。
 + [优化] AI 对话全面定制专属字体体系：内置 Cascadia Mono 与方正小标宋简体 WOFF2 字体资源包并建立 @font-face 声明，彻底解决本地未安装或外部 CDN 受限导致字体不生效的问题；英文与数字统一采用 Cascadia Mono，中文采用方正小标宋简体，同时覆盖 AI 回复、用户气泡与输入框，呈现一致的排版美感。
 + [优化] 深度统一生图工作台、视频创作台与 AI 对话界面的设计语言：三者侧边栏统一采用带有品牌 Logo、模块标识（agent / image / video）、SquarePen 风格新建按钮、RECENTS 历史记录标与通栏底部状态条；统一主页面淡入动效、输入框聚焦阴影、参考图轻量卡片托盘与深色高对比度底部生成按钮；结果区统一采用无底栏悬浮毛玻璃拟态操作（放大预览、规格信息、下载、转存资产、参考图）、居中骨架生成态与灵动呼吸光晕空状态。
 + [新增] 新增本地服务端模式（`Dockerfile.server` + `docker-compose.local.yml`）：渠道与 API Key 只保存在服务端，普通用户打开即用；按 IP + 浏览器指纹记录匿名访客，图片额度默认每日 100 张、每周 700 张并自动刷新。

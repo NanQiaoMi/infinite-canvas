@@ -12,7 +12,7 @@ import { router } from "@/router";
 
 initAnalytics();
 
-document.body.style.fontFamily = '"SF Pro Display","SF Pro Text","PingFang SC","Microsoft YaHei","Helvetica Neue",sans-serif';
+document.body.style.fontFamily = 'var(--font-primary, "Cascadia Mono", "方正小标宋简体", sans-serif)';
 
 createRoot(document.getElementById("root")!).render(
     <React.StrictMode>

@@ -35,6 +35,7 @@ export function getAntThemeConfig(dark: boolean): ThemeConfig {
         algorithm: dark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
         cssVar: { key: dark ? "infinite-canvas-dark" : "infinite-canvas-light" },
         token: {
+            fontFamily: 'var(--font-primary, "Cascadia Mono", "方正小标宋简体", sans-serif)',
             colorPrimary: color.primary,
             colorInfo: color.primary,
             colorLink: color.primary,
