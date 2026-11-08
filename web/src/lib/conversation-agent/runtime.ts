@@ -444,8 +444,15 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
                 continue;
             }
             // 确定性兜底：模型一次工具都没调用（或推诿拒绝）时，按本地意图或推诿修复强制执行一次生成/改图，再让模型总结。
+            // 但用户描述模糊（本地低置信度）且模型主动追问澄清时，保留追问，不强行兜底出图。
             const effectiveIntentTool = intentTool || (refusal && (findLastGenerationPrompt(options.messages) || GENERATION_INTENT_PATTERN.test(lastUserText)) ? "generate_image" : null);
-            if (!intentHandled && !modelToolCallMade && effectiveIntentTool) {
+            const displayText = cleanedDisplayText.trim();
+            const asksClarification =
+                !parsed.promptBlocks.length &&
+                (/[?？]\s*$/.test(displayText) && displayText.length <= 160 ||
+                    /(?:告诉我|请问|你想|你是想|你需要|想要什么|想要哪种|什么风格|哪种风格|哪个方向|还是)[^\n]{0,40}[?？]?\s*$/.test(displayText));
+            const lowConfidenceIntent = !intent.explicit;
+            if (!intentHandled && !modelToolCallMade && effectiveIntentTool && !(asksClarification && lowConfidenceIntent)) {
                 const hasCanvasTools = options.tools.some((t) => t.name === "canvas_batch_generate_nodes");
                 const isCanvasTarget = hasCanvasTools && (intent.isCanvas || options.buildContext().pageContext === "canvas");
 

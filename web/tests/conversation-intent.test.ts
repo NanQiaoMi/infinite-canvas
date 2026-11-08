@@ -328,4 +328,18 @@ describe("本地意图识别", () => {
         const followUp = detectAgentIntent("再来一张，换个风格", { hasReferences: false, history });
         expect(followUp.kind).toBe("generate_image");
     });
+
+    test("模糊短句：有画面描述按生成意图，无意义短语不提取提示词", () => {
+        const catPicture = detectAgentIntent("一张猫的图", { hasReferences: false });
+        expect(catPicture.kind).toBe("generate_image");
+        expect(catPicture.prompt).toBe("一张猫的图");
+
+        const scene = detectAgentIntent("雨夜街道上的少女", { hasReferences: false });
+        expect(scene.kind).toBe("generate_image");
+        expect(scene.explicit).toBe(false);
+
+        expect(detectAgentIntent("画一个", { hasReferences: false }).kind).toBe("chat");
+        expect(detectAgentIntent("随便来一张", { hasReferences: false }).prompt).toBe("");
+        expect(detectAgentIntent("帮我优化一下", { hasReferences: false }).kind).toBe("chat");
+    });
 });

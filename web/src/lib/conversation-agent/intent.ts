@@ -205,6 +205,9 @@ function sanitizeExtractedPrompt(prompt: string, input: string) {
     if (!prompt) return "";
     if (REFERENCE_PROMPT_PATTERN.test(prompt) && countVisualCategories(prompt) === 0) return "";
     if (prompt === input && countVisualCategories(prompt) === 0 && prompt.length < 16) return "";
+    // 「随便来一张」「来一张更好看的」这类没有画面主体的残留词不能当提示词去出图
+    const meaninglessPrompt = prompt.replace(/[，,。.!！、\s]+$/g, "");
+    if (/^(?:(?:随便|随机|任意)(?:来|弄|整|画|搞)?(?:一?[个张幅])?|(?:好看|更好看|更酷|更帅|更美)(?:的)?|来一张|整一个|搞一个|弄一个|新的?)$/.test(meaninglessPrompt)) return "";
     return prompt;
 }
 
@@ -461,6 +464,31 @@ export function detectAgentIntent(
             prompt: input,
             explicit: false,
             direct: true,
+            ...(isGif ? { format: "gif" as const } : {}),
+            ...(isTransparent ? { background: "transparent" as const } : {}),
+            ...(usageScene ? { usageScene } : {}),
+        };
+    }
+
+    // ⑩.5 简短画面描述（如「雨夜街道上的少女」「一张猫的图」）：没有提问/优化语义时按生成意图交给模型判断
+    const compactInput = input.replace(/\s+/g, "");
+    const meaninglessCompact = /^(?:(?:随便|随机|任意)(?:来|弄|整|画|搞)?(?:一?[个张幅])?|(?:好看|更好看|更酷|更帅|更美)(?:的)?|来一张|整一个|搞一个|弄一个|画一个|画一张|新的?)$/.test(compactInput);
+    if (
+        compactInput.length >= 4 &&
+        compactInput.length <= 30 &&
+        !meaninglessCompact &&
+        !/(?:改成|换成|修改|编辑|替换|加上|去掉|移除)/.test(input) &&
+        !SMALL_TALK_PATTERN.test(input) &&
+        !PURE_INQUIRY_PATTERN.test(input) &&
+        !/[?？]$/.test(compactInput) &&
+        !/(?:怎么|如何|为什么|什么|吗|呢|教程|优化|润色|改写|评价|建议|分析|提示词)/.test(input) &&
+        (countVisualCategories(input) >= 1 || /[猫狗鸟兽花树木山水人物少女少男女孩男孩头像海报壁纸插画照片场景街道城市风景动物宠物]/.test(input))
+    ) {
+        return {
+            kind: "generate_image",
+            prompt: input,
+            explicit: false,
+            direct: false,
             ...(isGif ? { format: "gif" as const } : {}),
             ...(isTransparent ? { background: "transparent" as const } : {}),
             ...(usageScene ? { usageScene } : {}),

@@ -355,6 +355,20 @@ describe("对话运行时", () => {
         expect(result.messages.map((message) => message.role)).toEqual(["assistant"]);
     });
 
+    test("模糊生图意图下模型主动追问澄清时不再兜底出图", async () => {
+        const intent = detectAgentIntent("雨夜街道上的少女", { hasReferences: false });
+        expect(intent.kind).toBe("generate_image");
+        expect(intent.explicit).toBe(false);
+        const runner = createRunner({
+            turns: [turn("你想要写实摄影还是插画风格？人物是侧脸还是正脸？")],
+            intent,
+        });
+        const result = await runner.run();
+        expect(runner.calls).toHaveLength(1);
+        expect(runner.toolCalls).toHaveLength(0);
+        expect(result.messages.map((message) => message.role)).toEqual(["assistant"]);
+    });
+
     test("本地判为聊天时，模型仍可自主分析意图并调用生图工具", async () => {
         const runner = createRunner({
             turns: [
