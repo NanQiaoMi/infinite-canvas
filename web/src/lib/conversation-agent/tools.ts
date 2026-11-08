@@ -31,7 +31,7 @@ export const AGENT_TOOLS: AgentToolDefinition[] = [
                 count: { type: "integer", minimum: 1, maximum: 12, description: "生成张数，默认 1，最多 12" },
                 size: {
                     type: "string",
-                    description: "画幅尺寸/比例。支持如 1024x1024 (1:1 头像/图标), 1536x864 (16:9 电脑壁纸/横屏/风景), 864x1536 (9:16 手机壁纸/竖屏/全身), 768x1024 (3:4 海报/写真), 2016x864 (21:9 宽银幕)；根据题材主动匹配，不要默认都是 1:1",
+                    description: "画幅尺寸/比例（可选，推荐由你根据画面自行判断）。如 1024x1024、1536x1024、1024x1536、768x1024、864x1536、1536x864 等；省略时系统按提示词自动推断，不必套用固定比例。",
                 },
                 quality: { type: "string", enum: ["low", "medium", "high", "xhigh", "max"], description: "质量，省略时使用默认质量" },
                 background: {
@@ -61,7 +61,7 @@ export const AGENT_TOOLS: AgentToolDefinition[] = [
                 count: { type: "integer", minimum: 1, maximum: 12, description: "生成张数，默认 1，最多 12" },
                 size: {
                     type: "string",
-                    description: "画幅尺寸/比例。支持如 1024x1024 (1:1), 1536x864 (16:9), 864x1536 (9:16), 768x1024 (3:4) 等；省略时根据修改场景推断或沿用参考图尺寸",
+                    description: "画幅尺寸/比例（可选）。省略时沿用参考图尺寸或由系统按修改场景推断。",
                 },
                 quality: { type: "string", enum: ["low", "medium", "high", "xhigh", "max"] },
                 background: { type: "string", enum: ["transparent", "auto"] },

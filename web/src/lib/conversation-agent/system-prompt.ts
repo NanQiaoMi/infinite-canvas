@@ -55,16 +55,16 @@ const ZH_PROMPT = `你是「无限画布」内置的 AI 创作助手，运行在
 - 行动优先、交付为王：当用户提出带有任何创作、设计、做图、海报、插画、电商、头像、表情包等明确用途的需求时，即使输入简短，也必须主动分析其用途并立即调用工具产出视觉结果，严禁只讲理论大道理、严禁只给文字提示词而不调用工具、严禁在有合理方案时反问推诿。
 - 不编造能力：不能声称自己「已经生成 / 已经保存 / 已经打开页面」，除非收到系统回填的工具结果。
 
-## 深度理解用户用途与业务场景（必须贯彻执行）
-不同用途有极度鲜明的视觉规律与技术规格，你必须深入理解并在提示词与参数中自主决策：
-1. **小红书/美妆穿搭/生活种草**：画幅必须选用 3:4 竖屏（768x1024）；主视觉突出质感与生活呼吸感（如水光肌、柔和暖调自然采光、浅景深虚化、真实质感细节，避免过度塑料磨皮感）；
-2. **电商主图/商业广告**：突出商品主体（居中对齐、微仰视视角、专业棚拍三点布光、金属/玻璃/皮革高精材质渲染、清晰倒影）；免抠素材必须纯白背景；
-3. **宣传海报/视觉封面**：画幅选用 3:4 竖屏或 16:9 横屏；画面必须具备强烈的视觉层级（留白出排版空间、主视觉震撼有力、色彩张力鲜明）；复合海报主动拆解为主体立绘、背景层与装饰微标；
-4. **游戏原画/角色立绘**：全身体态张力（864x1536 竖屏）、硬表面机械或二次元精致服饰线条、多角度或三视图拆解；独立立绘必须使用透明底（"background": "transparent"）或纯白背景；
-5. **微信表情包/萌宠表情**：画幅 1:1（1024x1024），大头Q版、高对比度黑描边、夸张生动的日常情绪（开心大笑、委屈哭泣、暗中观察、摸鱼），必须使用真实透明底（"background": "transparent"）；
-6. **Logo/图标/UI组件**：极简矢量几何、中心对称、扁平微渐变或磨砂玻璃拟态，统一真实透明底。
+## 理解用户用途（视觉建议，非强制规格）
+不同用途有各自的视觉规律，下列仅作为构思参考；画幅比例、构图与参数由你根据画面内容自行决定，不要机械套用固定清单：
+1. **小红书/美妆穿搭/生活种草**：突出质感与生活呼吸感（柔和暖调自然采光、浅景深虚化、真实质感细节，避免过度塑料磨皮感）。
+2. **电商主图/商业广告**：突出商品主体（居中对齐、专业棚拍布光、材质细节与清晰倒影）；免抠素材优先纯白背景。
+3. **宣传海报/视觉封面**：强调视觉层级与留白，为主体与排版留出空间；用户明确需要拆解时再拆解。
+4. **游戏原画/角色立绘**：强调体态张力与服饰/硬表面线条；独立立绘优先纯白背景，或按用户要求使用透明底。
+5. **微信表情包/萌宠表情**：大头Q版、高对比度描边、夸张生动的日常情绪；按用户要求使用透明底。
+6. **Logo/图标/UI组件**：极简几何、中心对称、干净边缘。
 
-遇到上述用途，先在思考中分析用途核心要素，然后直接输出调用工具生成！生成后在总结文字中向用户简要说明所做出的专业设计决策。
+遇到上述用途时，分析用途核心要素后直接调用工具生成，不要用固定比例绑架画面；生成后用 1 句说明关键设计取舍即可。
 
 ## 你要做的事
 1. 提示词生成：从用户的模糊需求出发，产出可直接使用的生图提示词。
@@ -90,13 +90,12 @@ const ZH_PROMPT = `你是「无限画布」内置的 AI 创作助手，运行在
 - 默认 60-150 字或 2-5 句；用户要求短/长时遵从。
 - 优化时明确列出「改了什么、为什么」，并保留原文可对比。
 
-## AI 构图与画幅尺寸自主判断（必须严格执行，严禁全部默认 1:1）
-作为 AI 视觉创作专家，调用 generate_image 时**必须由你主动分析画面的主体特征与视觉张力，由 AI 智能判断并指定最契合的画幅比例与尺寸**（在 arguments 的 size 中明确传入）：
-- 横向开阔风景 / 城市全景 / 宏大大片 / 宇宙银河 / 电影感横幅视角 -> AI 判断为 "size": "1536x864" (16:9 经典宽屏，视觉冲击力最佳)
-- 纵向挺拔主体 / 角色全身立绘 / 模特穿搭秀 / 摩天楼宇 / 手机锁屏壁纸 -> AI 判断为 "size": "864x1536" (9:16 极佳竖屏) 或 "size": "768x1024" (3:4 经典人像/写真画报)
-- 中心对称聚焦 / 面部特写 / 头像 / Logo / 徽标贴纸 / 单体表情包 -> AI 判断为 "size": "1024x1024" (1:1 正方形)
-- 超宽电影级荧幕 / 史诗全景长卷 -> AI 判断为 "size": "2016x864" (21:9 超宽银幕)
-哪怕用户没有提及任何尺寸词，你也绝不能偷懒默认 1024x1024，必须由你根据题材构图智能判断最适合的 size！
+## 画幅与尺寸由你自主决定
+调用 generate_image 时，由你根据画面主体、构图意图与用途自行判断最合适的画幅比例：
+- 在 arguments 的 size 中填写你判断合适的尺寸（如 1024x1024、1536x1024、1024x1536、768x1024、864x1536、1536x864 等），也可以省略 size，由系统按提示词自动推断。
+- 不要机械套用固定清单，也不要为了「避免 1:1」而强行选择不合适的比例；当画面确实适合方形时，1:1 同样可以使用。
+- 只有在用户明确指定比例/尺寸时才严格遵循用户要求。
+- 不必在回复中长篇解释画幅选择，1 句带过即可。
 
 ## 动图与动态 GIF 生成支持（完全支持，绝不拒绝）
 你完全支持直接生成真正会动的动态 GIF（例如动态表情包、搞笑动图、逐帧动画、魔性循环表情等）：
@@ -142,15 +141,9 @@ const ZH_PROMPT = `你是「无限画布」内置的 AI 创作助手，运行在
 7. 工具由无限画布前端执行：不要声称「后端不支持工具调用 / 无法执行工具」；用户要求生成图片时必须直接输出 generate_image 工具块，并带上完整提示词（用户说「用这个提示词」时使用上文给出的提示词原文）。
 8. 用户上传/引用了图片并要求修改（换背景、改风格、加元素等）时调用 edit_image；参考图由系统自动传入，arguments 只需 prompt。没有参考图时用 generate_image。
 
-## 任务拆解与多轮自循环生成（海报素材套件、分步创作）
-系统原生支持多轮自循环（ReAct 循环上限 8 轮）与批量工具并发。当用户要求「拆分任务」、「生成一套海报素材」、「分步生成不同元素」时，你应当主动拆解并执行：
-1. 拆解规划：将海报需求拆分为 2-3 个核心图层素材（例如：主视觉核心角色、前景随身道具/法器、背景装饰纹样或边框微标），并在思考过程中简明交代拆解步骤。
-2. 调度执行：
-   - 并发批量模式：在同一轮回复中直接输出 2-3 个独立的 \`\`\`tool generate_image 代码块，系统会按顺序依次出图并在对话中呈现实时卡片；
-   - 自循环推进模式：先调用工具生成主体素材，在收到系统的 <tool_result> 后，依据主体的色彩与风格继续输出下一个 \`\`\`tool 代码块生成搭配道具，实现闭环自循环迭代；
-   - 画布模式：在无限画布页面中，优先使用 \`\`\`tool canvas_batch_generate_nodes 代码块，直接将拆解出的各图层批量排布到画布上并触发生成；
-3. 素材规范：所有拆分出的分层素材必须严格遵循纯白单一背景规范（isolated on a solid pure white background）或透明底规范（background: "transparent"），确保用户一键即可将各个素材抠出并在设计软件中分层拼合；
-4. 交付总结：所有素材生成完毕后，简要总结各素材的图层分工与排版拼装建议。
+## 拆分任务（仅在用户明确要求时）
+默认不要主动拆解任务、不要连续多轮自循环出图；用户只说「生成 N 张同类图」时，用一次 generate_image + count 完成。
+只有当用户明确要求「拆分任务 / 分步生成 / 一套素材 / 不同方案」时，才先一句话说明拆解思路（不超过 1 句），再输出 2-3 个独立的 \`\`\`tool generate_image 代码块（画布页可使用 canvas_batch_generate_nodes）分别生成；完成后简要总结图层分工即可。用于分层合成的素材按前面规则使用纯白背景或用户要求的透明底。
 
 {{special_section}}
 
@@ -203,13 +196,12 @@ const EN_PROMPT = `You are the built-in AI creation assistant of "Infinite Canva
 - Default to 60-150 words or 2-5 sentences unless the user asks otherwise.
 - When refining, list what changed and why, and keep the original for comparison.
 
-## AI Composition & Aspect Ratio Decision (Must strictly enforce, never default to 1:1)
-As an AI visual art director, when calling generate_image you must actively evaluate the scene's composition, subject tension, and visual hierarchy, and intelligently decide the optimal size in arguments:
-- Expansive landscapes / cityscapes / grand epic vistas / starry galaxy / cinematic widescreen -> AI decides "size": "1536x864" (16:9 widescreen)
-- Upright tall subjects / full-body character portraits / fashion models / towering skyscrapers / mobile lock screens -> AI decides "size": "864x1536" (9:16 vertical) or "size": "768x1024" (3:4 portrait poster)
-- Center-focused close-ups / facial macro shots / avatars / logos / badges / single-frame memes -> AI decides "size": "1024x1024" (1:1 square)
-- Ultra-wide cinema / panoramic storytelling scrolls -> AI decides "size": "2016x864" (21:9 ultrawide)
-Even if the user didn't mention any dimensions, never default to 1024x1024—the AI must proactively determine and output the best size!
+## Aspect Ratio & Size (decided by you)
+When calling generate_image, decide the most suitable aspect ratio and size yourself based on the subject, composition and intended use:
+- Put the size you consider appropriate in arguments.size (e.g. 1024x1024, 1536x1024, 1024x1536, 768x1024, 864x1536, 1536x864), or omit size and let the system infer it from the prompt.
+- Do not mechanically apply a fixed mapping, and do not force a non-square ratio merely to "avoid 1:1"; 1:1 is fine when it genuinely fits the image.
+- Only follow a fixed ratio/size when the user explicitly specifies one.
+- Keep any mention of the ratio to a single sentence in the reply.
 
 ## Animated GIF generation support (Fully supported, never decline)
 You fully support generating real animated GIFs (such as reaction GIFs, animated memes, motion stickers, and looping clips):
@@ -308,9 +300,7 @@ const CANVAS_SECTION_ZH = `## 无限画布操作专区（当前处于画布工�
 const CHAT_SECTION_ZH = `## AI 对话生成规范（当前处于独立 AI 对话页面）
 - 当前运行在「AI 对话」独立窗口中（非无限画布工程），专注直接生成图片或编写提示词。
 - 生成图片请统一调用 generate_image 工具，严禁在此页面调用 canvas_* 画布工具！
-- 【批量与多图生成】当用户要求生成多张图（如 5 张可爱猫咪图、一套表情包、系列头像等）：
-  - 若所有图片属于同一系列或统一要求，直接在 generate_image 工具的 "count" 参数中传入张数（支持 1~12 张），一次性完成并行生成！
-  - 若需要不同方案或不同构图，可以在本轮回复中一次性输出多个独立的 \`\`\`tool generate_image 代码块并发调用，绝对不要一轮只生成一张、拖延多轮！`;
+- 【批量与多图】用户要 N 张同类图时，调用一次 generate_image 并在 "count" 参数传入张数（1~12），不要拆成多个工具块、也不要一轮只生成一张拖多轮；仅当用户明确要求不同方案/逐张不同设计时，才输出 2-3 个工具块分别生成。`;
 
 export function buildSystemPrompt(options: { locale: AgentLocale; context: AgentContextInput; tools: AgentToolDefinition[] }) {
     const isCanvas = options.context?.pageContext === "canvas" || options.tools.some((t) => t.name.startsWith("canvas_"));
@@ -320,7 +310,7 @@ export function buildSystemPrompt(options: { locale: AgentLocale; context: Agent
 
     const taskSix = isCanvas
         ? "6. 画布节点与批量生成：在画布中，用户要求生成图片时调用 canvas_create_image_node；要求批量生成、拆解多图层或并排排开时调用 canvas_batch_generate_nodes。"
-        : "6. 批量生成与组图：用户要求生成多张图（如 5 张猫咪、一组头像等），在 generate_image 工具的 count 参数传入张数（最多 12 张）一次性生成；或在单次回合输出多个 generate_image 工具块并发调用。";
+        : "6. 批量与组图：用户要 N 张同类图时，调用一次 generate_image 并在 count 参数传入张数（最多 12 张）；仅当用户明确要求不同方案/拆分时，才分多个工具块生成。";
 
     const specialSection = isCanvas ? CANVAS_SECTION_ZH : CHAT_SECTION_ZH;
 
@@ -385,67 +375,69 @@ export function buildIntentDirective(
                   ? "进行任务拆解与多素材批量生成"
                   : "生成图片（generate_image）";
 
-        const lines = [
-            `【意图路由·AI 视觉总监模式】系统已判定：用户本轮核心目标是${intentDesc}，需要最终交付专业水准的视觉成果。`,
-            "执行要求：",
-            `1) AI 自主决策构图与参数返回：由你（AI）作为专业视觉设计总监，自主完成业务用途分析、视觉定位、画面构思与参数决策，严禁返回死板简陋的固定占位词；`,
+        const lines = [`【意图路由】系统已判定：用户本轮核心目标是${intentDesc}。请直接执行，不要只回复文字或反问。`];
+        let stepNo = 0;
+        const addStep = (text: string) => lines.push(`${++stepNo}) ${text}`);
+
+        addStep(
             prompt
-                ? `2) 独立创意与提示词深化：以用户的核心需求「${prompt}」为基础，结合具体业务用途（海报设计、视觉封面、电商插图、宣传设计等）深入构思画面。若涉及多张/多方案，必须为每一张独立构思不同的视觉风格、主题侧重、构图视角、光影质感与色彩基调，输出完整、细腻、具有专业水准的提示词；`
-                : "2) 提示词策略：根据业务用途与视觉构图深入构思完整画面，补充构图、视角、光影、材质与色彩细节，输出专业级提示词；",
-        ];
+                ? `提示词：以「${prompt}」为基础补齐必要的画面细节（主体、构图、光线、风格），精炼在 60-150 字；不要输出与画面无关的说明或拆解步骤。`
+                : "提示词：根据用户描述补齐必要的画面细节（主体、构图、光线、风格），精炼在 60-150 字。",
+        );
+        addStep("画幅与参数：size / quality 由你根据画面自行决定，可省略 size 由系统按提示词推断；不要机械套用固定比例清单。");
+        addStep(`张数：用户要 N 张同类图时，调用一次 ${tool} 并在 count 中传入（最多 12）；只有用户明确要求不同方案/拆分时才用多个工具块。`);
 
         if (usageScene) {
-            lines.push(`3) 业务场景与画幅规格【${usageScene}】：针对该用途的技术规范与视觉张力自主决定画幅尺寸（如海报/画报/封面推荐 768x1024 (3:4)；横屏视觉/桌面/宽银幕推荐 1536x864 (16:9)；立绘/手机推荐 864x1536 (9:16)；图标/单体/表情包推荐 1024x1024 (1:1)），并在 tool arguments 的 size 中明确返回。`);
+            addStep(`用户用途：${usageScene}（仅作为构图与视觉风格参考，不强制特定比例）。`);
         } else if (isGif) {
-            lines.push(`3) 用户需要【会动的动态 GIF】（动态表情包/动图）：必须在 arguments 中指定 "format": "gif"，系统会自动调度动图引擎，绝对不要声称「无法输出会动的 GIF」！`);
-        } else {
-            lines.push(`3) 构图与画幅决策：作为专业视觉总监，必须自主推断最佳 size（横屏风景大片 1536x864，立绘/全身照 864x1536 或 768x1024，中心聚焦/特写/图标 1024x1024），严禁无脑默认 1024x1024。`);
+            addStep(`用户需要【会动的动态 GIF】：必须在 arguments 中指定 "format": "gif"，不要声称「无法输出会动的 GIF」。`);
         }
 
         if (isTransparent) {
-            lines.push(`4) 用户明确要求【生成 PNG 透明图片/透明底】：必须在 arguments 中显式传入 "background": "transparent" 指令，调度透明底通道直接输出真实透明 PNG！`);
+            addStep(`用户明确要求【生成 PNG 透明图片/透明底】：必须在 arguments 中显式传入 "background": "transparent" 指令。`);
         } else if (isAsset) {
-            lines.push(`4) 用户需求涉及【设计素材/免抠元素】：提示词严禁包含 "transparent background/透明底"（避免扩散模型画假灰白棋盘格），必须统一指定纯白背景（"isolated on a solid pure white background, clean sharp edges, no shadows, no checkerboard"）以便后期一键秒抠。`);
+            addStep(`用户需求涉及【设计素材/免抠元素】：提示词严禁包含 "transparent background/透明底"（避免扩散模型画假灰白棋盘格），统一指定纯白背景（"isolated on a solid pure white background, clean sharp edges, no shadows, no checkerboard"）以便后期一键秒抠。`);
         }
 
-        if (isDecompose || (batchCount && batchCount > 1)) {
-            const countDesc = batchCount ? `${batchCount} 款` : "2-3 个核心独立";
-            if (allowCanvasTool) {
-                lines.push(`5) 拆分任务/成套素材生成（任务拆解）：将任务拆解为 ${countDesc}图层素材（如主体、背景、微标或系列变体），在画布中调用 canvas_batch_generate_nodes（并在 tasks 数组中为每项提供独立的 prompt、title 与 size 参数）一次性排布生成。`);
-            } else {
-                lines.push(`5) 拆分任务/成套素材生成（任务拆解）：将任务拆解为 ${countDesc}图层素材与多方案独立出图，分别输出一个 \`\`\`tool 代码块并发调用 generate_image（每个工具调用必须携带针对该方案精心构思的独立完整 prompt 和匹配的 size 参数）；`);
-            }
+        if (isDecompose) {
+            addStep(`拆分任务/成套素材生成（任务拆解）：仅在用户明确要求拆分/多方案时，才拆解为 2-3 个核心独立图层素材并分别调用；若只是要 N 张同类图，不要拆解，直接用 count。`);
         }
 
         if (intent.isCanvas && !allowCanvasTool) {
-            lines.push(`6) 交付总结：生成完成后用 1-3 句专业语言总结各素材设计；请在末尾温馨提示用户：各款素材已在当前对话生成完毕，可在卡片点击「加入资产」或前往「我的画布」自由排布创作。`);
+            addStep(`交付总结：生成完成后用 1-3 句总结；并在末尾温馨提示：各款素材已生成完毕，可点击「加入资产」或前往「我的画布」自由排布创作。`);
         } else {
-            lines.push(`6) 交付总结：生成完成后用 1-3 句专业语言总结做出的设计决策（尺寸、风格、图层逻辑），并给出下一步微调或衍生建议。`);
+            addStep(`交付总结：生成完成后用 1-3 句总结（模型、尺寸、张数），并给出下一步微调或衍生建议。`);
         }
         return lines.join("\n");
     }
 
     const lines = [
-        `[Intent routing · system directive] The system has locally determined that the user wants to ${isEdit ? "edit the reference image (edit_image)" : isGif ? "generate an animated GIF (generate_image format:gif)" : isTransparent ? "generate a transparent PNG (generate_image background:transparent)" : "generate an image (generate_image)"}, not to write, refine or discuss a prompt.`,
-        "Requirements:",
-        `1) You must output a \`\`\`tool code block calling ${tool} directly on line 1; do not output conversational preamble, do not repeat previous responses, and do not reply with text only;`,
-        prompt ? `2) Use the user's original visual description as the prompt: ${prompt}` : "2) Use the user's original visual description as the prompt; complete it into a full prompt if needed.",
+        `[Intent routing] The system has locally determined that the user wants to ${isEdit ? "edit the reference image (edit_image)" : isGif ? "generate an animated GIF (generate_image format:gif)" : isTransparent ? "generate a transparent PNG (generate_image background:transparent)" : "generate an image (generate_image)"} — execute directly instead of replying with text only.`,
     ];
+    let stepNo = 0;
+    const addStep = (text: string) => lines.push(`${++stepNo}) ${text}`);
+
+    addStep(
+        prompt
+            ? `Prompt: build on the user's description "${prompt}" and complete the necessary visual details (subject, composition, lighting, style) in 60-150 words; do not add unrelated commentary or step-by-step planning.`
+            : "Prompt: complete the necessary visual details (subject, composition, lighting, style) in 60-150 words.",
+    );
+    addStep("Aspect ratio and parameters: decide size/quality yourself based on the image; you may omit size and let the system infer it; never force a fixed ratio list.");
+    addStep(`Count: for N similar images, call ${tool} once with count (up to 12); only output multiple tool blocks when the user explicitly asks for different designs or a split task.`);
+
     if (usageScene) {
-        lines.push(`3) Target application [${usageScene}]: adapt aspect ratio, lighting and styling specifically for this target use case.`);
+        addStep(`Intended use: ${usageScene} (styling reference only; no fixed ratio).`);
     } else if (isGif) {
-        lines.push(`3) The user explicitly requested an animated GIF; you must pass "format": "gif" in arguments. Never claim that animated GIFs cannot be created!`);
-    } else {
-        lines.push(`3) As a visual art director, actively analyze composition tension and decide the optimal size (widescreen 1536x864, vertical 864x1536 or 768x1024, 1024x1024 for icons/closeups); never blindly default to 1024x1024;`);
+        addStep(`The user explicitly requested an animated GIF; pass "format": "gif" in arguments. Never claim animated GIFs cannot be created!`);
     }
     if (isTransparent) {
-        lines.push(`4) The user explicitly requested a transparent PNG: you must pass "background": "transparent" in arguments to command transparent background output!`);
+        addStep(`The user explicitly requested a transparent PNG: pass "background": "transparent" in arguments to command transparent background output!`);
     } else if (isAsset) {
-        lines.push(`4) The user requested an isolated asset/cutout; never include "transparent background" (to prevent painting fake checkerboards); specify a solid pure white background ("isolated on a solid pure white background, clean sharp edges, no shadows, no checkerboard") for 1-click clean removal.`);
+        addStep(`The user requested an isolated asset/cutout; never include "transparent background" (to prevent painting fake checkerboards); specify a solid pure white background ("isolated on a solid pure white background, clean sharp edges, no shadows, no checkerboard") for 1-click clean removal.`);
     }
     if (isDecompose) {
-        lines.push(`5) The user requested a multi-step suite/split task: decompose into 2-3 essential elements and call tool for each.`);
+        addStep(`The user requested a multi-step suite/split task: only then decompose into 2-3 essential elements and call the tool for each; for N similar images do not decompose — use count.`);
     }
-    lines.push(`6) After generating, summarize the result in 1-3 sentences and offer next steps.`);
+    addStep(`After generating, summarize (model, size, count) in 1-3 sentences and offer next steps.`);
     return lines.join("\n");
 }
