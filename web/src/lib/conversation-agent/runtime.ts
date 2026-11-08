@@ -3,7 +3,7 @@ import { nanoid } from "nanoid";
 import { inferImageSizeFromPrompt } from "./aspect-ratio";
 import { detectAgentIntent, extractFollowUpModification, findLastGenerationPrompt, FOLLOW_UP_PATTERN, REFERENCE_PROMPT_PATTERN, type AgentIntent } from "./intent";
 import { parseAgentOutput, serializeToolResult, stripForStreaming } from "./protocol";
-import { buildIntentDirective, buildSystemPrompt } from "./system-prompt";
+import { buildSystemPrompt } from "./system-prompt";
 import type { AgentContextInput, AgentEvent, AgentImageRef, AgentMessage, AgentModelCall, AgentModelMessage, AgentToolCall, AgentToolDefinition, AgentToolExecutor, AgentToolResult, AgentTurnResult } from "./types";
 import type { AgentLocale } from "./system-prompt";
 
@@ -358,24 +358,25 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
     };
 
     if (options.signal?.aborted) return { messages: newMessages, aborted: true, roundLimitReached: false };
-    /** 意图指令只注入首轮模型调用，一次即弃，避免总结轮再次看到「必须调用工具」而重复生成。 */
-    let pendingDirective: string | null = null;
-    if (intentTool && intent.direct && intent.prompt.trim()) {
-        // 高置信度意图：直接执行工具，不调用模型。
+    /**
+     * 模型主决策：除「显式命令」（如「生成图片：…」冒号形式）与「带参考图的明确改图」外，
+     * 一律先交给模型分析意图并自主决定是否调用工具、调用哪个工具（生图 / 改图 / 提示词 / 对话）。
+     * 本地意图识别只用于兜底：模型没有调用任何工具且没有产出提示词时，确保生图请求不空转。
+     */
+    if (intentTool && intent.direct && intent.prompt.trim() && (intent.explicitCommand || intent.kind === "edit_image")) {
+        // 显式命令 / 带参考图的明确改图：直接执行工具，不调用模型。
         intentHandled = true;
         const result = await runIntentTool(intent.prompt.trim());
         if (result.ok === true) return { messages: newMessages, aborted: false, roundLimitReached: false, directToolResult: result };
         if (result.code === "canceled") return { messages: newMessages, aborted: true, roundLimitReached: false, directToolResult: result };
         // 其他失败：把错误结果留给模型解释，不再注入「必须生成」指令，也不再兜底，避免死循环。
-    } else if (intentTool) {
-        pendingDirective = buildIntentDirective(options.locale, intent, options.buildContext(), options.tools);
     }
 
     for (let round = 0; round < maxRounds; round += 1) {
         if (options.signal?.aborted) return { messages: newMessages, aborted: true, roundLimitReached: false };
         const turn = await options.callModel({
             systemPrompt: buildSystemPrompt({ locale: options.locale, context: options.buildContext(), tools: options.tools }),
-            messages: [...toModelMessages([...options.messages, ...newMessages]), ...modelOnlyMessages, ...(pendingDirective ? [{ role: "user" as const, content: pendingDirective }] : [])],
+            messages: [...toModelMessages([...options.messages, ...newMessages]), ...modelOnlyMessages],
             tools: options.tools,
             signal: options.signal,
             onDelta: (text) => {
@@ -386,7 +387,6 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
                 options.onEvent?.({ type: "assistant-stream", text: cleaned });
             },
         });
-        pendingDirective = null;
         if (options.signal?.aborted) return { messages: newMessages, aborted: true, roundLimitReached: false };
 
         const parsed = parseAgentOutput(turn.content);

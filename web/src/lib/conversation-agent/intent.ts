@@ -19,8 +19,10 @@ export type AgentIntent = {
     prompt: string;
     /** 用户是否明确说出了动作（如「生成图片」「帮我做一张」），而不是只粘贴了一段提示词。 */
     explicit: boolean;
-    /** 是否可以直接执行工具，无需模型参与。 */
+    /** 是否可以直接执行工具，无需模型参与（仅显式命令或带参考图的明确改图会直连）。 */
     direct: boolean;
+    /** 是否为显式命令（如「生成图片：…」冒号形式）；显式命令绕过模型直连执行。 */
+    explicitCommand?: boolean;
     /** 输出格式要求：gif 或 png */
     format?: "png" | "gif";
     /** 画幅尺寸要求（如 1536x864、1024x1024 等） */
@@ -409,6 +411,7 @@ export function detectAgentIntent(
             prompt,
             explicit: true,
             direct,
+            explicitCommand: Boolean(colonBody && prompt),
             ...(isGif ? { format: "gif" as const } : {}),
             ...(inferredSize ? { size: inferredSize } : {}),
             ...(isTransparent ? { background: "transparent" as const } : {}),

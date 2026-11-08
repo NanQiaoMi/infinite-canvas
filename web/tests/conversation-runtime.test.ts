@@ -175,12 +175,12 @@ describe("对话运行时", () => {
         expect(result.messages.filter((message) => message.role === "assistant")).toHaveLength(2);
     });
 
-    test("direct 意图直接执行工具，不调用模型", async () => {
+    test("显式命令（冒号形式）直接执行工具，不调用模型", async () => {
         const events: AgentEvent[] = [];
         const runner = createRunner({
             turns: [turn("模型不应该被调用")],
             events,
-            intent: { kind: "generate_image", prompt: "一只红色苹果，白色背景，棚拍质感", explicit: true, direct: true },
+            intent: { kind: "generate_image", prompt: "一只红色苹果，白色背景，棚拍质感", explicit: true, direct: true, explicitCommand: true },
         });
         const result = await runner.run();
         expect(runner.calls).toHaveLength(0);
@@ -207,11 +207,11 @@ describe("对话运行时", () => {
         expect(result.messages.map((message) => message.role)).toEqual(["tool"]);
     });
 
-    test("direct 执行失败时继续交给模型解释，且不重复注入意图指令", async () => {
+    test("显式命令执行失败时继续交给模型解释，且不重复注入意图指令", async () => {
         const runner = createRunner({
             turns: [turn("生成失败了，可能是今日额度用完了。")],
             toolResult: { tool: "generate_image", ok: false, code: "quota_exceeded", error: "额度不足" },
-            intent: { kind: "generate_image", prompt: "红苹果", explicit: true, direct: true },
+            intent: { kind: "generate_image", prompt: "红苹果", explicit: true, direct: true, explicitCommand: true },
         });
         const result = await runner.run();
         expect(runner.calls).toHaveLength(1);
@@ -229,21 +229,21 @@ describe("对话运行时", () => {
         });
         const result = await runner.run();
         expect(runner.calls).toHaveLength(2);
-        // 首个模型请求包含意图指令
-        expect(runner.calls[0].some((entry) => entry.includes("意图路由"))).toBe(true);
-        // 兜底执行一次生成，然后让模型总结
+        // 模型主决策：不再注入强制意图指令，模型可自行决定是否调用工具
+        expect(runner.calls[0].some((entry) => entry.includes("意图路由"))).toBe(false);
+        // 模型只回文字时兜底执行一次生成，然后让模型总结
         expect(runner.toolCalls).toHaveLength(1);
         expect(runner.toolCalls[0].tool).toBe("generate_image");
         expect(runner.toolCalls[0].arguments.prompt).toBe("赛博朋克海报");
         expect(result.messages.map((message) => message.role)).toEqual(["assistant", "tool", "assistant"]);
         expect(result.messages[1].role === "tool" && result.messages[1].result.ok).toBe(true);
         expect(result.directToolResult).toBeUndefined();
-        // 意图指令只注入首轮：兜底生成后的总结轮不再包含意图指令，且工具只执行一次
+        // 模型主决策：两轮都不注入强制意图指令，且工具只执行一次
         expect(runner.calls[1].some((entry) => entry.includes("意图路由"))).toBe(false);
         expect(runner.toolCalls).toHaveLength(1);
     });
 
-    test("模型首轮已调用工具后，总结轮不再注入意图指令", async () => {
+    test("模型自主调用工具后，总结轮不注入任何指令", async () => {
         const intent = detectAgentIntent("帮我生成一张赛博朋克海报", { hasReferences: false });
         const runner = createRunner({
             turns: [turn('```tool\n{"tool":"generate_image","arguments":{"prompt":"赛博朋克海报"}}\n```'), turn("已经生成完成。")],
@@ -251,7 +251,7 @@ describe("对话运行时", () => {
         });
         const result = await runner.run();
         expect(runner.calls).toHaveLength(2);
-        expect(runner.calls[0].some((entry) => entry.includes("意图路由"))).toBe(true);
+        expect(runner.calls[0].some((entry) => entry.includes("意图路由"))).toBe(false);
         expect(runner.calls[1].some((entry) => entry.includes("意图路由"))).toBe(false);
         expect(runner.toolCalls).toHaveLength(1);
         expect(result.messages.map((message) => message.role)).toEqual(["assistant", "tool", "assistant"]);
@@ -297,18 +297,19 @@ describe("对话运行时", () => {
         expect(result.messages.map((message) => message.role)).toEqual(["assistant"]);
     });
 
-    test("不传 intent 时完整 JK 提示词自动直接出图，不调用模型", async () => {
+    test("不传 intent 时完整 JK 提示词交由模型决策，未调用工具时兜底出图", async () => {
         const runner = createRunner({
-            turns: [turn("模型不应该被调用")],
+            turns: [turn("这是一段完整的提示词，我可以直接生成。"), turn("已经生成完成。")],
             messages: [{ id: "u1", role: "user", text: JK_PROMPT, createdAt: 0 }],
         });
         const result = await runner.run();
-        expect(runner.calls).toHaveLength(0);
+        expect(runner.calls).toHaveLength(2);
+        expect(runner.calls[0].some((entry) => entry.includes("意图路由"))).toBe(false);
         expect(runner.toolCalls).toHaveLength(1);
         expect(runner.toolCalls[0].tool).toBe("generate_image");
         expect(runner.toolCalls[0].arguments.prompt).toBe(JK_PROMPT);
-        expect(result.messages.map((message) => message.role)).toEqual(["tool"]);
-        expect(result.directToolResult?.ok).toBe(true);
+        expect(result.directToolResult).toBeUndefined();
+        expect(result.messages.map((message) => message.role)).toEqual(["assistant", "tool", "assistant"]);
     });
 
     test("不传 intent 时帮助提问正常走模型且不注入意图指令", async () => {
@@ -325,14 +326,14 @@ describe("对话运行时", () => {
         }
     });
 
-    test("不传 intent 时模糊生成请求注入意图指令并在模型不调工具时兜底", async () => {
+    test("不传 intent 时模糊生成请求由模型决策，未调用工具时兜底", async () => {
         const runner = createRunner({
             turns: [turn("这个需求可以这样做：先确定主体，再补充镜头和光线……"), turn("已经生成完成。")],
             messages: [{ id: "u1", role: "user", text: "帮我生成一张赛博朋克海报", createdAt: 0 }],
         });
         const result = await runner.run();
         expect(runner.calls).toHaveLength(2);
-        expect(runner.calls[0].some((entry) => entry.includes("意图路由"))).toBe(true);
+        expect(runner.calls[0].some((entry) => entry.includes("意图路由"))).toBe(false);
         expect(runner.toolCalls).toHaveLength(1);
         expect(runner.toolCalls[0].tool).toBe("generate_image");
         expect(runner.toolCalls[0].arguments.prompt).toBe("赛博朋克海报");
@@ -353,10 +354,26 @@ describe("对话运行时", () => {
         expect(result.messages.map((message) => message.role)).toEqual(["assistant"]);
     });
 
+    test("本地判为聊天时，模型仍可自主分析意图并调用生图工具", async () => {
+        const runner = createRunner({
+            turns: [
+                turn("好的。", { toolCalls: [{ tool: "generate_image", arguments: { prompt: "蓝色系头像" } }] }),
+                turn("已经生成完成。"),
+            ],
+            intent: CHAT_INTENT,
+        });
+        const result = await runner.run();
+        expect(runner.calls).toHaveLength(2);
+        expect(runner.calls[0].some((entry) => entry.includes("意图路由"))).toBe(false);
+        expect(runner.toolCalls).toHaveLength(1);
+        expect(runner.toolCalls[0].tool).toBe("generate_image");
+        expect(result.messages.map((message) => message.role)).toEqual(["assistant", "tool", "assistant"]);
+    });
+
     test("动图生成请求直连执行时自动带上 format: gif", async () => {
         const runner = createRunner({
             turns: [],
-            messages: [{ id: "u1", role: "user", text: "生成一个猫咪动图：邪魅坏笑的橘猫，眼睛微微眯起，魔性表情", createdAt: 0 }],
+            messages: [{ id: "u1", role: "user", text: "生成动图：邪魅坏笑的橘猫，眼睛微微眯起，魔性表情", createdAt: 0 }],
         });
         const result = await runner.run();
         expect(runner.calls).toHaveLength(0);

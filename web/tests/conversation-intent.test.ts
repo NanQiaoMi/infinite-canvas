@@ -309,4 +309,14 @@ describe("本地意图识别", () => {
         expect(intent.prompt).toBe(prompt);
         expect(intent.direct).toBe(true);
     });
+
+    test("冒号显式命令标记 explicitCommand，自然语言生成不标记", () => {
+        const colon = detectAgentIntent("生成图片：一只红色苹果，高光", { hasReferences: false });
+        expect(colon.kind).toBe("generate_image");
+        expect(colon.explicitCommand).toBe(true);
+
+        const natural = detectAgentIntent("帮我生成一张赛博朋克海报", { hasReferences: false });
+        expect(natural.kind).toBe("generate_image");
+        expect(natural.explicitCommand).toBe(false);
+    });
 });
