@@ -7,5 +7,4 @@ description: Planned follow-up work
 
 - Replace the Claude Code CLI adapter with a Claude Agent SDK adapter and improve the tool queue, following the [Local Agent Integration Plan](/docs/progress/local-agent-integration-plan).
 - Add Skill installation from web search, Skill resource-file management, and controlled local-memory persistence.
-- Context-pollution hardening follow-ups: attribute canvas-originated `apply_prompt` image commands with the originating session id (currently validated at page level only); restore workbench tasks by their absolute persisted slot index instead of the compressed-array index; treat legacy persisted tasks without a channel fingerprint as same-channel rather than reporting a channel mismatch; and avoid writing failure logs / task status for generations whose polling was only aborted by page unload.
-- AI chat follow-ups: unify the two same-named `isCurrentThreadEvent` helpers (thread filter vs. legacy event check) and include the artifact prompt state in the per-session clear list.
+- Verify the server-side image task lifecycle after reloads and unloads: task ids must not be reused across server restarts or instances, and task status lookups should keep echoing prompt/model so the client can reject mismatched results.
