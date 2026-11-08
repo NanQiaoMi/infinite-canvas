@@ -297,9 +297,9 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
     };
     const requestedImageCount = intent.batchCount || (intentTool ? 1 : 0);
 
-    const runIntentTool = async (prompt: string, customSize?: string, customTitle?: string) => {
+    const runIntentTool = async (prompt: string, customSize?: string, customTitle?: string, customCount?: number) => {
         const defaultSize = options.buildContext().defaultSize;
-        const size = customSize || inferImageSizeFromPrompt(prompt, defaultSize);
+        const size = customSize || intent.size || inferImageSizeFromPrompt(prompt, defaultSize);
         const format = intent.format || (/动图|动态表情包|动态图|\bgif\b|会动的/i.test(prompt) ? "gif" : undefined);
         const background = intent.background || (/透明底|透明背景|透明图|透明png|png透明|transparent/i.test(prompt) ? "transparent" : undefined);
         const hasCanvasTools = options.tools.some((t) => t.name === "canvas_batch_generate_nodes");
@@ -334,12 +334,15 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
                 };
             }
         } else {
+            const toolCount = typeof customCount === "number" && customCount > 0
+                ? customCount
+                : (intent.batchCount && intent.batchCount > 0 ? intent.batchCount : 1);
             call = {
                 tool: (intentTool || "generate_image") as "generate_image" | "edit_image",
                 arguments: {
                     prompt,
                     size,
-                    count: 1,
+                    count: toolCount,
                     ...(customTitle ? { title: customTitle } : {}),
                     ...(format ? { format } : {}),
                     ...(background ? { background } : {}),
@@ -541,7 +544,7 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
                             await Promise.all(
                                 subTasks.map(async (task) => {
                                     if (options.signal?.aborted) return;
-                                    await runIntentTool(task.prompt, task.size, task.title);
+                                    await runIntentTool(task.prompt, task.size, task.title, 1);
                                 }),
                             );
                             modelOnlyMessages.push({

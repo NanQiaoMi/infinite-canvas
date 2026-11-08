@@ -8,6 +8,7 @@
  * 4. 为模型与运行时提供结构化的意图元数据与指令路由。
  */
 
+import { inferImageSizeFromPrompt } from "./aspect-ratio";
 import type { AgentToolCall } from "./types";
 
 export type AgentIntentKind = "chat" | "generate_image" | "edit_image" | "apply_prompt";
@@ -22,6 +23,8 @@ export type AgentIntent = {
     direct: boolean;
     /** 输出格式要求：gif 或 png */
     format?: "png" | "gif";
+    /** 画幅尺寸要求（如 1536x864、1024x1024 等） */
+    size?: string;
     /** 背景模式：transparent 时下发透明底生成指令 */
     background?: "transparent" | "auto";
     /** 是否属于任务拆解、多图层素材或成套生成任务 */
@@ -120,7 +123,7 @@ const USAGE_SCENE_RULES: Array<{ scene: string; pattern: RegExp }> = [
 
 /** 显式生成动作：支持丰富的创作、设计、拆解及用途表达 */
 const GENERATE_ACTION_PATTERN =
-    /(?:(?:能不能|可不可以|可以|请|帮我|麻烦|给我|想|想要|打算|需要)\s*)?(?:生成|制作|创作|设计|画|做|出|来|搞|整|安排|弄)\s*(?:一?\s*[个张幅份套组版]|几\s*[张幅个套组]|\d+\s*[张幅个套组]|[一二两三四五六七八九几]\s*[张幅个套组])?[^。！？!?\n]{0,20}?(?:动图|动态表情包|动态图|\bgif\b|表情包|透明图|透明底|透明图片|透明png|png透明|透明素材|海报|插画|插图|照片|头像|壁纸|封面|图标|logo|标志|素材|立绘|原画|电商图|小红书图|图片|图|画|作品)|生成图片|生成一张|生成一幅|生成几张|生成\s*\d+\s*[张幅个]|生成\s*[一二两三四五六七八九几]\s*[张幅个]|出图|出\s*\d+\s*[张幅个]|画一张|画个|画幅|画张|帮我画|来一张|再来一版|再生成|重新生成|换一版|做一张|做个|设计一张|设计一个|生图(?!\s*工作台)|(?:拆解|拆分)[^。！？!?\n]{0,15}?(?:生成|素材|图层)|generate\s+(an?\s+|the\s+)?(?:animated\s+|transparent\s+)?(image|picture|photo|illustration|poster|gif|png)|draw\s+(me\s+)?|design\s+(an?\s+)?|create\s+(an?\s+)?(?:animated\s+|transparent\s+)?(image|picture|gif|png)|make\s+(an?\s+)?(?:animated\s+|transparent\s+)?(image|picture|gif|png)/i;
+    /(?:(?:能不能|可不可以|可以|请|帮我|麻烦|给我|想|想要|打算|需要)\s*)?(?:生成|制作|创作|设计|画|做|出|来|搞|整|安排|弄)\s*(?:一?\s*[个张幅份套组版]|几\s*[张幅个套组]|\d+\s*[张幅个套组]|[一二两三四五六七八九几]\s*[张幅个套组])?[^。！？!?\n]{0,20}?(?:动图|动态表情包|动态图|\bgif\b|表情包|透明图|透明底|透明图片|透明png|png透明|透明素材|海报|插画|插图|照片|头像|壁纸|封面|图标|logo|标志|素材|立绘|原画|电商图|小红书图|图片|图|画|作品)|(?:再?来|出)\s*(?:\d+|[一二两三四五六七八九几])\s*[张幅个套组版]|生成图片|生成一张|生成一幅|生成几张|生成\s*\d+\s*[张幅个]|生成\s*[一二两三四五六七八九几]\s*[张幅个]|出图|出\s*\d+\s*[张幅个]|画一张|画个|画幅|画张|帮我画|来一张|再来一版|再生成|重新生成|换一版|做一张|做个|设计一张|设计一个|生图(?!\s*工作台)|(?:拆解|拆分)[^。！？!?\n]{0,15}?(?:生成|素材|图层)|generate\s+(an?\s+|the\s+)?(?:animated\s+|transparent\s+)?(image|picture|photo|illustration|poster|gif|png)|draw\s+(me\s+)?|design\s+(an?\s+)?|create\s+(an?\s+)?(?:animated\s+|transparent\s+)?(image|picture|gif|png)|make\s+(an?\s+)?(?:animated\s+|transparent\s+)?(image|picture|gif|png)/i;
 
 /** 冒号形式必须「生成指令词紧邻冒号」，避免把 16:9 这类比例冒号当成分隔符。 */
 const COLON_GENERATE_PATTERN =
@@ -180,10 +183,17 @@ function extractBatchCount(text: string): number | undefined {
     return undefined;
 }
 
-/** 识别具体的业务场景用途 */
+function stripNegativePrompt(text: string): string {
+    return text
+        .replace(/(?:\[负面提示词\]|负面提示词|negative prompt|negative:|避免|avoid)[\s\S]*$/i, "")
+        .trim();
+}
+
+/** 识别具体的业务场景用途（先隔离负面提示词，避免负面词中的「LOGO」「文字」等反向触发场景误判） */
 function detectUsageScene(text: string): string | undefined {
+    const positiveText = stripNegativePrompt(text) || text;
     for (const rule of USAGE_SCENE_RULES) {
-        if (rule.pattern.test(text)) return rule.scene;
+        if (rule.pattern.test(positiveText)) return rule.scene;
     }
     return undefined;
 }
@@ -206,13 +216,14 @@ export function stripInstructionPrefix(text: string) {
     trimmed = trimmed.replace(/[，,。.!！、\s]*(?:共|一共|总共)?\s*(?:\d+|十一|十二|十|[一二两三四五六七八九几])\s*[张幅个套组次]$/i, "").trim();
     trimmed = trimmed.replace(/[，,。.!！、\s]*(?:再|重新)?(?:生成|来|做|出|搞)?\s*一?次$/i, "").trim();
     const stripped = trimmed.replace(/^[，,。.!！、：:\s]+/, "").trim();
-    if ((stripped === "素材" || !stripped) && /海报/i.test(text)) {
+    const cleanTrailing = stripped.replace(/(?:[，,。.!！、：:\s]+|(?:请|帮我)?(?:生成|出图|做图|制作|绘制))+$/i, "").trim();
+    if ((cleanTrailing === "素材" || !cleanTrailing) && /海报/i.test(text)) {
         return "海报设计素材（主体核心元素、装饰边框与纹样）";
     }
-    if ((stripped === "素材" || !stripped) && /游戏/i.test(text)) {
+    if ((cleanTrailing === "素材" || !cleanTrailing) && /游戏/i.test(text)) {
         return "游戏道具素材";
     }
-    return stripped;
+    return cleanTrailing;
 }
 
 /** 提取续作/增补中的微调要求（如从「换个姿势再来一个」中提取「换个姿势」，从「要双爪合十求抱抱」中提取「双爪合十求抱抱」） */
@@ -223,13 +234,13 @@ export function extractFollowUpModification(input: string): string {
     text = text.replace(/(?:[，,。.!！、\s]*(?:共|一共|总共)?\s*(?:\d+|十一|十二|十|[一二两三四五六七八九几])\s*[张幅个套组次])+/gi, "");
     text = text.replace(/(?:[，,。.!！、\s]*(?:再|重新|另外再?|接着|继续)?(?:生成|画|来|做|出|整|搞)?\s*(?:一?[个张幅组套版次]|几[个张幅次]|同款)?)+$/gi, "");
     text = text.replace(/^[，,。.!！、：:\s]+|[，,。.!！、：:\s]+$/g, "");
-    if (/^(?:再|重新|继续|再来|再出|再做|再生成)?(?:一?次|一?张|一?版)?$/i.test(text)) return "";
+    if (/^(?:再|重新|继续|再来|再出|再做|再生成)?(?:一?次|一?张|一?版|横屏|竖屏|方屏|横版|竖版|方版|横图|竖图|方图)?(?:的|图)?$/i.test(text)) return "";
     return text;
 }
 
 /** 延续上一轮生成的追问/增补指令：如「再生成一个」「再来一张」「换个姿势再来一个」「不改变她原来的脸，再来一张」「要双爪合十求抱抱」 */
 export const FOLLOW_UP_PATTERN =
-    /^(?:我?想要?|来个|整个|搞个|做个|换成|选|我选)\s*([^。！？!?\n]{2,30})|(?:再|另外再?|重新|接着|继续|换[个一次]|换种|换套|换身|按[照这个]?风格再?|延续[这个]?风格再?)(?:生成|画|来|做|出|整|搞)?\s*(?:一?[个张幅组套版次]|几[个张幅次]|同款)?|不改变.*再来|换个.*再[来画生成]|延续.*再[来画生成]|按.*风格.*再|再生成一次|再来一次/i;
+    /^(?:我?想要?|来个|整个|搞个|做个|换成|选|我选)\s*([^。！？!?\n]{2,30})|(?:再|另外再?|重新|接着|继续|换[个一次]|换种|换套|换身|按[照这个]?风格再?|延续[这个]?风格再?)(?:生成|画|来|做|出|整|搞)?\s*(?:一?[个张幅组套版次]|几[个张幅次]|\d+\s*[个张幅组套版次]|[一二两三四五六七八九几]\s*[个张幅组套版次]|同款)?|^(?:再?来|再?搞|再?整|再?出|再?做)\s*(?:\d+|[一二两三四五六七八九几])\s*[个张幅组套版次]|不改变.*再来|换个.*再[来画生成]|延续.*再[来画生成]|按.*风格.*再|再生成一次|再来一次/i;
 
 /** 提取上一轮助手回复中推荐的选项（如「摸摸」或者「双爪合十求抱抱」） */
 export function extractAssistantSuggestions(history?: Array<{ role: string; text?: string }>): string[] {
@@ -250,22 +261,29 @@ export function extractAssistantSuggestions(history?: Array<{ role: string; text
 }
 
 /** 追溯历史会话中最近一次的生成提示词，用于「再生成一个」「换个姿势再来一张」等延续生成意图 */
-export function findLastGenerationPrompt(history?: Array<{ role: string; text?: string; call?: AgentToolCall; promptBlocks?: string[] }>): string {
+export function findLastGenerationPrompt(history?: Array<{ role: string; text?: string; content?: string; call?: AgentToolCall | { tool?: string; name?: string; arguments?: Record<string, unknown> }; toolCalls?: Array<{ tool?: string; name?: string; arguments?: Record<string, unknown> }>; promptBlocks?: string[] }>): string {
     if (!history || !history.length) return "";
     // 若最后一条为当前 user 消息，排除之（只往前追溯真实历史）
     const endIndex = history[history.length - 1]?.role === "user" ? history.length - 2 : history.length - 1;
     for (let index = endIndex; index >= 0; index -= 1) {
         const item = history[index];
-        if (item.call && typeof item.call === "object") {
-            const call = item.call;
-            if (call.tool === "generate_image" || call.tool === "edit_image" || call.tool === "canvas_create_image_node") {
-                const prompt = typeof call.arguments?.prompt === "string" ? call.arguments.prompt.trim() : "";
-                if (prompt) return prompt;
-            }
-            if (call.tool === "canvas_batch_generate_nodes" && Array.isArray(call.arguments?.tasks)) {
-                const first = call.arguments.tasks[0];
-                if (first && typeof first.prompt === "string" && first.prompt.trim()) {
-                    return first.prompt.trim();
+        const calls = [
+            ...(item.call ? [item.call] : []),
+            ...(Array.isArray(item.toolCalls) ? item.toolCalls : []),
+        ];
+        for (const call of calls) {
+            if (call && typeof call === "object") {
+                const toolName = (call as { tool?: string; name?: string }).tool || (call as { tool?: string; name?: string }).name;
+                const args = (call as { arguments?: Record<string, unknown> }).arguments;
+                if (toolName === "generate_image" || toolName === "edit_image" || toolName === "canvas_create_image_node") {
+                    const prompt = typeof args?.prompt === "string" ? args.prompt.trim() : "";
+                    if (prompt) return prompt;
+                }
+                if (toolName === "canvas_batch_generate_nodes" && Array.isArray(args?.tasks)) {
+                    const first = (args.tasks as Array<{ prompt?: string }>)[0];
+                    if (first && typeof first.prompt === "string" && first.prompt.trim()) {
+                        return first.prompt.trim();
+                    }
                 }
             }
         }
@@ -273,11 +291,12 @@ export function findLastGenerationPrompt(history?: Array<{ role: string; text?: 
             const p = String(item.promptBlocks[0] || "").trim();
             if (p) return p;
         }
-        if (item.role === "user" && item.text) {
-            if (REFERENCE_PROMPT_PATTERN.test(item.text) || FOLLOW_UP_PATTERN.test(item.text) || PURE_INQUIRY_PATTERN.test(item.text)) {
+        const userText = item.text || item.content;
+        if (item.role === "user" && userText) {
+            if (REFERENCE_PROMPT_PATTERN.test(userText) || FOLLOW_UP_PATTERN.test(userText) || PURE_INQUIRY_PATTERN.test(userText)) {
                 continue;
             }
-            const stripped = stripInstructionPrefix(item.text);
+            const stripped = stripInstructionPrefix(userText);
             if (stripped.length >= 3 && (countVisualCategories(stripped) >= 1 || stripped.length >= 8)) {
                 return stripped;
             }
@@ -336,6 +355,9 @@ export function detectAgentIntent(
     const usageScene = detectUsageScene(input) || (!GENERATE_ACTION_PATTERN.test(input) && historyStickerContext ? "微信表情包" : undefined);
     const batchCount = extractBatchCount(input);
     const colonBody = extractColonBody(input);
+    const stripped = stripInstructionPrefix(input);
+    const isAspectOnly = /^(?:横屏|竖屏|方屏|横版|竖版|方版|宽屏|全屏|壁纸|正方形|长方形|横图|竖图|方图|16:9|9:16|1:1|4:3|3:4|高画质|高清|超清)+(?:的|图)?$/i.test(stripped);
+    const inferredSize = inferImageSizeFromPrompt(input, "");
 
     // ⑤ 纯功能/使用咨询提问（如「怎么用」「支持哪些模型」）→ 聊天
     if (!colonBody && PURE_INQUIRY_PATTERN.test(input)) {
@@ -346,9 +368,9 @@ export function detectAgentIntent(
     const previousPrompt = findLastGenerationPrompt(options?.history);
     const assistantSuggestions = extractAssistantSuggestions(options?.history);
     const matchesSuggestion = assistantSuggestions.some((s) => input.includes(s) || s.includes(input));
-    const isFollowUp = (FOLLOW_UP_PATTERN.test(input) || /^(再来|再出|换一版|换个风格|换个姿势|再生成一次|再来一次)$/.test(input) || matchesSuggestion) && Boolean(previousPrompt);
+    const isFollowUp = (FOLLOW_UP_PATTERN.test(input) || /^(再来|再出|换一版|换个风格|换个姿势|再生成一次|再来一次)$/.test(input) || matchesSuggestion || isAspectOnly) && Boolean(previousPrompt);
     if (isFollowUp && previousPrompt) {
-        const modification = extractFollowUpModification(input);
+        const modification = isAspectOnly ? "" : extractFollowUpModification(input);
         const combined = modification ? `${previousPrompt}，${modification}` : previousPrompt;
         return {
             kind: "generate_image",
@@ -356,6 +378,7 @@ export function detectAgentIntent(
             explicit: true,
             direct: false,
             ...(isGif ? { format: "gif" as const } : {}),
+            ...(inferredSize ? { size: inferredSize } : {}),
             ...(isTransparent ? { background: "transparent" as const } : {}),
             ...(isDecompose ? { decompose: true } : {}),
             ...(isCanvas ? { isCanvas: true } : {}),
@@ -367,14 +390,18 @@ export function detectAgentIntent(
 
     // ⑦ 显式生成/创作/设计/拆解动作 → 生成图片
     if (GENERATE_ACTION_PATTERN.test(input)) {
-        const stripped = stripInstructionPrefix(input);
         let prompt = colonBody ?? stripped;
-        if (!prompt && previousPrompt) {
+        if ((!prompt || isAspectOnly) && previousPrompt) {
             prompt = previousPrompt;
         } else if (!prompt && countVisualCategories(input) >= 2 && input.length >= 24) {
             prompt = input;
         }
-        prompt = sanitizeExtractedPrompt(prompt, input);
+        if (!isAspectOnly) {
+            prompt = sanitizeExtractedPrompt(prompt, input);
+        }
+        if (!prompt && previousPrompt) {
+            prompt = previousPrompt;
+        }
         // 如果是拆解任务、画布排布任务、或者有明确用途但描述较短，交给模型进行深度分析与拆解规划；若是详细提示词则直接执行
         const direct = Boolean(colonBody && prompt) || (!isDecompose && !isCanvas && (prompt.length >= 24 || countVisualCategories(prompt) >= 2));
         return {
@@ -383,6 +410,7 @@ export function detectAgentIntent(
             explicit: true,
             direct,
             ...(isGif ? { format: "gif" as const } : {}),
+            ...(inferredSize ? { size: inferredSize } : {}),
             ...(isTransparent ? { background: "transparent" as const } : {}),
             ...(isDecompose ? { decompose: true } : {}),
             ...(isCanvas ? { isCanvas: true } : {}),

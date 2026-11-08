@@ -306,7 +306,7 @@ export default function ChatPage() {
             const controller = new AbortController();
             controllersRef.current.set(targetSessionId, controller);
             let stepSeq = 0;
-            let lastToolStepId: string | null = null;
+            const activeToolStepsMap = new Map<string, string>();
 
             try {
                 const result = await runAgentTurn({
@@ -345,7 +345,8 @@ export default function ChatPage() {
                         } else if (event.type === "tool-start") {
                             stepSeq += 1;
                             const stepId = `tool-${stepSeq}`;
-                            lastToolStepId = stepId;
+                            const callKey = `${event.call.tool}:${event.call.arguments.title || event.call.arguments.prompt || JSON.stringify(event.call.arguments)}`;
+                            activeToolStepsMap.set(callKey, stepId);
                             setSessionRun(targetSessionId, (prev) => {
                                 const nextSteps = prev.steps.map((step) =>
                                     step.status === "running" || step.status === "correction" || step.status === "waiting-retry"
@@ -377,9 +378,15 @@ export default function ChatPage() {
                                 };
                             });
                         } else if (event.type === "tool-end") {
+                            const callKey = `${event.call.tool}:${event.call.arguments.title || event.call.arguments.prompt || JSON.stringify(event.call.arguments)}`;
+                            const stepId = activeToolStepsMap.get(callKey);
+                            activeToolStepsMap.delete(callKey);
                             setSessionRun(targetSessionId, (prev) => {
-                                const nextSteps = prev.steps.map((step) => (step.id === lastToolStepId && step.status === "running" ? { ...step, status: "done" as const } : step));
-                                lastToolStepId = null;
+                                const nextSteps = prev.steps.map((step) =>
+                                    (step.id === stepId || (!stepId && step.kind === "tool" && step.status === "running"))
+                                        ? { ...step, status: "done" as const }
+                                        : step,
+                                );
                                 const isImageTool = event.call.tool === "generate_image" || event.call.tool === "edit_image";
                                 const completed = isImageTool
                                     ? [...prev.completedToolResults, { id: nanoid(), call: event.call, result: event.result }]
