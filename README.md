@@ -6,7 +6,7 @@
 
 > **二次开发声明（二开项目）**
 > 本仓库是 [basketikun/infinite-canvas](https://github.com/basketikun/infinite-canvas) 的**二次开发（二开）项目**，不是官方仓库，也不代表上游项目或其维护者。
-> 原始代码与设计版权归原作者所有，遵循 MIT License（见 [LICENSE](LICENSE)）；本仓库在上游基础上做了功能开发与更新，改动概览与归属说明见 [NOTICE.md](NOTICE.md)。
+> 原始代码与设计版权归原作者所有，遵循 MIT License（见 [LICENSE](LICENSE)）；本仓库在上游基础上做了 120 个提交的功能开发与更新（对话 Agent、生图排队与重试、画布批量、诊断与排版等），**逐项明细、协议与免责说明见 [NOTICE.md](NOTICE.md)**。
 
 
 <p align="center">
