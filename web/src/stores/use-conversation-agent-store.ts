@@ -4,6 +4,7 @@ import { create } from "zustand";
 
 import type { AgentImageRef, AgentLaunchContext, AgentMessage, AgentSession, AgentStep, AgentToolCall, AgentToolResult } from "@/lib/conversation-agent/types";
 import type { AgentIntent } from "@/lib/conversation-agent/intent";
+import { resolvePersistedScope, selectHydratedSessionId, type SessionScope } from "@/lib/conversation-agent/session-select";
 
 const storage = localforage.createInstance({ name: "infinite-canvas", storeName: "agent_conversations" });
 const MAX_SESSIONS = 50;
@@ -11,6 +12,18 @@ const MAX_MESSAGES = 200;
 const PERSIST_DELAY_MS = 400;
 
 type PersistedState = { sessions: AgentSession[]; activeSessionId: string | null };
+
+type CreateSessionOptions = { scope?: SessionScope; canvasProjectId?: string; forceNew?: boolean };
+
+/**
+ * createSession 的重载：
+ * - 默认/chat：始终返回会话 id；
+ * - canvas：必须绑定 canvasProjectId，拒绝创建时返回 null（调用方负责提示）。
+ */
+type CreateSession = {
+    (options?: { scope?: "chat"; canvasProjectId?: string; forceNew?: boolean }): string;
+    (options: { scope: "canvas"; canvasProjectId?: string; forceNew?: boolean }): string | null;
+};
 
 export type SessionRunState = {
     running: boolean;
@@ -45,7 +58,7 @@ type ConversationAgentStore = {
     consumeReferences: () => AgentImageRef[];
     setComposerDraft: (text: string) => void;
     consumeComposerDraft: () => string | null;
-    createSession: (options?: { scope?: "chat" | "canvas"; canvasProjectId?: string }) => string;
+    createSession: CreateSession;
     deleteSession: (id: string) => void;
     renameSession: (id: string, title: string) => void;
     setActiveSession: (id: string) => void;
@@ -93,38 +106,17 @@ function sanitizeMessages(value: unknown): AgentMessage[] {
     });
 }
 
-function isCanvasSessionHeuristic(item: Record<string, unknown>): boolean {
-    if (item.scope === "canvas") return true;
-    if (item.canvasProjectId) return true;
-    const title = String(item.title || "");
-    if (/在画布|画布|画板/i.test(title)) return true;
-    const messages = Array.isArray(item.messages) ? item.messages : [];
-    for (const msg of messages) {
-        if (!msg || typeof msg !== "object") continue;
-        const record = msg as Record<string, unknown>;
-        const call = record.call as Record<string, unknown> | undefined;
-        if (call && typeof call === "object" && typeof call.tool === "string" && call.tool.startsWith("canvas_")) {
-            return true;
-        }
-        if (record.role === "user") {
-            const text = String(record.text || "");
-            if (/^在画布上/i.test(text)) return true;
-        }
-    }
-    return false;
-}
-
 function sanitizeSessions(value: unknown): AgentSession[] {
     if (!Array.isArray(value)) return [];
     return value
         .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"))
         .map((item) => {
-            const isCanvas = isCanvasSessionHeuristic(item);
+            const scope = resolvePersistedScope(item);
             return {
                 id: String(item.id || nanoid()),
                 title: String(item.title || ""),
-                scope: isCanvas ? ("canvas" as const) : ("chat" as const),
-                ...(item.canvasProjectId ? { canvasProjectId: String(item.canvasProjectId) } : {}),
+                scope,
+                ...(scope === "canvas" && item.canvasProjectId ? { canvasProjectId: String(item.canvasProjectId) } : {}),
                 messages: sanitizeMessages(item.messages).map((message) => (message.role === "assistant" ? { ...message, promptBlocks: Array.isArray(message.promptBlocks) ? message.promptBlocks : [] } : message)),
                 createdAt: Number(item.createdAt) || Date.now(),
                 updatedAt: Number(item.updatedAt) || Date.now(),
@@ -188,30 +180,34 @@ export const useConversationAgentStore = create<ConversationAgentStore>()((set, 
                 const rawSessions = sanitizeSessions(saved?.sessions);
                 // 过滤掉既无内容也非当前唯一的幽灵空会话
                 const sessions = rawSessions.filter((s, idx) => s.messages.length > 0 || idx === 0);
-                const activeId = saved?.activeSessionId && sessions.some((session) => session.id === saved.activeSessionId && session.scope !== "canvas")
-                    ? saved.activeSessionId
-                    : sessions.find((s) => s.scope !== "canvas")?.id ?? sessions[0]?.id ?? null;
+                // 失效的 activeSessionId 直接回到空态，不静默改选其它会话（画布会话也不作为全局选中会话）
+                const activeId = selectHydratedSessionId(sessions, saved?.activeSessionId);
                 set({ sessions, activeSessionId: activeId, hydrated: true });
             } catch {
                 set({ hydrated: true });
             }
         },
-        createSession: (options?: { scope?: "chat" | "canvas"; canvasProjectId?: string }) => {
+        createSession: ((options?: CreateSessionOptions): string | null => {
             const scope = options?.scope || "chat";
             const canvasProjectId = options?.canvasProjectId;
-            if (scope === "canvas" && canvasProjectId) {
-                const existing = get().sessions.find((s) => s.scope === "canvas" && s.canvasProjectId === canvasProjectId);
-                if (existing) {
-                    set({ streamingText: "", runningTool: null });
-                    return existing.id;
-                }
-            } else if (scope === "chat") {
-                const currentActive = get().sessions.find((s) => s.id === get().activeSessionId && s.scope !== "canvas");
-                if (currentActive && currentActive.messages.length === 0) {
-                    return currentActive.id;
+            const forceNew = options?.forceNew === true;
+            // 画布会话必须绑定画布项目：projectId 缺失时拒绝创建，避免出现被所有项目共用的无主会话
+            if (scope === "canvas" && !canvasProjectId) return null;
+            if (!forceNew) {
+                if (scope === "canvas") {
+                    const existing = get().sessions.find((s) => s.scope === "canvas" && s.canvasProjectId === canvasProjectId);
+                    if (existing) {
+                        set({ streamingText: "", runningTool: null });
+                        return existing.id;
+                    }
+                } else {
+                    const currentActive = get().sessions.find((s) => s.id === get().activeSessionId && s.scope !== "canvas");
+                    if (currentActive && currentActive.messages.length === 0) {
+                        return currentActive.id;
+                    }
                 }
             }
-            const session = createSessionRecord(options);
+            const session = createSessionRecord({ scope, canvasProjectId });
             set((state) => ({
                 sessions: [session, ...state.sessions].slice(0, MAX_SESSIONS),
                 activeSessionId: scope === "chat" ? session.id : state.activeSessionId,
@@ -220,22 +216,17 @@ export const useConversationAgentStore = create<ConversationAgentStore>()((set, 
             }));
             schedulePersist();
             return session.id;
-        },
+        }) as CreateSession,
         deleteSession: (id) => {
             set((state) => {
                 const sessions = state.sessions.filter((session) => session.id !== id);
                 const nextRuns = { ...state.sessionRuns };
                 delete nextRuns[id];
-                const activeSessionId = state.activeSessionId === id ? (sessions[0]?.id ?? null) : state.activeSessionId;
-                const activeRun = activeSessionId ? nextRuns[activeSessionId] : undefined;
-                return {
-                    sessions,
-                    activeSessionId,
-                    sessionRuns: nextRuns,
-                    streamingText: activeRun?.streamingText ?? "",
-                    runningTool: activeRun?.runningTool ?? null,
-                    running: activeRun?.running ?? false,
-                };
+                // 删除当前会话后回到空态，不静默切换到其它会话（其它会话可能是无主/其它项目的画布会话）
+                if (state.activeSessionId === id) {
+                    return { sessions, activeSessionId: null, sessionRuns: nextRuns, streamingText: "", runningTool: null, running: false };
+                }
+                return { sessions, sessionRuns: nextRuns };
             });
             schedulePersist();
         },

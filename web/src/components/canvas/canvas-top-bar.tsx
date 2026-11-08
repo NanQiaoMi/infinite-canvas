@@ -185,13 +185,20 @@ function MenuLabel({ text, shortcut }: { text: string; shortcut: string }) {
     );
 }
 
+import { selectCanvasSession } from "@/lib/conversation-agent/session-select";
+import { useAgentStore } from "@/stores/use-agent-store";
 import { useConversationAgentStore } from "@/stores/use-conversation-agent-store";
 
 function CompactAgentStatus({ status, onClick }: { status: { connected: boolean; enabled: boolean; activity: string }; onClick: () => void }) {
     const colorTheme = useThemeStore((state) => state.theme);
     const theme = canvasThemes[colorTheme];
     const { t } = useTranslation();
-    const isAiRunning = useConversationAgentStore((state) => state.running);
+    const canvasProjectId = useAgentStore((state) => state.canvasContext?.snapshot?.projectId);
+    // 画布 AI 运行态只认“当前画布项目会话”的运行切片：画布轮次能亮起，chat 页/其它项目的后台轮次不再点亮画布顶栏
+    const isAiRunning = useConversationAgentStore((state) => {
+        const canvasSession = selectCanvasSession(state.sessions, canvasProjectId);
+        return canvasSession ? state.sessionRuns[canvasSession.id]?.running === true : false;
+    });
 
     let label = "AI 助手就绪";
     let dotColor = "#22c55e";

@@ -30,7 +30,8 @@ import { agentLocaleOf } from "@/lib/conversation-agent/system-prompt";
 import { formatAgentToolStepLabel, getInitialUnderstandStepLabel } from "@/lib/conversation-agent/formatters";
 import { detectAgentIntent } from "@/lib/conversation-agent/intent";
 import { recordDiagnostic } from "@/lib/conversation-agent/diagnostics";
-import type { AgentEvent, AgentMessage, AgentStep, AgentToolCall } from "@/lib/conversation-agent/types";
+import { matchesCanvasProject, selectCanvasSession } from "@/lib/conversation-agent/session-select";
+import type { AgentEvent, AgentImageRef, AgentMessage, AgentStep, AgentToolCall, AgentToolResult } from "@/lib/conversation-agent/types";
 import { nativeToolCallsToAgent, serializeToolResult } from "@/lib/conversation-agent/protocol";
 import { ChatMessage } from "@/pages/chat/components/chat-message";
 import { StepTrail } from "@/pages/chat/components/step-trail";
@@ -46,10 +47,12 @@ const QUICK_PROMPTS = [
 
 const NETWORK_ERROR_PATTERN = /network error|failed to fetch|load failed|networkerror|econnreset|socket hang up|fetch failed/i;
 const isNetworkError = (error: unknown) => NETWORK_ERROR_PATTERN.test(error instanceof Error ? error.message : String(error));
+// 稳定空数组引用：空闲时 steps 不随每次渲染新建，避免滚动 effect 被输入框打字等无关渲染误触发
+const EMPTY_STEPS: AgentStep[] = [];
 
 export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCodex?: () => void }) {
     const { t } = useTranslation();
-    const { message } = App.useApp();
+    const { message, modal } = App.useApp();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const closePanel = useAgentStore((state) => state.closePanel);
     const canvasContext = useAgentStore((state) => state.canvasContext);
@@ -57,53 +60,61 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
 
     const hydrated = useConversationAgentStore((state) => state.hydrated);
     const sessions = useConversationAgentStore((state) => state.sessions);
-    const streamingText = useConversationAgentStore((state) => state.streamingText);
-    const running = useConversationAgentStore((state) => state.running);
-    const runningTool = useConversationAgentStore((state) => state.runningTool);
+    const sessionRuns = useConversationAgentStore((state) => state.sessionRuns);
     const hydrate = useConversationAgentStore((state) => state.hydrate);
     const createSession = useConversationAgentStore((state) => state.createSession);
+    const deleteSession = useConversationAgentStore((state) => state.deleteSession);
     const appendMessages = useConversationAgentStore((state) => state.appendMessages);
-    const setStreamingText = useConversationAgentStore((state) => state.setStreamingText);
-    const setRunning = useConversationAgentStore((state) => state.setRunning);
-    const setRunningTool = useConversationAgentStore((state) => state.setRunningTool);
+    const setSessionRun = useConversationAgentStore((state) => state.setSessionRun);
+    const clearSessionRun = useConversationAgentStore((state) => state.clearSessionRun);
 
     const [input, setInput] = useState("");
-    const [steps, setStepsState] = useState<AgentStep[]>([]);
-    const currentStepsRef = useRef<AgentStep[]>([]);
-    const setSteps = useCallback((action: AgentStep[] | ((current: AgentStep[]) => AgentStep[])) => {
-        setStepsState((prev) => {
-            const next = typeof action === "function" ? action(prev) : action;
-            currentStepsRef.current = next;
-            return next;
-        });
-    }, []);
-
     const stepSeqRef = useRef(0);
     const controllerRef = useRef<AbortController | null>(null);
+    // 本面板发起的在飞轮次归属：项目/会话切换时只中断自己这一轮，不误杀其它会话
+    const runSessionIdRef = useRef<string | null>(null);
+    const runProjectIdRef = useRef<string | null>(null);
     const scrollRef = useRef<HTMLDivElement | null>(null);
 
-    const canvasSessions = sessions.filter((s) => s.scope === "canvas");
-    const activeSession = (projectId ? canvasSessions.find((s) => s.canvasProjectId === projectId) : null) ?? canvasSessions[0] ?? null;
+    // 画布会话严格绑定当前画布项目：匹配不到即空态，绝不复用其它项目/无主会话的历史
+    const activeSession = selectCanvasSession(sessions, projectId);
+    const activeSessionId = activeSession?.id ?? null;
+    // 运行态按会话切片，画布面板不再读写全局 running/streamingText/runningTool
+    const activeRun = activeSessionId ? sessionRuns[activeSessionId] : undefined;
+    const running = activeRun?.running ?? false;
+    const streamingText = activeRun?.streamingText ?? "";
+    const runningTool = activeRun?.runningTool ?? null;
+    const steps = activeRun?.steps ?? EMPTY_STEPS;
+    // 旧会话的工具卡片“重试”只在该会话仍归属当前画布项目时可用
+    const retryEnabled = Boolean(activeSession) && matchesCanvasProject(activeSession?.canvasProjectId, projectId);
+
+    const updateSteps = useCallback(
+        (sessionId: string, action: AgentStep[] | ((current: AgentStep[]) => AgentStep[])) => {
+            setSessionRun(sessionId, (current) => ({ ...current, steps: typeof action === "function" ? action(current.steps) : action }));
+        },
+        [setSessionRun],
+    );
 
     useEffect(() => {
         void hydrate();
     }, [hydrate]);
 
-    const lastSessionRef = useRef<string | null | undefined>(undefined);
+    const lastViewRef = useRef<{ projectId: string; sessionId: string | null } | null>(null);
     useEffect(() => {
-        const curId = activeSession?.id;
-        if (lastSessionRef.current && lastSessionRef.current !== curId) {
-            if (controllerRef.current) {
-                controllerRef.current.abort();
-                controllerRef.current = null;
-            }
-            setRunning(false);
-            setStreamingText("");
-            setRunningTool(null);
-            setSteps([]);
+        const next = { projectId: projectId ?? "", sessionId: activeSessionId };
+        const previous = lastViewRef.current;
+        lastViewRef.current = next;
+        if (!previous) return;
+        if (previous.projectId === next.projectId && previous.sessionId === next.sessionId) return;
+        const controller = controllerRef.current;
+        // 同一轮自己创建会话引起的视图变化不中断；真正切换项目/会话时中断在飞请求并重置视图
+        const sameRunView = Boolean(controller) && runSessionIdRef.current === next.sessionId && runProjectIdRef.current === next.projectId;
+        if (controller && !sameRunView) {
+            controller.abort();
+            controllerRef.current = null;
         }
-        lastSessionRef.current = curId;
-    }, [activeSession?.id, setSteps, setRunning, setStreamingText, setRunningTool]);
+        setInput("");
+    }, [projectId, activeSessionId]);
 
     useEffect(() => {
         if (!scrollRef.current) return;
@@ -180,26 +191,62 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
         [],
     );
 
+    /**
+     * 画布工具执行前做归属校验：运行中切换画布项目后，旧轮次的节点/生成不得落到新项目上。
+     * 非画布工具不受影响。
+     */
+    const executeGuardedTool = useCallback(
+        async (call: AgentToolCall, context: { signal: AbortSignal; references?: AgentImageRef[] }, expectedProjectId: string | null | undefined): Promise<AgentToolResult> => {
+            if (call.tool.startsWith("canvas_")) {
+                const currentProjectId = useAgentStore.getState().canvasContext?.snapshot?.projectId;
+                if (!matchesCanvasProject(expectedProjectId, currentProjectId)) {
+                    return { tool: call.tool, ok: false, code: "execution_failed", error: "画布项目已切换，已取消在旧画布上的操作；请在当前项目的画布助手中重新发起。" };
+                }
+            }
+            return executeAgentTool(call, context);
+        },
+        [],
+    );
+
     const send = useCallback(
         async (rawText?: string) => {
             const text = (rawText ?? input).trim();
-            if (!text || running) return;
-
-            let sessionId = activeSession?.id;
-            if (!sessionId) {
-                sessionId = createSession({ scope: "canvas", canvasProjectId: projectId });
+            if (!text || !hydrated) return;
+            if (!projectId) {
+                message.warning("请先打开一个画布项目，再使用画布助手");
+                return;
             }
-            lastSessionRef.current = sessionId;
+            if (running) return;
+
+            let sessionId = activeSession?.id ?? null;
+            if (!sessionId) {
+                // 只有当前画布项目还没有专属会话时才新建；会话强制绑定当前 projectId
+                sessionId = createSession({ scope: "canvas", canvasProjectId: projectId });
+                if (!sessionId) {
+                    message.warning("当前画布项目会话创建失败，请重新打开画布项目后再试");
+                    return;
+                }
+            }
+            runSessionIdRef.current = sessionId;
+            runProjectIdRef.current = projectId;
 
             appendMessages(sessionId, [{ id: nanoid(), role: "user", text, createdAt: Date.now() }]);
             setInput("");
-            setStreamingText("");
 
             const history = useConversationAgentStore.getState().sessions.find((s) => s.id === sessionId)?.messages ?? [];
             const intent = detectAgentIntent(text, { history });
             const initialLabel = getInitialUnderstandStepLabel(text, intent);
-            setSteps([{ id: "understand", kind: "understand", label: initialLabel, status: "running" }]);
-            setRunning(true);
+            setSessionRun(sessionId, (current) => ({
+                ...current,
+                running: true,
+                streamingText: "",
+                runningTool: null,
+                steps: [{ id: "understand", kind: "understand", label: initialLabel, status: "running" }],
+                completedToolResults: [],
+                turnStartedAt: Date.now(),
+                intent,
+                turnId: `turn_${nanoid()}`,
+            }));
 
             const controller = new AbortController();
             controllerRef.current = controller;
@@ -211,12 +258,12 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
                     tools: ALL_AGENT_TOOLS,
                     buildContext,
                     callModel,
-                    executeTool: (call, ctx) => executeAgentTool(call, ctx),
+                    executeTool: (call, ctx) => executeGuardedTool(call, ctx, projectId),
                     onEvent: (event: AgentEvent) => {
                         if (event.type === "assistant-stream") {
-                            setStreamingText(event.text);
+                            setSessionRun(sessionId, (current) => ({ ...current, streamingText: event.text }));
                             if (event.text.trim()) {
-                                setSteps((current) => {
+                                updateSteps(sessionId, (current) => {
                                     const hasTool = current.some((s) => s.kind === "tool");
                                     const isActionIntent = intent.kind === "generate_image" || intent.kind === "edit_image" || intent.isCanvas;
                                     if (isActionIntent && !hasTool) return current;
@@ -233,15 +280,14 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
                                 });
                             }
                         } else if (event.type === "tool-start") {
-                            setStreamingText("");
-                            setRunningTool(event.call);
-                            setSteps((current) => {
+                            setSessionRun(sessionId, (current) => ({ ...current, streamingText: "", runningTool: event.call }));
+                            updateSteps(sessionId, (current) => {
                                 const next = current.map((s) => (s.status === "running" || s.status === "correction" ? { ...s, status: "done" as const } : s));
                                 stepSeqRef.current += 1;
                                 return [...next, { id: `tool-${stepSeqRef.current}`, kind: "tool" as const, label: formatAgentToolStepLabel(event.call), status: "running" as const }];
                             });
                         } else if (event.type === "correction-start") {
-                            setSteps((current) => {
+                            updateSteps(sessionId, (current) => {
                                 const next = current.map((s) => (s.status === "running" ? { ...s, status: "done" as const } : s));
                                 stepSeqRef.current += 1;
                                 return [
@@ -255,15 +301,15 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
                                 ];
                             });
                         } else if (event.type === "tool-end") {
-                            setRunningTool(null);
-                            setSteps((current) => current.map((s) => (s.status === "running" ? { ...s, status: "done" as const } : s)));
+                            setSessionRun(sessionId, (current) => ({ ...current, runningTool: null }));
+                            updateSteps(sessionId, (current) => current.map((s) => (s.status === "running" ? { ...s, status: "done" as const } : s)));
                         }
                     },
                     signal: controller.signal,
                     maxRounds: 8,
                 });
 
-                const finalSteps = currentStepsRef.current.map((s) => (s.status === "running" ? { ...s, status: "done" as const } : s));
+                const finalSteps = (useConversationAgentStore.getState().sessionRuns[sessionId]?.steps ?? []).map((s) => (s.status === "running" ? { ...s, status: "done" as const } : s));
                 if (result.messages.length) {
                     let messagesToAppend = [...result.messages];
                     if (finalSteps.length > 0) {
@@ -300,7 +346,7 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
                 }
             } catch (err: unknown) {
                 const aborted = controller.signal.aborted;
-                const partial = useConversationAgentStore.getState().streamingText;
+                const partial = useConversationAgentStore.getState().sessionRuns[sessionId]?.streamingText ?? "";
                 if (aborted) {
                     if (partial.trim()) {
                         appendMessages(sessionId, [{ id: nanoid(), role: "assistant", text: partial, promptBlocks: [], createdAt: Date.now() }]);
@@ -318,25 +364,35 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
                     message.error(errorMsg);
                 }
             } finally {
-                setRunning(false);
-                setRunningTool(null);
-                setStreamingText("");
-                controllerRef.current = null;
+                // 只清理本会话的运行态，其它会话的后台任务不受影响
+                clearSessionRun(sessionId);
+                if (controllerRef.current === controller) controllerRef.current = null;
+                if (runSessionIdRef.current === sessionId) {
+                    runSessionIdRef.current = null;
+                    runProjectIdRef.current = null;
+                }
             }
         },
-        [input, running, createSession, appendMessages, setStreamingText, setSteps, setRunning, buildContext, callModel, setRunningTool, message],
+        [input, hydrated, projectId, running, activeSession?.id, createSession, appendMessages, setSessionRun, clearSessionRun, buildContext, callModel, updateSteps, executeGuardedTool, message],
     );
 
     /** 工具失败（生成中断/网络异常）后就地重试同一调用，无需重新描述需求。 */
     const retryTool = useCallback(
         async (toolMessage: Extract<AgentMessage, { role: "tool" }>) => {
             const sessionId = activeSession?.id;
-            if (!sessionId || useConversationAgentStore.getState().running) return;
+            const sessionProjectId = activeSession?.canvasProjectId;
+            if (!sessionId || !projectId) return;
+            if (!matchesCanvasProject(sessionProjectId, projectId)) {
+                message.warning("该历史调用属于其它画布项目，已禁止在当前画布重试");
+                return;
+            }
+            if (sessionRuns[sessionId]?.running) return;
             const controller = new AbortController();
             controllerRef.current = controller;
             const startedAt = Date.now();
             try {
-                const result = await executeAgentTool(toolMessage.call, { signal: controller.signal });
+                // 重试同样校验归属：执行瞬间当前画布必须仍是该会话所属项目
+                const result = await executeGuardedTool(toolMessage.call, { signal: controller.signal }, sessionProjectId);
                 appendMessages(sessionId, [
                     {
                         id: nanoid(),
@@ -354,7 +410,7 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
                 if (controllerRef.current === controller) controllerRef.current = null;
             }
         },
-        [activeSession?.id, appendMessages],
+        [activeSession?.id, activeSession?.canvasProjectId, projectId, sessionRuns, executeGuardedTool, appendMessages, message],
     );
 
     const handleStop = () => {
@@ -362,9 +418,39 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
             controllerRef.current.abort();
             controllerRef.current = null;
         }
-        setRunning(false);
-        setRunningTool(null);
-        setStreamingText("");
+        if (activeSessionId) clearSessionRun(activeSessionId);
+    };
+
+    /** 画布“新对话”必须强制新建会话，不复用当前会话（否则旧上下文继续生效）。 */
+    const handleNewConversation = () => {
+        if (!projectId) {
+            message.warning("请先打开一个画布项目，再新建画布会话");
+            return;
+        }
+        const id = createSession({ scope: "canvas", canvasProjectId: projectId, forceNew: true });
+        if (!id) message.warning("当前画布项目会话创建失败，请重新打开画布项目后再试");
+    };
+
+    /** 清空当前画布项目的助手会话（二次确认），被污染的历史可在界面内重置。 */
+    const handleClearConversation = () => {
+        if (!activeSession || !projectId) return;
+        modal.confirm({
+            title: "清空当前画布会话",
+            content: "将删除当前画布项目的画布助手会话及全部历史消息，画布节点、图片与项目内容不受影响。是否继续？",
+            okText: "清空会话",
+            okButtonProps: { danger: true },
+            cancelText: "取消",
+            onOk: () => {
+                if (controllerRef.current) {
+                    controllerRef.current.abort();
+                    controllerRef.current = null;
+                }
+                // 同一项目可能残留多个历史会话，一并删除，避免清空后旧会话又被选中
+                for (const session of useConversationAgentStore.getState().sessions) {
+                    if (session.scope === "canvas" && session.canvasProjectId === projectId) deleteSession(session.id);
+                }
+            },
+        });
     };
 
     return (
@@ -382,14 +468,26 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
                 </div>
 
                 <div className="flex items-center gap-1">
-                    <Tooltip title="新对话">
+                    <Tooltip title="新对话（新建画布会话，不复用当前上下文）">
                         <Button
                             type="text"
                             size="small"
                             className="!h-7 !w-7 !p-0"
                             style={{ color: theme.node.muted }}
                             icon={<Plus className="size-3.5" />}
-                            onClick={() => createSession({ scope: "canvas", canvasProjectId: projectId })}
+                            onClick={handleNewConversation}
+                            disabled={!projectId}
+                        />
+                    </Tooltip>
+                    <Tooltip title="清空当前画布会话">
+                        <Button
+                            type="text"
+                            size="small"
+                            className="!h-7 !w-7 !p-0"
+                            style={{ color: theme.node.muted }}
+                            icon={<Trash2 className="size-3.5" />}
+                            onClick={handleClearConversation}
+                            disabled={!activeSession}
                         />
                     </Tooltip>
                     {onSwitchToCodex ? (
@@ -419,7 +517,31 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
 
             {/* Messages Area */}
             <div ref={scrollRef} className="flex-1 overflow-y-auto px-3.5 py-4 space-y-4">
-                {(!activeSession || activeSession.messages.length === 0) && (
+                {!projectId && (
+                    <div className="flex flex-col items-center justify-center py-10 text-center">
+                        <div className="flex size-12 items-center justify-center rounded-2xl bg-stone-100 dark:bg-stone-800 text-stone-400">
+                            <Sparkles className="size-6" />
+                        </div>
+                        <h3 className="mt-3 text-sm font-medium">请先打开一个画布项目</h3>
+                        <p className="mt-1 max-w-[260px] text-xs text-stone-400 leading-relaxed">
+                            画布助手只在当前画布项目内工作，不会复用其它项目或对话页的会话历史
+                        </p>
+                    </div>
+                )}
+
+                {projectId && !activeSession && (
+                    <div className="flex flex-col items-center justify-center py-10 text-center">
+                        <div className="flex size-12 items-center justify-center rounded-2xl bg-stone-100 dark:bg-stone-800 text-stone-400">
+                            <Sparkles className="size-6" />
+                        </div>
+                        <h3 className="mt-3 text-sm font-medium">当前画布项目还没有会话</h3>
+                        <p className="mt-1 max-w-[260px] text-xs text-stone-400 leading-relaxed">
+                            发送第一条指令后会为该项目创建独立会话；「新对话」会强制新建，不会继承旧上下文
+                        </p>
+                    </div>
+                )}
+
+                {activeSession && activeSession.messages.length === 0 && (
                     <div className="flex flex-col items-center justify-center py-10 text-center">
                         <div className="flex size-12 items-center justify-center rounded-2xl bg-stone-100 dark:bg-stone-800 text-stone-400">
                             <Sparkles className="size-6" />
@@ -432,7 +554,7 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
                 )}
 
                 {activeSession?.messages.map((msg) => (
-                    <ChatMessage key={msg.id} message={msg} onToolRetry={msg.role === "tool" ? (toolMessage) => void retryTool(toolMessage) : undefined} />
+                    <ChatMessage key={msg.id} message={msg} onToolRetry={msg.role === "tool" && retryEnabled ? (toolMessage) => void retryTool(toolMessage) : undefined} />
                 ))}
 
                 {running && (
@@ -485,7 +607,7 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
                                 void send();
                             }
                         }}
-                        placeholder="给画布 Agent 发送指令或创作需求..."
+                        placeholder={projectId ? "给画布 Agent 发送指令或创作需求..." : "请先打开一个画布项目，再使用画布助手..."}
                         rows={2}
                         className="w-full resize-none border-none bg-transparent p-1 text-xs outline-none placeholder:text-stone-400"
                         style={{ color: theme.node.text }}
@@ -510,7 +632,7 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
                                 type="primary"
                                 shape="circle"
                                 className="!size-7 !min-w-7 bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-900"
-                                disabled={!input.trim()}
+                                disabled={!input.trim() || !hydrated}
                                 icon={<ArrowUp className="size-3.5" />}
                                 onClick={() => void send()}
                             />
