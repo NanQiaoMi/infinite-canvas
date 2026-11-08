@@ -100,6 +100,13 @@ const NEGATION_PATTERNS: RegExp[] = [
     /(只|仅)[^。！？!?\n]{0,6}(写|要|给|输出)[^。！？!?\n]{0,6}提示词/,
 ];
 
+/**
+ * 长文本加工请求（总结/翻译/改写/分析等）：即使正文里包含大量视觉词，也不能误判为「贴了一段生图提示词」。
+ * 必须同时出现「加工动词 + 文本对象」，避免把「数据分析大屏海报」这类正常画面描述排除掉。
+ */
+const TEXT_TASK_PATTERN =
+    /(?:总结|概括|摘要|提炼|翻译|解释|复述|缩写|扩写|续写|改写|润色|校对|整理|列出|分类|提取)(?:一下|下|这段|这段文字|以上|下面|上述|这篇|全文|文字|文本|内容|材料|文章|报告|邮件|文案|标题|要点|信息|成英文|成中文|成日文|英文|中文)/;
+
 const APPLY_PROMPT_PATTERN = /(填入|填到|填进|放到|放进|导入到?)[^。！？!?\n]{0,10}(工作台|生图工作台|视频创作台)/;
 
 /** 改图动作词：有参考图时才判定为编辑。 */
@@ -369,6 +376,11 @@ export function detectAgentIntent(
         return CHAT_INTENT;
     }
 
+    // ⑤.5 长文本加工请求（总结/翻译/改写/分析等）→ 聊天；避免长段文字里的视觉词被误判成生图提示词
+    if (!colonBody && TEXT_TASK_PATTERN.test(input) && !GENERATE_ACTION_PATTERN.test(input)) {
+        return CHAT_INTENT;
+    }
+
     // ⑥ 续作/增补上一轮生成（例如「再生成一个」「再来一张」「换个姿势再来一个」「要双爪合十求抱抱」或用户直接选择了上一轮推荐的选项）
     const previousPrompt = findLastGenerationPrompt(options?.history);
     const assistantSuggestions = extractAssistantSuggestions(options?.history);
@@ -450,6 +462,7 @@ export function detectAgentIntent(
     if (
         !SMALL_TALK_PATTERN.test(input) &&
         !PURE_INQUIRY_PATTERN.test(input) &&
+        !TEXT_TASK_PATTERN.test(input) &&
         !input.endsWith("?") &&
         !input.endsWith("？") &&
         (

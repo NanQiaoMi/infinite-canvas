@@ -9,6 +9,7 @@ describe("生成任务重试策略", () => {
         expect(isRetryableGenerationError("503 Service Unavailable")).toBe(true);
         expect(isRetryableGenerationError("task_interrupted")).toBe(true);
         expect(isRetryableGenerationError("上游接口不可达：Unable to connect. Is the computer able to access the url?")).toBe(true);
+        expect(isRetryableGenerationError("请求过于频繁，请稍后再试")).toBe(true);
         expect(isRetryableGenerationError("invalid args: prompt is required")).toBe(false);
         expect(isRetryableGenerationError("额度不足")).toBe(false);
         expect(isRetryableGenerationError("canceled")).toBe(false);

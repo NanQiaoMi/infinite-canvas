@@ -346,4 +346,12 @@ describe("本地意图识别", () => {
         expect(detectAgentIntent("写一句冬日咖啡的文案", { hasReferences: false }).kind).toBe("chat");
         expect(detectAgentIntent("写实风格少女", { hasReferences: false }).kind).toBe("generate_image");
     });
+
+    test("长文本加工请求不会被误判为生图提示词", () => {
+        const longText = `请用一句话总结下面这段文字：\n${"雪夜的灯塔在海雾中闪烁，守塔人记录着每一次潮汐与风向。".repeat(20)}`;
+        expect(detectAgentIntent(longText, { hasReferences: false }).kind).toBe("chat");
+        expect(detectAgentIntent("帮我翻译成英文：雪夜灯塔下的守塔人", { hasReferences: false }).kind).toBe("chat");
+        // 正常画面描述不能被文本加工规则误伤
+        expect(detectAgentIntent("帮我生成一张科技感数据分析大屏海报", { hasReferences: false }).kind).toBe("generate_image");
+    });
 });
