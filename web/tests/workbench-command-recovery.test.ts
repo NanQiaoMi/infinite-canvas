@@ -15,7 +15,19 @@ if (typeof globalThis.localStorage === "undefined") {
 import { beforeEach, describe, expect, it } from "bun:test";
 
 import { readImageTaskEchoMismatch, type ImageTaskResult } from "../src/services/api/image-queue";
-import { buildRecoverySlots, planWorkbenchRecovery, resolveRetrySlotSnapshot, useImageTaskStore, type PersistedImageTask } from "../src/stores/use-image-task-store";
+import {
+    BATCH_PLAN_TTL_MS,
+    buildRecoverySlots,
+    clearBatchPlan,
+    markBatchPlanSlotSubmitted,
+    planWorkbenchRecovery,
+    readResumableBatchPlan,
+    resolveBatchResumePlan,
+    resolveRetrySlotSnapshot,
+    saveBatchPlan,
+    useImageTaskStore,
+    type PersistedImageTask,
+} from "../src/stores/use-image-task-store";
 import {
     WORKBENCH_COMMAND_TTL_MS,
     isWorkbenchCommandExpired,
@@ -345,5 +357,81 @@ describe("恢复任务持久化字段", () => {
         expect(task?.baseUrl).toBe(CURRENT_BASE_URL);
         expect(task?.slotIndex).toBe(3);
         store.removeActiveTask("task-persist-1");
+    });
+});
+
+describe("批量生成刷新恢复 (batch plan)", () => {
+    const makeActiveTask = (taskId: string, slotIndex: number, overrides: Partial<PersistedImageTask> = {}): PersistedImageTask => ({
+        taskId,
+        source: "workbench",
+        prompt: "八张不同颜色的圆形图标",
+        model: "gpt-image-2.6",
+        baseUrl: CURRENT_BASE_URL,
+        createdAt: NOW,
+        updatedAt: NOW,
+        status: "processing",
+        slotIndex,
+        ...overrides,
+    });
+    const createPlan = () => {
+        saveBatchPlan({ batchId: "batch-refresh-1", prompt: "八张不同颜色的圆形图标", model: "gpt-image-2.6", count: 8, createdAt: NOW });
+        for (let slotIndex = 0; slotIndex < 4; slotIndex += 1) {
+            markBatchPlanSlotSubmitted("batch-refresh-1", slotIndex, `task-${slotIndex}`);
+        }
+    };
+
+    beforeEach(() => {
+        localStorage.clear();
+    });
+
+    it("持久化计划与已提交 task_id，刷新后已提交槽位续轮询、未提交槽位补提交", () => {
+        createPlan();
+        const plan = readResumableBatchPlan(NOW + 1000);
+        expect(plan?.count).toBe(8);
+        expect(plan?.submitted["0"]).toBe("task-0");
+        expect(plan?.submitted["3"]).toBe("task-3");
+        expect(plan?.submitted["7"]).toBeUndefined();
+
+        const tasks = Array.from({ length: 4 }, (_, slotIndex) => makeActiveTask(`task-${slotIndex}`, slotIndex));
+        const resume = resolveBatchResumePlan(plan!, tasks, { baseUrl: CURRENT_BASE_URL });
+        expect(resume.count).toBe(8);
+        expect(resume.entries).toHaveLength(8);
+        // 已提交：沿用原 task_id 续轮询
+        expect(resume.entries.slice(0, 4).map((entry) => entry.taskId)).toEqual(["task-0", "task-1", "task-2", "task-3"]);
+        // 未提交：没有 task_id，按批次原提示词重新提交
+        expect(resume.entries.slice(4).every((entry) => !entry.taskId)).toBe(true);
+        expect(resume.entries[7].prompt).toBe("八张不同颜色的圆形图标");
+        expect(resume.entries[7].slotIndex).toBe(7);
+    });
+
+    it("计划里记录过 task_id 但本地任务已丢失时仍按该 task_id 续轮询", () => {
+        createPlan();
+        const plan = readResumableBatchPlan(NOW + 1000)!;
+        const resume = resolveBatchResumePlan(plan, [], { baseUrl: CURRENT_BASE_URL });
+        expect(resume.entries[0].taskId).toBe("task-0");
+        expect(resume.entries[4].taskId).toBeUndefined();
+    });
+
+    it("超过 TTL 的批次计划不再恢复，避免延迟补提交旧提示词", () => {
+        createPlan();
+        expect(readResumableBatchPlan(NOW + 1000)).not.toBeNull();
+        expect(readResumableBatchPlan(NOW + BATCH_PLAN_TTL_MS + 1)).toBeNull();
+    });
+
+    it("跨渠道旧任务不会被恢复轮询，避免把别的渠道 task 挂到当前渠道", () => {
+        createPlan();
+        const plan = readResumableBatchPlan(NOW + 1000)!;
+        const tasks = [makeActiveTask("task-0", 0, { baseUrl: "https://other.example.com/v1" })];
+        const resume = resolveBatchResumePlan(plan, tasks, { baseUrl: CURRENT_BASE_URL });
+        // slot 0 的旧任务属于另一个渠道：整槽放弃恢复（不轮询、不用当前渠道补提交）
+        expect(resume.entries.some((entry) => entry.slotIndex === 0)).toBe(false);
+        expect(resume.entries).toHaveLength(7);
+    });
+
+    it("批次正常结束后清理计划；再次读取为空", () => {
+        createPlan();
+        expect(readResumableBatchPlan(NOW + 1000)).not.toBeNull();
+        clearBatchPlan("batch-refresh-1");
+        expect(readResumableBatchPlan(NOW + 1000)).toBeNull();
     });
 });

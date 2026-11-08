@@ -8,3 +8,4 @@ description: Planned follow-up work
 - Replace the Claude Code CLI adapter with a Claude Agent SDK adapter and improve the tool queue, following the [Local Agent Integration Plan](/docs/progress/local-agent-integration-plan).
 - Add Skill installation from web search, Skill resource-file management, and controlled local-memory persistence.
 - Verify the server-side image task lifecycle after reloads and unloads: task ids must not be reused across server restarts or instances, and task status lookups should keep echoing prompt/model so the client can reject mismatched results.
+- Investigate chatgpt2api burst behavior during client batch recovery: after reloading mid-batch, resubmitting the remaining slots can hit `429 Too Many Requests`, and one recovered `GET /tasks/{id}` returned `Task ... not found or expired`. Add server-side admission waiting / retry-after handling and confirm task TTL and eviction semantics under load.

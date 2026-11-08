@@ -22,7 +22,7 @@ import { requestEdit, requestGeneration, requestPromptOptimization } from "@/ser
 import { deleteStoredImages, ensureImagePreview, getImagePreviewRevision, previewUrlFor, resolveImageUrl, subscribeImagePreviews, uploadImage } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useConversationAgentStore } from "@/stores/use-conversation-agent-store";
-import { buildRecoverySlots, planWorkbenchRecovery, resolveRetrySlotSnapshot, useImageTaskStore } from "@/stores/use-image-task-store";
+import { clearBatchPlan, markBatchPlanSlotSubmitted, planWorkbenchRecovery, readResumableBatchPlan, resolveBatchResumePlan, resolveRetrySlotSnapshot, saveBatchPlan, useImageTaskStore, type BatchResumeEntry } from "@/stores/use-image-task-store";
 import { resolveImageCommand, useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
 import type { ImageTaskResult } from "@/services/api/image-queue";
 import { useQuotaStore } from "@/stores/use-quota-store";
@@ -128,6 +128,8 @@ export default function ImagePage() {
     const promptRef = useRef("");
     promptRef.current = prompt;
     const recoveryEpochRef = useRef(0);
+    // 服务端模式探测完成前不要直连渠道 baseUrl 请求队列状态（旧持久化配置可能指向 host.docker.internal，会被 CORS 拦截）。
+    const bootstrapChecked = useConfigStore((state) => state.bootstrapChecked);
     // 页面卸载时被 abort 的请求：其 catch/finally 不得再把取消结果写回持久化任务，任务应保持可恢复。
     const discardedControllersRef = useRef<WeakSet<AbortController>>(new WeakSet());
     // 页面已卸载：被中断的生成不得再写失败状态/失败日志。
@@ -135,17 +137,24 @@ export default function ImagePage() {
     const queueStatus = useImageTaskStore((state) => state.queueStatus);
 
     useEffect(() => {
+        // 服务端模式/静态模式探测完成后再查询队列水位：旧持久化配置的 baseUrl 可能指向服务端内部地址，
+        // 在 serverMode 生效前直连会被浏览器 CORS 拦截并产生噪音。
+        if (!bootstrapChecked) return;
         useImageTaskStore.getState().refreshQueueStatus(effectiveConfig);
         const timer = setInterval(() => {
             useImageTaskStore.getState().refreshQueueStatus(effectiveConfig);
         }, 15000);
         return () => clearInterval(timer);
-    }, [effectiveConfig.baseUrl, effectiveConfig.apiKey]);
+    }, [effectiveConfig.baseUrl, effectiveConfig.apiKey, bootstrapChecked]);
 
     // 页面刷新 / 重新进入时恢复未完成的后台生成任务：
-    // 只恢复当前渠道、提示词完整的 workbench 任务，按持久化 slotIndex 归位；恢复结束必须在 finally 复位 running。
+    // 刷新/重进恢复：已提交任务按 task_id 续轮询；批次计划中尚未提交的槽位按原提示词补提交，
+    // 避免批量生成刷新后只恢复第一批已提交任务、其余排队槽位丢失。
+    // 必须等 serverMode 探测完成后再恢复：否则旧持久化配置的 baseUrl 会绕过 /api/relay 直连内部地址而被 CORS 拦截。
     useEffect(() => {
-        const plan = planWorkbenchRecovery(useImageTaskStore.getState().getTasksBySource("workbench"), { baseUrl: effectiveConfig.baseUrl });
+        if (!bootstrapChecked) return;
+        const tasks = useImageTaskStore.getState().getTasksBySource("workbench");
+        const plan = planWorkbenchRecovery(tasks, { baseUrl: effectiveConfig.baseUrl });
         const rejectedMessage = (reason: "channel-mismatch" | "missing-prompt") =>
             reason === "channel-mismatch"
                 ? t("imageWorkbench.recoveryChannelMismatch", "原任务使用的 API 渠道与当前渠道不一致，已放弃恢复，请重新生成")
@@ -156,7 +165,12 @@ export default function ImagePage() {
         if (plan.rejected.length) {
             message.warning(t("imageWorkbench.recoveryRejected", "部分未完成任务因渠道或提示词变化已放弃恢复，请重新生成"));
         }
-        if (!plan.entries.length) return;
+
+        const batchPlan = readResumableBatchPlan();
+        const resumeEntries: BatchResumeEntry[] = batchPlan
+            ? resolveBatchResumePlan(batchPlan, tasks, { baseUrl: effectiveConfig.baseUrl }).entries
+            : plan.entries.map(({ task, slotIndex }) => ({ slotIndex, prompt: task.prompt, model: task.model, taskId: task.taskId }));
+        if (!resumeEntries.length) return;
 
         const epoch = recoveryEpochRef.current + 1;
         recoveryEpochRef.current = epoch;
@@ -165,41 +179,46 @@ export default function ImagePage() {
         setStartedAt(performance.now());
         setElapsedMs(0);
         // 绝对槽位落位：结果数组按最大 slotIndex 补齐，空槽用 skipped 占位且不渲染卡片。
-        const recoverySlots = buildRecoverySlots(plan.entries);
-        setResults(
-            recoverySlots.map((slot): GenerationResult =>
-                slot.kind === "task"
+        const maxSlotIndex = resumeEntries.reduce((max, entry) => Math.max(max, entry.slotIndex), -1);
+        const totalSlots = Math.max(maxSlotIndex + 1, batchPlan?.count ?? 0);
+        const nextResults: GenerationResult[] = Array.from({ length: totalSlots }, (_, slotIndex) => ({ id: `recover-skipped-${slotIndex}`, status: "skipped" }));
+        resumeEntries.forEach((entry) => {
+            const activeTask = plan.entries.find(({ slotIndex }) => slotIndex === entry.slotIndex)?.task;
+            nextResults[entry.slotIndex] = {
+                id: entry.taskId ? `recover-${entry.taskId}` : `recover-plan-${entry.slotIndex}`,
+                status: "pending",
+                ...(entry.taskId ? { taskId: entry.taskId } : {}),
+                ...(activeTask
                     ? {
-                          id: `recover-${slot.task.taskId}`,
-                          status: "pending",
-                          taskId: slot.task.taskId,
-                          phase: slot.task.status === "queued" ? "queued" : "processing",
-                          queuePosition: slot.task.queuePosition,
-                          estimatedWaitSeconds: slot.task.estimatedWaitSeconds,
-                          progress: slot.task.progress,
-                          durationSeconds: slot.task.durationSeconds,
-                          prompt: slot.task.prompt,
+                          phase: activeTask.status === "queued" ? ("queued" as const) : ("processing" as const),
+                          queuePosition: activeTask.queuePosition,
+                          estimatedWaitSeconds: activeTask.estimatedWaitSeconds,
+                          progress: activeTask.progress,
+                          durationSeconds: activeTask.durationSeconds,
                       }
-                    : { id: `recover-skipped-${slot.slotIndex}`, status: "skipped" },
-            ),
-        );
-        const distinctPrompts = Array.from(new Set(plan.entries.map(({ task }) => task.prompt.trim())));
+                    : {}),
+                prompt: entry.prompt,
+            };
+        });
+        setResults(nextResults);
+        const distinctPrompts = Array.from(new Set(resumeEntries.map((entry) => entry.prompt.trim())));
         setResultsPrompt(distinctPrompts.length === 1 ? distinctPrompts[0] : "");
         void Promise.all(
-            plan.entries.map(async ({ task, slotIndex }) => {
+            resumeEntries.map(async (entry) => {
                 const snapshot = {
-                    text: task.prompt,
-                    config: { ...effectiveConfig, model: task.model, count: "1" },
+                    text: entry.prompt,
+                    config: { ...effectiveConfig, model: entry.model, count: "1" },
                     references: [] as ReferenceImage[],
                 };
                 try {
-                    // 用持久化的绝对 slotIndex 作为结果下标，空槽由 skipped 占位，刷新后保持原网格位置。
-                    const img = await runGenerationSlot(slotIndex, snapshot, { taskId: task.taskId, expectedPrompt: task.prompt, expectedModel: task.model });
+                    // 已提交槽位按 task_id 续轮询；未提交槽位提交新任务（runGenerationSlot 内的 plan 标记保证再次刷新可恢复）。
+                    const recovery = entry.taskId ? { taskId: entry.taskId, expectedPrompt: entry.prompt, expectedModel: entry.model } : undefined;
+                    const img = await runGenerationSlot(entry.slotIndex, snapshot, recovery, batchPlan?.batchId);
                     if (img) {
                         saveLog(
                             buildLog({
                                 prompt: snapshot.text,
-                                model: task.model,
+                                model: entry.model,
                                 config: { ...snapshot.config, count: "1" },
                                 references: snapshot.references,
                                 durationMs: 0,
@@ -219,8 +238,9 @@ export default function ImagePage() {
             setRunning(false);
             setStartedAt(0);
             setRecovering(false);
+            if (batchPlan) clearBatchPlan(batchPlan.batchId);
         });
-    }, []);
+    }, [bootstrapChecked]);
 
     // 页面卸载时断开在途请求：只 abort 网络轮询（cancelOnAbort=false），服务端任务保持可恢复，不做取消；
     // 被中断的生成不再写失败状态/结果/失败日志（pageUnmountedRef 供批次收尾判断）。
@@ -294,6 +314,19 @@ export default function ImagePage() {
         setPreviewLog(null);
         setResults(Array.from({ length: generationCount }, () => ({ id: nanoid(), status: "pending", prompt: snapshot.text, references: [...snapshot.references] })));
         setResultsPrompt(snapshot.text);
+        // 纯文生图批次持久化完整计划：刷新时除已提交任务外，尚未提交的排队槽位也能按原提示词补提交。
+        // 参考图批次体积/隐私敏感，不持久化计划，仍只恢复已提交任务。
+        const batchId = nanoid();
+        if (!snapshot.references.length) {
+            saveBatchPlan({
+                batchId,
+                prompt: snapshot.text,
+                model: snapshot.config.model || snapshot.config.imageModel,
+                size: snapshot.config.size,
+                quality: snapshot.config.quality,
+                count: generationCount,
+            });
+        }
         const batchStartedAt = performance.now();
         setStartedAt(batchStartedAt);
 
@@ -308,7 +341,7 @@ export default function ImagePage() {
                 const slotIndex = cursor;
                 cursor += 1;
                 try {
-                    const value = await runGenerationSlot(slotIndex, snapshot);
+                    const value = await runGenerationSlot(slotIndex, snapshot, undefined, batchId);
                     if (value) {
                         settled[slotIndex] = { status: "fulfilled", value };
                     } else {
@@ -349,6 +382,8 @@ export default function ImagePage() {
             }
         } finally {
             if (!pageUnmountedRef.current) setRunning(false);
+            // 正常结束（含失败/取消）清理批次计划；页面卸载中断时保留，供下次进入时补提交未完成槽位。
+            if (!skipPersist) clearBatchPlan(batchId);
         }
     };
 
@@ -588,6 +623,7 @@ export default function ImagePage() {
         index: number,
         snapshot: { text: string; config: AiConfig; references: ReferenceImage[] },
         recovery?: RecoveryTaskExpectation,
+        batchId?: string,
     ) => {
         const itemStartedAt = performance.now();
         let currentTaskId: string | undefined = recovery?.taskId;
@@ -628,6 +664,8 @@ export default function ImagePage() {
                         durationSeconds: task.duration_seconds,
                         slotIndex: index,
                     });
+                    // 记录槽位与 task_id 的对应关系：刷新后既能续轮询，也能据此判断未提交槽位并补提交。
+                    if (batchId) markBatchPlanSlotSubmitted(batchId, index, task.task_id);
                 }
             };
 

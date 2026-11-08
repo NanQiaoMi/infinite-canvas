@@ -107,6 +107,130 @@ export function resolveRetrySlotSnapshot(slot: { prompt?: string; references?: R
     return { prompt, references: slot?.references ? [...slot.references] : [] };
 }
 
+const BATCH_PLAN_STORAGE_KEY = "infinite-canvas:pending_image_batch_plan";
+
+/** 批次计划的最长有效期：超过仍未恢复完成的计划视为过期，避免旧提示词被延迟补提交。 */
+export const BATCH_PLAN_TTL_MS = 15 * 60 * 1000;
+
+export type PersistedBatchPlan = {
+    batchId: string;
+    prompt: string;
+    model: string;
+    size?: string;
+    quality?: string;
+    count: number;
+    createdAt: number;
+    /** slotIndex -> 已提交的 taskId；刷新后据此续轮询，未提交的槽位据此补提交。 */
+    submitted: Record<string, string>;
+};
+
+function getLocalStorage(): Storage | null {
+    try {
+        return typeof localStorage === "undefined" ? null : localStorage;
+    } catch {
+        return null;
+    }
+}
+
+function readBatchPlanRaw(): PersistedBatchPlan | null {
+    const storage = getLocalStorage();
+    if (!storage) return null;
+    try {
+        const raw = storage.getItem(BATCH_PLAN_STORAGE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw) as PersistedBatchPlan;
+        if (!parsed || typeof parsed !== "object") return null;
+        if (typeof parsed.batchId !== "string" || !parsed.batchId) return null;
+        if (typeof parsed.prompt !== "string" || !parsed.prompt.trim()) return null;
+        if (typeof parsed.count !== "number" || parsed.count < 1 || parsed.count > 10) return null;
+        if (typeof parsed.createdAt !== "number") return null;
+        if (!parsed.submitted || typeof parsed.submitted !== "object") parsed.submitted = {};
+        return parsed;
+    } catch {
+        return null;
+    }
+}
+
+/** 读取仍可恢复的批次计划：仅保留 TTL 内、提示词完整的计划。 */
+export function readResumableBatchPlan(now = Date.now()): PersistedBatchPlan | null {
+    const plan = readBatchPlanRaw();
+    if (!plan) return null;
+    if (now - plan.createdAt > BATCH_PLAN_TTL_MS) return null;
+    return plan;
+}
+
+/**
+ * 批次开始时持久化完整计划（仅在无参考图的纯文生图批次启用，参考图编辑批次不持久化），
+ * 这样刷新时除已提交任务外，尚未提交的槽位也能按原提示词补提交。
+ * 隐私模式或存储配额不足时静默失败，不影响正常生成。
+ */
+export function saveBatchPlan(plan: Omit<PersistedBatchPlan, "submitted" | "createdAt"> & { createdAt?: number }): string {
+    const payload: PersistedBatchPlan = { ...plan, createdAt: plan.createdAt ?? Date.now(), submitted: {} };
+    try {
+        getLocalStorage()?.setItem(BATCH_PLAN_STORAGE_KEY, JSON.stringify(payload));
+    } catch {
+        // ignore storage errors
+    }
+    return payload.batchId;
+}
+
+/** 记录某槽位已提交的 taskId，供刷新后恢复轮询。 */
+export function markBatchPlanSlotSubmitted(batchId: string, slotIndex: number, taskId: string): void {
+    const plan = readBatchPlanRaw();
+    if (!plan || plan.batchId !== batchId) return;
+    plan.submitted[String(slotIndex)] = taskId;
+    try {
+        getLocalStorage()?.setItem(BATCH_PLAN_STORAGE_KEY, JSON.stringify(plan));
+    } catch {
+        // ignore storage errors
+    }
+}
+
+/** 批次正常结束或确认完成后清理计划；页面卸载中断时保留，供下次进入时继续恢复。 */
+export function clearBatchPlan(batchId: string): void {
+    const plan = readBatchPlanRaw();
+    if (!plan || plan.batchId !== batchId) return;
+    try {
+        getLocalStorage()?.removeItem(BATCH_PLAN_STORAGE_KEY);
+    } catch {
+        // ignore storage errors
+    }
+}
+
+export type BatchResumeEntry = { slotIndex: number; prompt: string; model: string; taskId?: string };
+
+export type BatchResumePlan = { entries: BatchResumeEntry[]; count: number };
+
+/**
+ * 根据持久化批次计划 + 已持久化的活跃任务，推导刷新后需要恢复/补提交的全部槽位：
+ * 有活跃任务的槽位按其 task_id 续轮询；没有任务但计划里记录过 task_id 的槽位也继续轮询；
+ * 两者都没有的槽位按批次提示词重新提交，从而补齐刷新前尚未提交的排队槽位。
+ */
+export function resolveBatchResumePlan(plan: PersistedBatchPlan, tasks: PersistedImageTask[], options?: { baseUrl?: string }): BatchResumePlan {
+    const currentBaseUrl = normalizeChannelBaseUrl(options?.baseUrl);
+    const activeBySlot = new Map<number, PersistedImageTask>();
+    for (const task of tasks) {
+        if (task.source !== "workbench") continue;
+        if (task.status !== "queued" && task.status !== "processing") continue;
+        if (typeof task.slotIndex !== "number" || task.slotIndex < 0 || task.slotIndex >= plan.count) continue;
+        if (activeBySlot.has(task.slotIndex)) continue;
+        activeBySlot.set(task.slotIndex, task);
+    }
+    const entries: BatchResumeEntry[] = [];
+    for (let slotIndex = 0; slotIndex < plan.count; slotIndex += 1) {
+        const active = activeBySlot.get(slotIndex);
+        if (active) {
+            const taskBaseUrl = normalizeChannelBaseUrl(active.baseUrl);
+            if (taskBaseUrl && currentBaseUrl && taskBaseUrl !== currentBaseUrl) continue;
+            entries.push({ slotIndex, prompt: active.prompt, model: active.model, taskId: active.taskId });
+            continue;
+        }
+        const submittedTaskId = plan.submitted[String(slotIndex)];
+        entries.push({ slotIndex, prompt: plan.prompt, model: plan.model, ...(submittedTaskId ? { taskId: submittedTaskId } : {}) });
+    }
+    return { entries, count: plan.count };
+}
+
 const STORAGE_KEY = "infinite-canvas:active_image_tasks";
 
 function loadFromStorage(): Record<string, PersistedImageTask> {
