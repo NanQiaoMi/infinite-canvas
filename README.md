@@ -6,8 +6,32 @@
 
 > **二次开发声明（二开项目）**
 > 本仓库是 [basketikun/infinite-canvas](https://github.com/basketikun/infinite-canvas) 的**二次开发（二开）项目**，不是官方仓库，也不代表上游项目或其维护者。
-> 原始代码与设计版权归原作者所有，遵循 MIT License（见 [LICENSE](LICENSE)）；本仓库在上游基础上做了 120 个提交的功能开发与更新（对话 Agent、生图排队与重试、画布批量、诊断与排版等），**逐项明细、协议与免责说明见 [NOTICE.md](NOTICE.md)**。
+> 原始代码与设计版权归原作者所有，遵循 MIT License（见 [LICENSE](LICENSE)）；本仓库在上游 `v0.20.0` 之上做了 **128 个提交**的本地开发（含合并；不含合并 112 个），**逐条提交清单见 [LOCAL-UPDATES.md](LOCAL-UPDATES.md)，协议与免责见 [NOTICE.md](NOTICE.md)**。
 
+
+---
+
+## 本仓库：NanQiaoMi 的二开版本
+
+> 上游是 [basketikun/infinite-canvas](https://github.com/basketikun/infinite-canvas)（MIT）。本仓库在其 `v0.20.0` 之上做了 **128 个提交**的本地开发（含合并；不含合并 112 个），当前仍是 `v0.20.0`，**未发版、开发中**。逐条提交清单见 **[LOCAL-UPDATES.md](LOCAL-UPDATES.md)**。
+
+**我做了什么（摘要）**
+
+1. **把「无限画布」做成 Agent 工作台**：对话里任务拆解 + 工具循环（ReAct），AI 自己决定出图、改图、批量排布与画布操作。
+2. **对话稳定性**：多会话/多线程隔离、后台丢图修复、网络重试与可见化、长文本误判修复、历史提示词污染治理。
+3. **生图链路**：排队与互斥去重、客户端并发上限、可恢复错误自动重试、刷新后任务恢复、张数超 4 的 422 拆批、默认模型 `gpt-image-2.6`、GIF（9 帧/5fps，可调 1–20fps）。
+4. **画布 Agent**：12 张批量排布（4 列网格）、节点创建/连线/聚焦/更新/删除、画布与普通会话隔离。
+5. **生成诊断**：诊断面板与持久化、最近 7 天失败率趋势、渠道健康检查。
+6. **服务端模式**：渠道管理、额度服务（每日/每周/IP）、relay、身份与管理后台 API、长任务超时。
+7. **界面与排版**：内置 Cascadia Mono + 方正小标宋字体、Claude 风格衬线体系、三端设计语言统一、动效打磨。
+8. **宣传片**：`promo/L43_活体实机录屏/` 90 秒 L43 风格衍生片《小方上岗记》。
+9. **工程化**：清理历史 TypeScript 错误至 typecheck 归零、构建与文档整理。
+
+**入口**：[本地更新详单](LOCAL-UPDATES.md) · [二开说明与协议](NOTICE.md) · [宣传片资料](promo/L43_活体实机录屏/) · [宣传片文案](promo/L43_活体实机录屏/05_视频号发布文案.md)
+
+---
+
+## 上游项目介绍（basketikun/infinite-canvas）
 
 <p align="center">
   <a href="https://linux.do/"><img src="https://img.shields.io/badge/Linux.do-Community-2b6de8?style=flat-square" alt="Linux.do"></a>
