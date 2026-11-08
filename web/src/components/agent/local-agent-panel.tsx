@@ -21,6 +21,7 @@ import { useShallow } from "zustand/react/shallow";
 import { useAgentStore, type AgentAttachment, type AgentBootstrapStatus, type AgentCanvasContext, type AgentCanvasReference, type AgentChatItem, type AgentConversationState, type AgentModel, type AgentPendingApproval, type AgentPendingToolCall, type AgentPermissionMode, type AgentReasoningEffort, type AgentThreadSummary } from "@/stores/use-agent-store";
 import { type CanvasAgentOp, type CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
 import { isSiteTool, runSiteTool } from "@/lib/agent/agent-site-tools";
+import { isCurrentThreadEvent as isCurrentThreadToolCall } from "@/lib/agent/agent-event-formatters";
 import { acknowledgeCodexHistory, activateAgentClient, AgentApiError, discoverAgentConfig, fetchAgentJson, interruptCodexTurn, postCodexApproval, postState, postToolResult } from "@/services/api/canvas-agent";
 import { AgentChatTimeline, AgentTaskProgress, AgentUsageBar } from "./agent-chat";
 import { AgentChatComposer } from "./agent-chat-composer";
@@ -436,7 +437,15 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
         source.addEventListener("tool_call", (event) => {
             if (!isCurrentConnection()) return;
             const data = parseEventData<AgentPendingToolCall>(event);
-            if (data) void handleToolCall(endpoint, token, data);
+            if (!data) return;
+            // 画布/站点工具只允许在发起该 tool_call 的对话里执行：切到其它对话后到达的旧调用直接丢弃并记录诊断；
+            // 老版本服务端不发送 threadId/turnId 时按兼容策略放行。
+            const current = useAgentStore.getState();
+            if (!isCurrentThreadToolCall(data, { threadId: current.activeThreadId, turnId: current.activeTurnId })) {
+                addEventLog(rt("log"), `已丢弃非当前线程的工具调用：${data.name}`, data);
+                return;
+            }
+            void handleToolCall(endpoint, token, data);
         });
         source.addEventListener("codex_approval", (event) => {
             if (!isCurrentConnection()) return;

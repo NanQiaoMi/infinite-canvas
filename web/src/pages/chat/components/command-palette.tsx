@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { AgentSession } from "@/lib/conversation-agent/types";
+import { selectChatSessions } from "@/lib/conversation-agent/session-view";
 import { cn } from "@/lib/utils";
 
 type CommandPaletteProps = {
@@ -34,13 +35,16 @@ export function CommandPalette({ open, onClose, sessions, activeSessionId, onSel
             { command: "/new", labelKey: "chat.commands.items.new" },
             { command: "/help", labelKey: "chat.commands.items.help" },
         ].map<PaletteItem>((item) => ({ id: `cmd:${item.command}`, group: t("chat.palette.commands"), label: item.command, hint: t(item.labelKey), run: () => onCommand(item.command) }));
-        const recent = sessions.slice(0, 6).map<PaletteItem>((session) => ({
-            id: `session:${session.id}`,
-            group: t("chat.palette.sessions"),
-            label: session.title || t("chat.untitled"),
-            hint: session.id === activeSessionId ? t("chat.palette.current") : undefined,
-            run: () => onSelectSession(session.id),
-        }));
+        // 命令面板只展示 chat 会话：画布会话由画布助手维护，不能从这里切进对话页。
+        const recent = selectChatSessions(sessions)
+            .slice(0, 6)
+            .map<PaletteItem>((session) => ({
+                id: `session:${session.id}`,
+                group: t("chat.palette.sessions"),
+                label: session.title || t("chat.untitled"),
+                hint: session.id === activeSessionId ? t("chat.palette.current") : undefined,
+                run: () => onSelectSession(session.id),
+            }));
         return [...actions, ...commands, ...recent];
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [sessions, activeSessionId, onNewChat, onSelectSession, onCommand, t]);

@@ -29,6 +29,7 @@ import { SmoothStreamText } from "./components/smooth-stream-text";
 const modelLabelOf = (option: string) => option.split("::").pop() || option;
 import { formatAgentToolStepLabel, getInitialUnderstandStepLabel } from "@/lib/conversation-agent/formatters";
 import { detectAgentIntent, type AgentIntent } from "@/lib/conversation-agent/intent";
+import { consumeLaunchPageContext, isSessionRunning, selectActiveChatSession, selectChatSessions, sessionSwitchResetPlan } from "@/lib/conversation-agent/session-view";
 import {
     clearDiagnostics,
     formatDiagnosticsReport,
@@ -69,6 +70,7 @@ export default function ChatPage() {
     const consumeReferences = useConversationAgentStore((state) => state.consumeReferences);
     const composerDraft = useConversationAgentStore((state) => state.composerDraft);
     const consumeComposerDraft = useConversationAgentStore((state) => state.consumeComposerDraft);
+    const closeArtifact = useConversationAgentStore((state) => state.closeArtifact);
     const hydrate = useConversationAgentStore((state) => state.hydrate);
     const createSession = useConversationAgentStore((state) => state.createSession);
     const deleteSession = useConversationAgentStore((state) => state.deleteSession);
@@ -88,8 +90,9 @@ export default function ChatPage() {
 
     const controllersRef = useRef<Map<string, AbortController>>(new Map());
     const scrollRef = useRef<HTMLDivElement | null>(null);
-    const chatSessions = useMemo(() => sessions.filter((session) => session.scope !== "canvas"), [sessions]);
-    const activeSession = chatSessions.find((session) => session.id === activeSessionId) ?? chatSessions[0] ?? null;
+    // 会话视图只展示 chat 会话；当前会话严格按 store 的 activeSessionId 命中，失效时显示空态而不是静默切到另一个会话。
+    const chatSessions = useMemo(() => selectChatSessions(sessions), [sessions]);
+    const activeSession = useMemo(() => selectActiveChatSession(sessions, activeSessionId), [sessions, activeSessionId]);
 
     // 当前活跃对话的独立执行状态切片，彻底消除跨对话交叉污染
     const activeRun = activeSession?.id ? sessionRuns[activeSession.id] : undefined;
@@ -128,19 +131,28 @@ export default function ChatPage() {
     const lastSessionRef = useRef<string | null | undefined>(undefined);
     useLayoutEffect(() => {
         const node = scrollRef.current;
-        if (!node) return;
         const currentActiveId = activeSession?.id ?? null;
-        const changed = lastSessionRef.current !== undefined && lastSessionRef.current !== currentActiveId;
+        // 切换会话时统一清理跨会话残留：输入框、启动上下文、参考图、全局信箱与产物面板，A 会话的内容不再注入 B 会话。
+        const reset = sessionSwitchResetPlan(lastSessionRef.current, currentActiveId);
         lastSessionRef.current = currentActiveId;
-        if (changed) {
-            setReferences([]);
-            node.scrollTop = node.scrollHeight;
+        if (reset) {
+            if (reset.composer) setInput("");
+            if (reset.pageContext) setPageContext(undefined);
+            if (reset.references) setReferences([]);
+            if (reset.mailboxes) {
+                consumeReferences();
+                consumeReference();
+                consumeComposerDraft();
+            }
+            if (reset.artifact) closeArtifact();
+            if (node) node.scrollTop = node.scrollHeight;
             return;
         }
+        if (!node) return;
         if (node.scrollHeight - node.scrollTop - node.clientHeight < 160) {
             node.scrollTo({ top: node.scrollHeight, behavior: "smooth" });
         }
-    }, [activeSession?.id, activeSession?.messages.length, runningTool]);
+    }, [activeSession?.id, activeSession?.messages.length, runningTool, closeArtifact, consumeComposerDraft, consumeReference, consumeReferences]);
 
     useLayoutEffect(() => {
         const node = scrollRef.current;
@@ -217,7 +229,13 @@ export default function ChatPage() {
         async (rawText?: string) => {
             let text = (rawText ?? input).trim();
             if (!text) return;
-            if (useConversationAgentStore.getState().running) return;
+            // 本会话指 store 当前 activeSessionId 命中的 chat 会话（与页面严格选择一致）；失效时发送会自动新建。
+            const storeAtSend = useConversationAgentStore.getState();
+            const storeActiveChat = storeAtSend.sessions.find((item) => item.id === storeAtSend.activeSessionId && item.scope !== "canvas");
+            const currentSessionId = activeSession?.id ?? storeActiveChat?.id ?? null;
+            const ensureSessionId = () => currentSessionId ?? createSession({ scope: "chat" });
+            // 重复提交守卫只看本会话的运行态：全局 running 会被其它会话/面板的运行态覆盖，不能作为本会话依据。
+            if (isSessionRunning(storeAtSend.sessionRuns, currentSessionId)) return;
             if (text.startsWith("/")) {
                 const [command, ...rest] = text.split(/\s+/);
                 const payload = rest.join(" ").trim();
@@ -227,8 +245,7 @@ export default function ChatPage() {
                     return;
                 }
                 if (command === "/help") {
-                    let sessionId = useConversationAgentStore.getState().activeSessionId;
-                    if (!sessionId) sessionId = createSession();
+                    const sessionId = ensureSessionId();
                     appendMessages(sessionId, [{ id: nanoid(), role: "assistant", text: t("chat.commands.helpText"), promptBlocks: [], createdAt: Date.now() }]);
                     setInput("");
                     return;
@@ -237,8 +254,7 @@ export default function ChatPage() {
                     const config = useConfigStore.getState().config;
                     const options = selectableModelsByCapability(config, "text");
                     if (!payload) {
-                        let sessionId = useConversationAgentStore.getState().activeSessionId;
-                        if (!sessionId) sessionId = createSession();
+                        const sessionId = ensureSessionId();
                         const models = options
                             .map((option) => {
                                 const decoded = decodeChannelModel(option);
@@ -282,8 +298,8 @@ export default function ChatPage() {
                     if (payload) text = t("chat.commands.editPrefix", { text: payload });
                 }
             }
-            let sessionId = activeSession?.id;
-            if (!sessionId) sessionId = createSession({ scope: "chat" });
+            const sessionId = ensureSessionId();
+            // targetSessionId 在进入 await 前固定，后续 appendMessages/setSessionRun 全部按它归属，多会话并发不混流。
             const targetSessionId = sessionId;
             const turnId = `turn_${nanoid()}`;
             const attachments = references.length ? references : undefined;
@@ -304,6 +320,9 @@ export default function ChatPage() {
             setInput("");
 
             const history = useConversationAgentStore.getState().sessions.find((session) => session.id === targetSessionId)?.messages ?? [];
+            // 从生图/视频工作台带入的草稿提示词只注入本轮（启动后的首轮），随后清空，避免常驻 system prompt 影响后续轮次。
+            const turnPageContext = consumeLaunchPageContext(pageContext);
+            if (turnPageContext.clear) setPageContext(undefined);
             const intent = detectAgentIntent(text, { hasReferences: Boolean(attachments?.length), history });
             const initialLabel = getInitialUnderstandStepLabel(text, intent);
 
@@ -328,7 +347,7 @@ export default function ChatPage() {
                     locale: agentLocaleOf(i18n.language),
                     messages: history,
                     tools: AGENT_TOOLS,
-                    buildContext,
+                    buildContext: () => ({ ...buildContext(), pageContext: turnPageContext.pageContext }),
                     callModel: createModelCaller(targetSessionId),
                     executeTool: (call, context) => executeAgentTool(call, context),
                     onEvent: (event: AgentEvent) => {
@@ -520,7 +539,7 @@ export default function ChatPage() {
                 useQuotaStore.getState().scheduleRefresh();
             }
         },
-        [activeSession?.id, appendMessages, buildContext, createModelCaller, clearSessionRun, createSession, input, references, setSessionRun, t],
+        [activeSession?.id, appendMessages, buildContext, createModelCaller, clearSessionRun, createSession, input, pageContext, references, setSessionRun, t],
     );
 
     const stop = () => {
@@ -543,23 +562,25 @@ export default function ChatPage() {
     };
 
     useEffect(() => {
-        if (!pendingReferences?.length && !pendingReference) return;
-        const incoming = pendingReferences?.length ? pendingReferences : pendingReference ? [pendingReference] : [];
+        // 直接读 store 的当前值：切会话的 layout effect 可能已在同一提交里清空信箱，避免旧会话参考图被注入新会话。
+        const store = useConversationAgentStore.getState();
+        const incoming = store.pendingReferences?.length ? store.pendingReferences : store.pendingReference ? [store.pendingReference] : [];
         if (!incoming.length) return;
         setReferences((current) => {
             const existingKeys = new Set(current.map((item) => item.storageKey));
             const toAdd = incoming.filter((item) => !existingKeys.has(item.storageKey)).map((item) => ({ ...item, id: nanoid() }));
             return [...current, ...toAdd];
         });
-        consumeReferences();
-        consumeReference();
-    }, [pendingReference, pendingReferences, consumeReference, consumeReferences]);
+        store.consumeReferences();
+        store.consumeReference();
+    }, [pendingReference, pendingReferences]);
 
     useEffect(() => {
-        if (composerDraft === null) return;
-        setInput(composerDraft);
-        consumeComposerDraft();
-    }, [composerDraft, consumeComposerDraft]);
+        const draft = useConversationAgentStore.getState().composerDraft;
+        if (draft === null) return;
+        setInput(draft);
+        useConversationAgentStore.getState().consumeComposerDraft();
+    }, [composerDraft]);
 
     const retryMessage = (index: number) => {
         const messages = activeSession?.messages ?? [];
@@ -571,7 +592,7 @@ export default function ChatPage() {
     const retryTool = useCallback(
         async (message: Extract<AgentMessage, { role: "tool" }>) => {
             const sessionId = activeSession?.id;
-            if (!sessionId || useConversationAgentStore.getState().running) return;
+            if (!sessionId || isSessionRunning(useConversationAgentStore.getState().sessionRuns, sessionId)) return;
             const controller = new AbortController();
             controllersRef.current.set(sessionId, controller);
             const startedAt = Date.now();
@@ -753,8 +774,8 @@ export default function ChatPage() {
             <CommandPalette
                 open={paletteOpen}
                 onClose={() => setPaletteOpen(false)}
-                sessions={sessions}
-                activeSessionId={activeSessionId}
+                sessions={chatSessions}
+                activeSessionId={activeSession?.id ?? null}
                 onSelectSession={(id) => setActiveSession(id)}
                 onNewChat={createAndClose}
                 onCommand={(command) => {
