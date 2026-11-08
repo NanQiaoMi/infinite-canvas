@@ -17,6 +17,7 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import { cn } from "@/lib/utils";
 import { nanoid } from "nanoid";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
+import { isRetryableGenerationError } from "@/lib/conversation-agent/generation-retry";
 import { requestEdit, requestGeneration, requestPromptOptimization } from "@/services/api/image";
 import { deleteStoredImages, ensureImagePreview, getImagePreviewRevision, previewUrlFor, resolveImageUrl, subscribeImagePreviews, uploadImage } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
@@ -116,6 +117,9 @@ export default function ImagePage() {
     const processedCommandRef = useRef(0);
     const agentTaskIdRef = useRef<string | undefined>(undefined);
     const activeControllersRef = useRef<Record<number, AbortController>>({});
+    const submittingRef = useRef(false);
+    const generatingRef = useRef(false);
+    const lastSubmitRef = useRef<{ text: string; at: number } | null>(null);
     const queueStatus = useImageTaskStore((state) => state.queueStatus);
 
     useEffect(() => {
@@ -219,7 +223,7 @@ export default function ImagePage() {
         }
     };
 
-    const runGenerationBatch = async (text: string, agentTaskId?: string) => {
+    const runGenerationBatchInner = async (text: string, agentTaskId?: string) => {
         const snapshot = buildRequestSnapshot(text);
         if (!snapshot) {
             if (agentTaskId) updateAgentTask(agentTaskId, { status: "failed", error: t("imageWorkbench.invalidParams") });
@@ -234,9 +238,24 @@ export default function ImagePage() {
         const batchStartedAt = performance.now();
         setStartedAt(batchStartedAt);
 
-        const tasks = Array.from({ length: generationCount }, (_, index) => runGenerationSlot(index, snapshot));
-
-        const result = await Promise.allSettled(tasks);
+        // 客户端并发限流：一次最多同时请求 4 个槽位，其余等前序完成再发，避免把上游打到限流（配合服务端队列）
+        const CLIENT_GENERATION_CONCURRENCY = 4;
+        const settled: Array<PromiseSettledResult<GeneratedImage>> = new Array(generationCount);
+        let cursor = 0;
+        const workers = Array.from({ length: Math.min(CLIENT_GENERATION_CONCURRENCY, generationCount) }, async () => {
+            while (cursor < generationCount) {
+                const slotIndex = cursor;
+                cursor += 1;
+                try {
+                    const value = await runGenerationSlot(slotIndex, snapshot);
+                    settled[slotIndex] = { status: "fulfilled", value };
+                } catch (reason) {
+                    settled[slotIndex] = { status: "rejected", reason };
+                }
+            }
+        });
+        await Promise.all(workers);
+        const result = settled;
         const successImages = result.filter((item): item is PromiseFulfilledResult<GeneratedImage> => item.status === "fulfilled").map((item) => item.value);
         const successCount = successImages.length;
         const failCount = generationCount - successCount;
@@ -264,7 +283,22 @@ export default function ImagePage() {
         }
     };
 
-    const generate = async () => {
+    /** 工作台批次提交互斥：生成/提交期间忽略重复点击，避免同一需求被并发提交多次。 */
+    const runGenerationBatch = async (text: string, agentTaskId?: string) => {
+        if (generatingRef.current) {
+            if (agentTaskId) updateAgentTask(agentTaskId, { status: "failed", error: t("workbench.busy") });
+            message.info(t("workbench.busy"));
+            return;
+        }
+        generatingRef.current = true;
+        try {
+            await runGenerationBatchInner(text, agentTaskId);
+        } finally {
+            generatingRef.current = false;
+        }
+    };
+
+    const generateInner = async () => {
         const agentTaskId = agentTaskIdRef.current;
         agentTaskIdRef.current = undefined;
         const text = prompt.trim();
@@ -297,6 +331,24 @@ export default function ImagePage() {
             setOptimizing(false);
         }
         await runGenerationBatch(text, agentTaskId);
+    };
+
+    /** 生成入口统一加互斥：优化中/生成中/提交中时忽略重复触发，并对 1.5s 内完全相同的提示词去重。 */
+    const generate = async () => {
+        if (running || optimizing || submittingRef.current) {
+            message.info(t("workbench.busy"));
+            return;
+        }
+        const text = prompt.trim();
+        const now = Date.now();
+        if (text && lastSubmitRef.current && lastSubmitRef.current.text === text && now - lastSubmitRef.current.at < 1500) return;
+        if (text) lastSubmitRef.current = { text, at: now };
+        submittingRef.current = true;
+        try {
+            await generateInner();
+        } finally {
+            submittingRef.current = false;
+        }
     };
 
     const approveOptimization = async () => {
@@ -485,9 +537,21 @@ export default function ImagePage() {
                     : {}),
             };
 
-            const result = snapshot.references.length
-                ? await requestEdit(snapshot.config, snapshot.text, snapshot.references, requestOpts)
-                : await requestGeneration(snapshot.config, snapshot.text, requestOpts);
+            const requestOnce = () =>
+                snapshot.references.length
+                    ? requestEdit(snapshot.config, snapshot.text, snapshot.references, requestOpts)
+                    : requestGeneration(snapshot.config, snapshot.text, requestOpts);
+            let result: Awaited<ReturnType<typeof requestGeneration>>;
+            for (let attempt = 0; ; attempt += 1) {
+                try {
+                    result = await requestOnce();
+                    break;
+                } catch (error) {
+                    // 排队拥挤/上游限流等可恢复错误：等待后自动重试一次，避免并发排队时直接失败
+                    if (controller.signal.aborted || attempt >= 1 || !isRetryableGenerationError(error)) throw error;
+                    await new Promise((resolve) => setTimeout(resolve, 1500));
+                }
+            }
 
             const image = result[0];
             if (!image) throw new Error(t("imageWorkbench.missingResult"));
@@ -719,11 +783,11 @@ export default function ImagePage() {
                                 block
                                 className="!h-11 !rounded-xl !bg-[#1f1e1d] hover:!bg-[#33312c] !text-white dark:!bg-[#f2efe8] dark:!text-stone-900 dark:hover:!bg-white !border-none !font-medium !shadow-2xs hover:!shadow-xs transition-all duration-200 active:scale-[0.99]"
                                 icon={<Sparkles className="size-4" />}
-                                loading={running}
-                                disabled={!canGenerate || running}
+                                loading={running || optimizing}
+                                disabled={!canGenerate || running || optimizing}
                                 onClick={() => void generate()}
                             >
-                                {running ? t("workbench.generating") : t("workbench.generate")}
+                                {optimizing ? t("imageWorkbench.optimizing") : running ? t("workbench.generating") : t("workbench.generate")}
                             </Button>
                         </div>
                     </div>
