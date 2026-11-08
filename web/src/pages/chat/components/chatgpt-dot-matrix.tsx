@@ -7,7 +7,7 @@ type ChatGptDotMatrixProps = {
 
 /**
  * ChatGPT DALL-E 3 官方同款极简纯单色波浪点阵（Dot Matrix Wave）：
- * - 纯单色科技蓝（浅色模式：#2563eb / 深色模式：#38bdf8），绝不掺杂彩斑杂色；
+ * - 纯单色暖石墨（浅色模式：#78716c / 深色模式：#a8a29e），与暖石底色同一语言，绝不掺杂彩斑杂色；
  * - 严格对齐网格阵列，同频驱动波点半径（0.8px ~ 3.2px）与不透明度（0.04 ~ 0.95）；
  * - 波浪自左上方（圆心向外）如水波涟漪般平滑推进，波峰处波点饱满凝聚，波谷处展现开阔纯净留白；
  * - 完美复现 ChatGPT 参考图 1 的宁静、高级科技美感。
@@ -63,10 +63,10 @@ export function ChatGptDotMatrix({ aspect = 1, className }: ChatGptDotMatrixProp
             const stepX = (width - padX * 2) / (cols - 1);
             const stepY = (height - padY * 2) / (rows - 1);
 
-            // 严格纯单色科技蓝（无任何桃红/鹅黄/薰衣草紫等杂色）
-            const rBase = isDark ? 56 : 37;
-            const gBase = isDark ? 189 : 99;
-            const bBase = isDark ? 248 : 235;
+            // 严格纯单色暖石墨（无任何蓝/桃红/鹅黄/薰衣草紫等杂色）
+            const rBase = isDark ? 168 : 120;
+            const gBase = isDark ? 162 : 113;
+            const bBase = isDark ? 158 : 108;
 
             for (let r = 0; r < rows; r++) {
                 for (let c = 0; c < cols; c++) {

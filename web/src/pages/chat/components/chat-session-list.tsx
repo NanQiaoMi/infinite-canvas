@@ -75,7 +75,7 @@ export function ChatSessionList({ sessions, activeSessionId, onSelect, onCreate,
                                 title={session.title || t("chat.untitled")}
                             >
                                 {isRunning ? (
-                                    <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-blue-500 dark:bg-blue-400" title={t("chat.generating") || "正在生成..."} />
+                                    <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-emerald-500 dark:bg-emerald-400" title={t("chat.generating") || "正在生成..."} />
                                 ) : null}
                                 <span className="min-w-0 flex-1 truncate">{displayTitle}</span>
                             </button>

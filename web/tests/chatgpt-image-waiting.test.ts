@@ -1,37 +1,26 @@
 import { describe, expect, it } from "bun:test";
 
-import { estimateProgress } from "../src/pages/chat/components/generation-waiting";
+import { resolveWaitingProgress } from "../src/pages/chat/components/generation-waiting";
 
-describe("ChatGPT 风格生图进度节奏 (estimateProgress)", () => {
-    it("初期思考与概念阶段 (0-1s) 保持在 14% 以内", () => {
-        expect(estimateProgress(0)).toBe(0);
-        expect(estimateProgress(1)).toBe(14);
+describe("生图等待进度只用真实数据 (resolveWaitingProgress)", () => {
+    it("服务端有真实进度时直接换算为百分比", () => {
+        expect(resolveWaitingProgress(0.42, 30)).toEqual({ kind: "percent", value: 42 });
+        expect(resolveWaitingProgress(0.1, 2)).toEqual({ kind: "percent", value: 10 });
     });
 
-    it("草图勾勒阶段 (4s 左右) 准确处于 39%~42%（契合 ChatGPT 参考截图）", () => {
-        const progressAt4s = estimateProgress(4);
-        expect(progressAt4s).toBeGreaterThanOrEqual(38);
-        expect(progressAt4s).toBeLessThanOrEqual(44);
+    it("真实进度做 1~99 的边界收敛，避免长时间停留 0% 或提前 100%", () => {
+        expect(resolveWaitingProgress(0, 30)).toEqual({ kind: "percent", value: 1 });
+        expect(resolveWaitingProgress(1, 50)).toEqual({ kind: "percent", value: 99 });
+        expect(resolveWaitingProgress(0.999, 50)).toEqual({ kind: "percent", value: 99 });
     });
 
-    it("细节绘制阶段 (8s) 达到 70% 左右", () => {
-        const progressAt8s = estimateProgress(8);
-        expect(progressAt8s).toBe(70);
+    it("没有真实进度时退回真实已用时（秒），不模拟插值", () => {
+        expect(resolveWaitingProgress(undefined, 12.8)).toEqual({ kind: "elapsed", value: 12 });
+        expect(resolveWaitingProgress(undefined, 0)).toEqual({ kind: "elapsed", value: 0 });
     });
 
-    it("高精渲染阶段 (15s) 达到 90%", () => {
-        const progressAt15s = estimateProgress(15);
-        expect(progressAt15s).toBe(90);
-    });
-
-    it("超长等待时平缓封顶在 98% 以内，不提前溢出 100%", () => {
-        expect(estimateProgress(25)).toBe(95);
-        expect(estimateProgress(60)).toBeLessThanOrEqual(98);
-    });
-
-    it("支持多图并行时的微小交错偏移", () => {
-        const first = estimateProgress(4, 0);
-        const second = estimateProgress(4, 1);
-        expect(first).toBeGreaterThan(second);
+    it("非法进度值同样退回真实已用时，且不允许负数", () => {
+        expect(resolveWaitingProgress(Number.NaN, 5)).toEqual({ kind: "elapsed", value: 5 });
+        expect(resolveWaitingProgress(undefined, -3)).toEqual({ kind: "elapsed", value: 0 });
     });
 });

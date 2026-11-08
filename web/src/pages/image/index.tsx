@@ -1069,7 +1069,28 @@ function PendingImageCard({
 }) {
     const { t } = useTranslation();
     const isQueued = phase === "queued";
-    const pct = Math.min(100, Math.max(0, Math.round((progress ?? 0) * 100)));
+    // 只展示服务端返回的真实进度；拿不到进度时展示真实已用时，避免出现假的百分比
+    const progressPct = typeof progress === "number" && Number.isFinite(progress) ? Math.min(99, Math.max(1, Math.round(progress * 100))) : undefined;
+    const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+    useEffect(() => {
+        if (isQueued) {
+            setElapsedSeconds(0);
+            return;
+        }
+        const startedAt = Date.now();
+        const timer = window.setInterval(() => setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000)), 1000);
+        return () => window.clearInterval(timer);
+    }, [isQueued]);
+
+    const queueLabel =
+        typeof queuePosition === "number" && queuePosition > 0
+            ? t("workbench.queuePosition", "前方还有 {{count}} 人", { count: queuePosition })
+            : t("workbench.queued", "排队等待中");
+    const queueWaitLabel =
+        typeof estimatedWaitSeconds === "number"
+            ? t("workbench.queueEstimate", "预计等待约 {{seconds}} 秒", { seconds: estimatedWaitSeconds })
+            : t("workbench.queueHint", "等待服务端分配生成槽位");
 
     return (
         <div className="relative flex aspect-square flex-col justify-between overflow-hidden rounded-2xl bg-stone-100/50 p-4 dark:bg-stone-900/40">
@@ -1078,7 +1099,7 @@ function PendingImageCard({
             {/* Top Status */}
             <div className="relative z-10 flex items-center justify-between">
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-stone-200/80 bg-white/80 px-2.5 py-0.5 text-[11px] font-medium text-stone-600 shadow-2xs backdrop-blur-xs dark:border-stone-700/80 dark:bg-stone-800/80 dark:text-stone-300">
-                    <span className={cn("size-2 rounded-full", isQueued ? "bg-amber-500 animate-pulse" : "bg-blue-500 animate-pulse")} />
+                    <span className={cn("size-2 rounded-full", isQueued ? "bg-amber-500 animate-pulse" : "bg-emerald-500 animate-pulse")} />
                     {isQueued ? t("workbench.queued", "排队等待中") : t("workbench.processing", "正在绘制中...")}
                 </span>
                 {onCancel ? (
@@ -1096,25 +1117,32 @@ function PendingImageCard({
                             <Clock className="size-5 animate-spin" style={{ animationDuration: "6s" }} />
                         </div>
                         <div className="space-y-0.5">
-                            <div className="text-xs font-semibold text-stone-800 dark:text-stone-200">
-                                {t("workbench.queuePosition", "前方还有 {{count}} 人", { count: queuePosition || 1 })}
-                            </div>
-                            <div className="text-[11px] text-stone-400 dark:text-stone-500">
-                                {t("workbench.queueEstimate", "预计等待约 {{seconds}} 秒", { seconds: estimatedWaitSeconds ?? 45 })}
-                            </div>
+                            <div className="text-xs font-semibold text-stone-800 dark:text-stone-200">{queueLabel}</div>
+                            <div className="text-[11px] text-stone-400 dark:text-stone-500">{queueWaitLabel}</div>
                         </div>
                     </div>
                 ) : (
-                    <div className="flex flex-col items-center gap-2.5 w-full px-4">
-                        <div className="relative flex size-10 items-center justify-center rounded-2xl border border-blue-200/80 bg-blue-50/80 text-blue-600 shadow-xs dark:border-blue-900/50 dark:bg-blue-950/40 dark:text-blue-400">
+                    <div className="flex w-full flex-col items-center gap-2.5 px-4">
+                        <div className="relative flex size-10 items-center justify-center rounded-2xl border border-stone-200/80 bg-stone-100/80 text-stone-600 shadow-xs dark:border-stone-700/80 dark:bg-stone-800/60 dark:text-stone-300">
                             <Sparkles className="size-5 animate-pulse" />
                         </div>
                         <div className="w-full space-y-1.5">
                             <div className="flex items-center justify-between text-xs text-stone-600 dark:text-stone-300">
                                 <span>{t("workbench.drawing", "正在绘制中...")}</span>
-                                <span className="font-mono font-semibold tabular-nums text-blue-600 dark:text-blue-400">{pct}%</span>
+                                <span
+                                    title={progressPct !== undefined ? "服务端返回的生成进度" : "已用时（服务端尚未返回进度）"}
+                                    className="font-mono font-semibold tabular-nums text-stone-700 dark:text-stone-200"
+                                >
+                                    {progressPct !== undefined ? `${progressPct}%` : `${elapsedSeconds}s`}
+                                </span>
                             </div>
-                            <Progress percent={pct} size="small" showInfo={false} strokeColor={{ "0%": "#3b82f6", "100%": "#60a5fa" }} />
+                            {progressPct !== undefined ? (
+                                <Progress percent={progressPct} size="small" showInfo={false} strokeColor={{ "0%": "#a8a29e", "100%": "#78716c" }} />
+                            ) : (
+                                <div className="relative h-1 overflow-hidden rounded-full bg-stone-200/80 dark:bg-stone-700/60">
+                                    <div className="agent-shimmer absolute inset-0" />
+                                </div>
+                            )}
                         </div>
                     </div>
                 )}

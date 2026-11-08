@@ -18,23 +18,24 @@ function parseAspect(size: unknown) {
 }
 
 /**
- * 模拟生图进度百分比（精确映射 ChatGPT DALL-E 3 生成节奏）：
- * 4 秒左右恰好处于 39%~42%，契合官方截图勾勒草图阶段。
+ * 解析生图等待卡片要展示的进度信息：优先使用服务端任务返回的真实进度（0~1），
+ * 未拿到真实进度时退回真实已用时（秒），不做任何模拟插值，避免出现「假百分比」。
  */
-export function estimateProgress(elapsedSeconds: number, indexOffset = 0): number {
-    const s = Math.max(0, elapsedSeconds - indexOffset * 0.4);
-    if (s <= 1) return Math.min(14, Math.round(s * 14));
-    if (s <= 4) return Math.min(42, Math.round(14 + (s - 1) * 9.3));
-    if (s <= 8) return Math.min(70, Math.round(42 + (s - 4) * 7));
-    if (s <= 15) return Math.min(90, Math.round(70 + (s - 8) * 2.85));
-    return Math.min(98, Math.round(90 + (s - 15) * 0.5));
+export type WaitingProgress = { kind: "percent"; value: number } | { kind: "elapsed"; value: number };
+
+export function resolveWaitingProgress(progress: number | undefined, elapsedSeconds: number): WaitingProgress {
+    if (typeof progress === "number" && Number.isFinite(progress)) {
+        return { kind: "percent", value: Math.min(99, Math.max(1, Math.round(progress * 100))) };
+    }
+    return { kind: "elapsed", value: Math.max(0, Math.floor(elapsedSeconds)) };
 }
 
 /**
  * ChatGPT 官方同款无框生图卡片：
  * 彻底去除外框、白色底色与投影，直接在聊天流背景中自然流动呈现：
  * - 阶段 1（0 ~ 1.5s）：直接在背景中显示「正在思考」；
- * - 阶段 2（> 1.5s）：左上角干净文字「正在勾勒草图」，中心是蓝色的波动波点海浪，右下角「39%」轻巧胶囊。
+ * - 阶段 2（> 1.5s）：左上角干净文字「正在勾勒草图」，中心是暖石墨单色波浪点阵，
+ *   右下角进度胶囊只展示服务端返回的真实百分比；拿不到时展示真实已用时（如 12s），绝不模拟。
  */
 function ChatGptImageWaitingCard({
     index,
@@ -53,8 +54,7 @@ function ChatGptImageWaitingCard({
 }) {
     const { t } = useTranslation();
     const isQueued = task?.status === "queued";
-    const serverProgressPct = typeof task?.progress === "number" ? Math.round(task.progress * 100) : undefined;
-    const progress = serverProgressPct !== undefined ? serverProgressPct : estimateProgress(elapsedSeconds, index);
+    const progressInfo = resolveWaitingProgress(task?.progress, elapsedSeconds);
 
     // 阶段文字演变
     const phase = useMemo(() => {
@@ -122,15 +122,21 @@ function ChatGptImageWaitingCard({
                         <ChatGptDotMatrix aspect={aspect} />
                     </div>
 
-                    {/* 右下角极简百分比 / 排队预计 */}
+                    {/* 右下角真实百分比 / 排队预计（拿不到真实数字时展示真实已用时） */}
                     <div className="flex items-center justify-end pt-1">
                         {isQueued ? (
-                            <div className="rounded-full border border-amber-300/80 bg-amber-50/80 px-2.5 py-0.5 font-mono text-xs font-semibold tabular-nums text-amber-700 shadow-xs backdrop-blur-sm dark:border-amber-700/80 dark:bg-amber-950/80 dark:text-amber-300">
-                                约 {task?.estimatedWaitSeconds ?? 45}s
+                            <div
+                                title={typeof task?.estimatedWaitSeconds === "number" ? "服务端预估排队时间" : "等待服务端返回排队信息"}
+                                className="rounded-full border border-amber-300/80 bg-amber-50/80 px-2.5 py-0.5 font-mono text-xs font-semibold tabular-nums text-amber-700 shadow-xs backdrop-blur-sm dark:border-amber-700/80 dark:bg-amber-950/80 dark:text-amber-300"
+                            >
+                                {typeof task?.estimatedWaitSeconds === "number" ? `约 ${task.estimatedWaitSeconds}s` : "排队中"}
                             </div>
                         ) : (
-                            <div className="rounded-full border border-stone-300/80 bg-white/80 px-2.5 py-0.5 font-mono text-xs font-semibold tabular-nums text-blue-600 shadow-xs backdrop-blur-sm dark:border-stone-700/80 dark:bg-stone-850/80 dark:text-blue-400">
-                                {progress}%
+                            <div
+                                title={progressInfo.kind === "percent" ? "服务端返回的生成进度" : "已用时（服务端尚未返回进度）"}
+                                className="rounded-full border border-stone-300/80 bg-white/80 px-2.5 py-0.5 font-mono text-xs font-semibold tabular-nums text-stone-600 shadow-xs backdrop-blur-sm dark:border-stone-700/80 dark:bg-stone-800/80 dark:text-stone-300"
+                            >
+                                {progressInfo.kind === "percent" ? `${progressInfo.value}%` : `${progressInfo.value}s`}
                             </div>
                         )}
                     </div>
