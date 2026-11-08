@@ -1,7 +1,7 @@
 import { nanoid } from "nanoid";
 
 import { inferImageSizeFromPrompt } from "./aspect-ratio";
-import { detectAgentIntent, extractFollowUpModification, findLastGenerationPrompt, FOLLOW_UP_PATTERN, REFERENCE_PROMPT_PATTERN, type AgentIntent } from "./intent";
+import { detectAgentIntent, extractFollowUpModification, findLastGenerationPrompt, hasOwnImageTheme, isFollowUpOrReferenceRequest, isSameImageTheme, REFERENCE_PROMPT_PATTERN, type AgentIntent } from "./intent";
 import { parseAgentOutput, serializeToolResult, stripForStreaming } from "./protocol";
 import { buildSystemPrompt } from "./system-prompt";
 import type { AgentContextInput, AgentEvent, AgentImageRef, AgentMessage, AgentModelCall, AgentModelMessage, AgentToolCall, AgentToolDefinition, AgentToolExecutor, AgentToolResult, AgentTurnResult } from "./types";
@@ -111,6 +111,41 @@ export function toModelMessages(messages: AgentMessage[]): AgentModelMessage[] {
 
 function invalidResult(tool: string, error: string): AgentToolResult {
     return { tool, ok: false, code: "invalid_args", error };
+}
+
+type HistoryPromptBlocks = {
+    promptBlocks: string[];
+    /** 产出这些 promptBlocks 的那一轮主题上下文（用户诉求 + 助手文本 + 提示词块本身）。 */
+    themeTexts: string[];
+};
+
+/** 从历史中取最近一次产出 ≥2 个 promptBlocks 的助手消息，并收集其所在轮次的主题文本。 */
+function findHistoryPromptBlocks(messages: AgentMessage[]): HistoryPromptBlocks | undefined {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const message = messages[index];
+        if (message.role !== "assistant") continue;
+        if (!Array.isArray(message.promptBlocks) || message.promptBlocks.length < 2) continue;
+        const previousUser = [...messages.slice(0, index)].reverse().find((item) => item.role === "user");
+        return {
+            promptBlocks: message.promptBlocks,
+            themeTexts: [previousUser?.text ?? "", message.text, message.raw ?? "", ...message.promptBlocks],
+        };
+    }
+    return undefined;
+}
+
+/**
+ * 批量兜底时是否允许继承上一轮助手的历史 promptBlocks：
+ * 只有显式续作/指代、与上一轮主题相关，或本轮完全没有独立提示词与画面主题时才继承；
+ * 全新独立请求（如「批量生成4张头像」）一律用本轮意图/模型输出重新提取；
+ * 即使共享个别风格词（如「赛博机甲」），只要本轮点名了自有画面主体，也不得把上一轮旧主体（logo）提示词整批继承过来。
+ */
+function canInheritHistoryPromptBlocks(lastUserText: string, intentPrompt: string, historyBlocks: HistoryPromptBlocks | undefined): boolean {
+    if (!historyBlocks || historyBlocks.promptBlocks.length < 2) return false;
+    if (isFollowUpOrReferenceRequest(lastUserText)) return true;
+    // 主题相关不能覆盖本轮明确点名的自有画面主体，否则「赛博机甲风格的头像」会执行上一轮「赛博机甲logo」。
+    if (isSameImageTheme(lastUserText, historyBlocks.themeTexts)) return !hasOwnImageTheme(lastUserText);
+    return !intentPrompt.trim() && !hasOwnImageTheme(lastUserText);
 }
 
 /**
@@ -461,11 +496,8 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
                     if (intent.decompose || (intent.batchCount && intent.batchCount > 1) || parsed.promptBlocks.length > 1) {
                         const count = intent.batchCount || (parsed.promptBlocks.length > 1 ? parsed.promptBlocks.length : 4);
                         const layout = intent.layout || "horizontal";
-                        const prevAssistant = [...options.messages].reverse().find(
-                            (m): m is Extract<AgentMessage, { role: "assistant" }> =>
-                                m.role === "assistant" && Array.isArray(m.promptBlocks) && m.promptBlocks.length >= 2,
-                        );
-                        const historyPromptBlocks = prevAssistant?.promptBlocks;
+                        const historyBlocks = findHistoryPromptBlocks(options.messages);
+                        const inheritHistoryBlocks = canInheritHistoryPromptBlocks(lastUserText, intent.prompt, historyBlocks);
                         let tasks: Array<{ prompt: string; title: string; size: string; background?: "transparent" }>;
                         if (parsed.promptBlocks.length >= 2) {
                             tasks = parsed.promptBlocks.slice(0, count).map((p: string, idx: number) => ({
@@ -474,8 +506,8 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
                                 size: inferImageSizeFromPrompt(p, "1024x1024"),
                                 ...(intent.background === "transparent" ? { background: "transparent" as const } : {}),
                             }));
-                        } else if (historyPromptBlocks && historyPromptBlocks.length >= 2) {
-                            tasks = historyPromptBlocks.slice(0, count).map((p: string, idx: number) => ({
+                        } else if (historyBlocks && inheritHistoryBlocks) {
+                            tasks = historyBlocks.promptBlocks.slice(0, count).map((p: string, idx: number) => ({
                                 prompt: p,
                                 title: `方案 ${idx + 1}`,
                                 size: inferImageSizeFromPrompt(p, "1024x1024"),
@@ -501,10 +533,12 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
                         if (result.ok === false && result.code === "canceled") return { messages: newMessages, aborted: true, roundLimitReached: false };
                         continue;
                     } else {
-                        const historyPrompt = findLastGenerationPrompt(options.messages);
-                        const isFollowUpOrRef = Boolean(FOLLOW_UP_PATTERN.test(lastUserText) || REFERENCE_PROMPT_PATTERN.test(lastUserText));
+                        const isFollowUpOrRef = isFollowUpOrReferenceRequest(lastUserText);
+                        // 单张兜底：历史生成提示词只在本轮没有独立提示词且属于显式续作/指代时启用，
+                        // 全新独立请求（如「批量生成4张头像」）绝不执行上一轮无关的旧提示词。
+                        const historyPrompt = isFollowUpOrRef ? findLastGenerationPrompt(options.messages) : "";
                         const followUpMod = lastUserText && !REFERENCE_PROMPT_PATTERN.test(lastUserText) ? extractFollowUpModification(lastUserText) : "";
-                        const candidatePrompt = parsed.promptBlocks[0] || intent.prompt.trim() || (isFollowUpOrRef && historyPrompt ? (followUpMod ? `${historyPrompt}，${followUpMod}` : historyPrompt) : "");
+                        const candidatePrompt = parsed.promptBlocks[0] || intent.prompt.trim() || (historyPrompt ? (followUpMod ? `${historyPrompt}，${followUpMod}` : historyPrompt) : "");
                         const prompt = candidatePrompt.trim();
                         if (prompt) {
                             const size = inferImageSizeFromPrompt(prompt, options.buildContext().defaultSize);
@@ -528,16 +562,12 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
                     }
                 } else {
                     intentHandled = true;
-                    const historyPrompt = findLastGenerationPrompt(options.messages);
                     // 在普通对话模式下，如果是拆解或批量生成任务，并发执行多张 generate_image
                     const isBatchChat = (intent.decompose || (intent.batchCount && intent.batchCount > 1)) && intentTool === "generate_image";
                     if (isBatchChat) {
                         const count = intent.batchCount || (parsed.promptBlocks.length > 1 ? parsed.promptBlocks.length : 3);
-                        const prevAssistant = [...options.messages].reverse().find(
-                            (m): m is Extract<AgentMessage, { role: "assistant" }> =>
-                                m.role === "assistant" && Array.isArray(m.promptBlocks) && m.promptBlocks.length >= 2,
-                        );
-                        const historyPromptBlocks = prevAssistant?.promptBlocks;
+                        const historyBlocks = findHistoryPromptBlocks(options.messages);
+                        const inheritHistoryBlocks = canInheritHistoryPromptBlocks(lastUserText, intent.prompt, historyBlocks);
                         let subTasks: Array<{ prompt: string; title?: string; size?: string }> = [];
                         if (parsed.promptBlocks.length >= 2) {
                             subTasks = parsed.promptBlocks.slice(0, count).map((p, idx) => ({
@@ -545,8 +575,8 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
                                 title: `方案 ${idx + 1}`,
                                 size: inferImageSizeFromPrompt(p, options.buildContext().defaultSize),
                             }));
-                        } else if (historyPromptBlocks && historyPromptBlocks.length >= 2) {
-                            subTasks = historyPromptBlocks.slice(0, count).map((p, idx) => ({
+                        } else if (historyBlocks && inheritHistoryBlocks) {
+                            subTasks = historyBlocks.promptBlocks.slice(0, count).map((p, idx) => ({
                                 prompt: p,
                                 title: `方案 ${idx + 1}`,
                                 size: inferImageSizeFromPrompt(p, options.buildContext().defaultSize),
@@ -569,9 +599,10 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
                         }
                     }
 
-                    const isFollowUpOrRef = Boolean(FOLLOW_UP_PATTERN.test(lastUserText) || REFERENCE_PROMPT_PATTERN.test(lastUserText));
+                    const isFollowUpOrRef = isFollowUpOrReferenceRequest(lastUserText);
+                    const historyPrompt = isFollowUpOrRef ? findLastGenerationPrompt(options.messages) : "";
                     const followUpMod = lastUserText && !REFERENCE_PROMPT_PATTERN.test(lastUserText) ? extractFollowUpModification(lastUserText) : "";
-                    const candidatePrompt = parsed.promptBlocks[0] || intent.prompt.trim() || (isFollowUpOrRef && historyPrompt ? (followUpMod ? `${historyPrompt}，${followUpMod}` : historyPrompt) : "");
+                    const candidatePrompt = parsed.promptBlocks[0] || intent.prompt.trim() || (historyPrompt ? (followUpMod ? `${historyPrompt}，${followUpMod}` : historyPrompt) : "");
                     const prompt = candidatePrompt.trim();
                     const hasReferenceForEdit = intentTool !== "edit_image" || (options.references ?? []).some((reference) => reference.storageKey);
                     if (prompt && hasReferenceForEdit) {

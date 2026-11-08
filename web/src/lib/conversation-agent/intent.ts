@@ -144,7 +144,7 @@ const LEADING_FILLER_PATTERN =
 
 /** 生成类指令词 + 量词/对象词，提取正文时去掉。 */
 const LEADING_GENERATE_PATTERN =
-    /^(?:(?:在画布上?|在画板上?|在无限画布上?)\s*)?(?:批量)?(?:生成|创建|绘制|画|出图|出|做|来|制作|换|设计|搞|整|安排|弄)\s*(?:一套\s*(?:\d+|[一二两三四五六七八九])\s*[个张幅次]|一套|一组|一?\s*[张幅个组份版套次]|几\s*[张幅个套次]|\d+\s*[张幅个套次]|[一二两三四五六七八九几]\s*[张幅个套次])?\s*(?:(?:透明底|透明背景|透明图|透明png|png透明|png透明图片|png透明图)?\s*(?:图片|图像|照片|插画|海报|头像|壁纸|封面|图|画|作品|动图|动态图|动态表情包|表情包|gif|素材|图标))?\s*[：:，,。.!！、\s]*/i;
+    /^(?:(?:在|于)?(?:无限)?画[布板]上?\s*)?(?:批量)?(?:生成|创建|绘制|画|出图|出|做|来|制作|换|设计|搞|整|安排|弄)\s*(?:一套\s*(?:\d+|[一二两三四五六七八九])\s*[个张幅次]|一套|一组|一?\s*[张幅个组份版套次]|几\s*[张幅个套次]|\d+\s*[张幅个套次]|[一二两三四五六七八九几]\s*[张幅个套次])?\s*(?:(?:透明底|透明背景|透明图|透明png|png透明|png透明图片|png透明图)?\s*(?:图片|图像|照片|插画|海报|头像|壁纸|封面|图|画|作品|动图|动态图|动态表情包|表情包|gif|素材|图标))?\s*[：:，,。.!！、\s]*/i;
 
 /** 指代型文本：这类内容不能当作提示词，交给运行时用历史 promptBlocks 兜底。 */
 export const REFERENCE_PROMPT_PATTERN = /(提示词|这张图|那张图|这个|那个|上面|上述|刚才|之前|参考图)/i;
@@ -253,6 +253,83 @@ export function extractFollowUpModification(input: string): string {
 /** 延续上一轮生成的追问/增补指令：如「再生成一个」「再来一张」「换个姿势再来一个」「不改变她原来的脸，再来一张」「要双爪合十求抱抱」 */
 export const FOLLOW_UP_PATTERN =
     /^(?:我?想要?|来个|整个|搞个|做个|换成|选|我选)\s*([^。！？!?\n]{2,30})|(?:再|另外再?|重新|接着|继续|换[个一次]|换种|换套|换身|按[照这个]?风格再?|延续[这个]?风格再?)(?:生成|画|来|做|出|整|搞)?\s*(?:一?[个张幅组套版次]|几[个张幅次]|\d+\s*[个张幅组套版次]|[一二两三四五六七八九几]\s*[个张幅组套版次]|同款)?|^(?:再?来|再?搞|再?整|再?出|再?做)\s*(?:\d+|[一二两三四五六七八九几])\s*[个张幅组套版次]|不改变.*再来|换个.*再[来画生成]|延续.*再[来画生成]|按.*风格.*再|再生成一次|再来一次/i;
+
+/** 「随便来一张 / 随机生成」这类无具体主题的随机续作：可继承上一轮提示词。 */
+const RANDOM_CONTINUATION_PATTERN = /^(?:随便|随机|任意)\s*(?:来|整|搞|弄|生成|画|做)/;
+
+/** 是否属于显式续作/指代上一轮生成（只有这类请求才允许继承历史提示词与历史 promptBlocks）。 */
+export function isFollowUpOrReferenceRequest(text: string): boolean {
+    return FOLLOW_UP_PATTERN.test(text) || REFERENCE_PROMPT_PATTERN.test(text);
+}
+
+/** 主题相关性比较时忽略的高频指令/套话二字组，避免「生成/批量/图片」这类泛词造成误判。 */
+const THEME_NOISE_BIGRAMS = new Set([
+    "生成", "制作", "图片", "图像", "照片", "画布", "画板", "节点", "批量",
+    "不同", "一张", "几张", "张图", "帮我", "帮忙", "麻烦", "给我", "我要", "想要", "打算",
+    "并排", "排开", "排布", "现在", "然后", "继续", "重新", "上面", "上述", "刚才", "之前",
+    "提示", "示词", "参考", "一组", "一套", "一个", "一种",
+]);
+
+/** 中文二字组中作结构助词/代词使用的字：以其开头或结尾的二字组不参与主题比较。 */
+const THEME_NOISE_CHARS = "的了着过和与并及或把将被给对向在是有个一这那其我你他她它";
+
+/** 忽略的英文指令/通用词。 */
+const THEME_NOISE_WORDS = new Set([
+    "the", "and", "with", "for", "image", "images", "picture", "pictures", "photo", "photos", "generate", "prompt",
+]);
+
+/**
+ * 提取用于主题相关性比较的文本单元：中文按二字组、英文按单词，剔除通用指令词。
+ * 只做轻量比较，不引入分词依赖。
+ */
+function extractThemeTokens(text: string): Set<string> {
+    const tokens = new Set<string>();
+    const normalized = text.toLowerCase();
+    for (const match of normalized.matchAll(/[a-z][a-z0-9]{1,}/g)) {
+        const word = match[0];
+        if (word.length >= 2 && !THEME_NOISE_WORDS.has(word)) tokens.add(word);
+    }
+    // 中文按非汉字字符切段后再取二字组，避免跨数字/英文拼出无意义组合
+    for (const run of normalized.match(/[\u4e00-\u9fa5]+/g) ?? []) {
+        if (run.length === 1) {
+            tokens.add(run);
+            continue;
+        }
+        for (let index = 0; index + 1 < run.length; index += 1) {
+            const bigram = run.slice(index, index + 2);
+            if (THEME_NOISE_BIGRAMS.has(bigram)) continue;
+            if (THEME_NOISE_CHARS.includes(bigram[0]) || THEME_NOISE_CHARS.includes(bigram[1])) continue;
+            tokens.add(bigram);
+        }
+    }
+    return tokens;
+}
+
+/** 判断本轮请求与历史生成轮次是否属于同一画面主题（用于决定能否继承历史提示词 / 历史 promptBlocks）。 */
+export function isSameImageTheme(currentText: string, historyTexts: string[]): boolean {
+    const current = extractThemeTokens(currentText);
+    if (!current.size) return false;
+    for (const text of historyTexts) {
+        if (!text) continue;
+        const history = extractThemeTokens(text);
+        for (const token of current) {
+            if (history.has(token)) return true;
+        }
+    }
+    return false;
+}
+
+/** 本轮请求是否自带独立画面主题（自有提示词、用途场景或画面要素），用于禁止继承无关历史提示词。 */
+export function hasOwnImageTheme(text: string): boolean {
+    return countVisualCategories(text) > 0 || Boolean(detectUsageScene(text));
+}
+
+/** 指令词被完全剥离时，回收用户明确点名的画面对象，避免兜底时丢失本轮主题（如「批量生成4张头像」→「头像」）。 */
+const REQUESTED_OBJECT_PATTERN = /(?:透明底|透明背景|透明图)?(?:头像|表情包|壁纸|封面|插画|插图|海报|图标|logo|标志|立绘|原画|素材|药水|图片|图像|照片|作品|动图|gif|png)/i;
+function extractRequestedObject(input: string): string {
+    const match = input.match(REQUESTED_OBJECT_PATTERN);
+    return match ? match[0].trim() : "";
+}
 
 /** 提取上一轮助手回复中推荐的选项（如「摸摸」或者「双爪合十求抱抱」） */
 export function extractAssistantSuggestions(history?: Array<{ role: string; text?: string }>): string[] {
@@ -412,15 +489,28 @@ export function detectAgentIntent(
     // ⑦ 显式生成/创作/设计/拆解动作 → 生成图片
     if (GENERATE_ACTION_PATTERN.test(input)) {
         let prompt = colonBody ?? stripped;
-        if ((!prompt || isAspectOnly) && previousPrompt) {
+        // 历史生成提示词只允许被「显式续作 / 指代上一轮 / 画幅延续 / 同主题」的请求继承；
+        // 全新独立请求（如「批量生成4张头像」）绝不能执行上一轮无关的旧提示词。
+        const canInheritPreviousPrompt =
+            Boolean(previousPrompt) &&
+            (isFollowUp ||
+                isAspectOnly ||
+                RANDOM_CONTINUATION_PATTERN.test(input) ||
+                isFollowUpOrReferenceRequest(input) ||
+                isSameImageTheme(input, [previousPrompt]));
+        if ((!prompt || isAspectOnly) && canInheritPreviousPrompt) {
             prompt = previousPrompt;
         } else if (!prompt && countVisualCategories(input) >= 2 && input.length >= 24) {
             prompt = input;
         }
+        // 前置指令被完全剥离时，回收用户点名的画面对象，保留本轮主题（如「批量生成4张头像」→「头像」）
+        if (!prompt && !isAspectOnly) {
+            prompt = extractRequestedObject(input);
+        }
         if (!isAspectOnly) {
             prompt = sanitizeExtractedPrompt(prompt, input);
         }
-        if (!prompt && previousPrompt) {
+        if (!prompt && canInheritPreviousPrompt) {
             prompt = previousPrompt;
         }
         // 如果是拆解任务、画布排布任务、或者有明确用途但描述较短，交给模型进行深度分析与拆解规划；若是详细提示词则直接执行

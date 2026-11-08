@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { CHAT_INTENT, detectAgentIntent } from "@/lib/conversation-agent/intent";
+import { CHAT_INTENT, detectAgentIntent, hasOwnImageTheme, isFollowUpOrReferenceRequest, isSameImageTheme } from "@/lib/conversation-agent/intent";
 
 /** 用户直接粘贴的完整生图提示词：只描述画面，没有任何「写/优化/评价」类请求。 */
 const JK_PROMPT =
@@ -353,5 +353,45 @@ describe("本地意图识别", () => {
         expect(detectAgentIntent("帮我翻译成英文：雪夜灯塔下的守塔人", { hasReferences: false }).kind).toBe("chat");
         // 正常画面描述不能被文本加工规则误伤
         expect(detectAgentIntent("帮我生成一张科技感数据分析大屏海报", { hasReferences: false }).kind).toBe("generate_image");
+    });
+
+    test("带历史时：独立新请求不再继承上一轮无关提示词，显式续作仍继承", () => {
+        const staleHistory = [
+            { role: "user", text: "帮我写3个logo方案提示词", createdAt: 1 },
+            {
+                role: "assistant",
+                text: "方案如下：赛博机甲logo、水墨logo",
+                promptBlocks: ["旧方案1：赛博机甲logo", "旧方案2：水墨logo"],
+                createdAt: 2,
+            },
+        ];
+        // 全新独立请求：本轮主题是「头像」，绝不能被执行上一轮的 logo 旧提示词
+        const avatarBatch = detectAgentIntent("批量生成4张头像", { history: staleHistory });
+        expect(avatarBatch.kind).toBe("generate_image");
+        expect(avatarBatch.batchCount).toBe(4);
+        expect(avatarBatch.prompt).toContain("头像");
+        expect(avatarBatch.prompt).not.toContain("旧方案");
+        expect(avatarBatch.prompt).not.toContain("logo");
+
+        // 全新单张独立请求：同样不得继承旧提示词
+        const avatarSingle = detectAgentIntent("帮我做个头像", { history: staleHistory });
+        expect(avatarSingle.kind).toBe("generate_image");
+        expect(avatarSingle.prompt).toBe("头像");
+
+        // 显式续作：仍然继承上一轮真实生成提示词
+        const followUp = detectAgentIntent("再来一张", { history: staleHistory });
+        expect(followUp.kind).toBe("generate_image");
+        expect(followUp.prompt).toContain("旧方案1：赛博机甲logo");
+    });
+
+    test("主题相关性判定：同主题续作可继承，异主题新请求不得继承", () => {
+        const staleTheme = ["帮我写3个logo方案提示词", "旧方案1：赛博机甲logo"];
+        expect(isSameImageTheme("批量生成4张头像", staleTheme)).toBe(false);
+        expect(isSameImageTheme("生成三张设计稿", ["帮我构思三个界面设计方案", "modern mobile app UI design"])).toBe(true);
+        expect(hasOwnImageTheme("批量生成4张头像")).toBe(true);
+        expect(hasOwnImageTheme("生成三张")).toBe(false);
+        expect(isFollowUpOrReferenceRequest("再来一张")).toBe(true);
+        expect(isFollowUpOrReferenceRequest("用这个提示词生成图片")).toBe(true);
+        expect(isFollowUpOrReferenceRequest("批量生成4张头像")).toBe(false);
     });
 });

@@ -791,7 +791,7 @@ describe("对话运行时", () => {
         expect(prompts[4].prompt).toContain("翻肚皮撒娇");
     });
 
-    test("当上一轮助手已提供 promptBlocks 且用户要求「生成三张设计稿」时，运行时直接继承历史 promptBlocks 出图", async () => {
+    test("同主题续作边界：上一轮助手已提供 promptBlocks 且用户要求「生成三张设计稿」时，运行时继承历史 promptBlocks 出图", async () => {
         const { runAgentTurn } = await import("@/lib/conversation-agent/runtime");
         const executedPrompts: string[] = [];
         const result = await runAgentTurn({
@@ -831,10 +831,219 @@ describe("对话运行时", () => {
         });
 
         expect(executedPrompts).toHaveLength(3);
+        // 主题相关（设计稿↔界面设计方案）的续作允许继承；异主题新请求见下方负向用例
         // 验证执行的提示词继承了上一轮的 3 个 promptBlocks，而不是泛泛的「设计稿，方案 1」
         expect(executedPrompts[0]).toBe("modern mobile app UI design clean aesthetic");
         expect(executedPrompts[1]).toBe("modern AI chat web application UI design");
         expect(executedPrompts[2]).toBe("modern ecommerce website UI design desktop");
+    });
+
+    test("上一轮助手已提供 promptBlocks 且用户显式续作「再生成三张设计稿」时，运行时仍继承历史 promptBlocks 出图", async () => {
+        const { runAgentTurn } = await import("@/lib/conversation-agent/runtime");
+        const executedPrompts: string[] = [];
+        const result = await runAgentTurn({
+            locale: "zh-CN",
+            messages: [
+                { id: "u1", role: "user", text: "帮我构思三个界面设计方案", createdAt: 1 },
+                {
+                    id: "a1",
+                    role: "assistant",
+                    text: "为你构思了三个方案：\n1. 移动端极简设计\n2. AI 聊天 Web 应用\n3. 现代电商桌面端",
+                    promptBlocks: [
+                        "modern mobile app UI design clean aesthetic",
+                        "modern AI chat web application UI design",
+                        "modern ecommerce website UI design desktop",
+                    ],
+                    createdAt: 2,
+                },
+                { id: "u2", role: "user", text: "再生成三张设计稿", createdAt: 3 },
+            ],
+            tools: [
+                {
+                    name: "generate_image",
+                    description: "生成图片",
+                    parameters: { type: "object", properties: { prompt: { type: "string" } }, required: ["prompt"] },
+                },
+            ],
+            buildContext: () => ({ defaultSize: "1024x1024", pageContext: "chat", imageModels: [] }),
+            callModel: async () => ({ content: "好的，再为你生成三张设计稿！", toolCalls: [] }),
+            executeTool: async (call) => {
+                executedPrompts.push(String(call.arguments.prompt || ""));
+                return { tool: call.tool, ok: true, images: [], count: 1, size: "1024x1024" };
+            },
+            signal: new AbortController().signal,
+        });
+
+        expect(executedPrompts).toHaveLength(3);
+        expect(executedPrompts[0]).toBe("modern mobile app UI design clean aesthetic");
+        expect(result.roundLimitReached).toBe(false);
+    });
+
+    test("画布批量兜底：异主题的新请求（批量生成4张头像）不得继承上一轮旧 promptBlocks，也不得执行旧提示词", async () => {
+        const { runAgentTurn } = await import("@/lib/conversation-agent/runtime");
+        const executedPrompts: string[] = [];
+        const result = await runAgentTurn({
+            locale: "zh-CN",
+            messages: [
+                { id: "u1", role: "user", text: "帮我写3个logo方案提示词", createdAt: 1 },
+                {
+                    id: "a1",
+                    role: "assistant",
+                    text: "给你三个旧方案：赛博机甲logo、水墨logo",
+                    promptBlocks: ["旧方案1：赛博机甲logo", "旧方案2：水墨logo"],
+                    createdAt: 2,
+                },
+                { id: "u2", role: "user", text: "画布上批量生成4张不同的头像", createdAt: 3 },
+            ],
+            tools: [
+                {
+                    name: "canvas_create_image_node",
+                    description: "在画布上创建图片节点",
+                    parameters: { type: "object", properties: { prompt: { type: "string" } }, required: ["prompt"] },
+                },
+                {
+                    name: "canvas_batch_generate_nodes",
+                    description: "在画布上批量创建图片节点",
+                    parameters: { type: "object", properties: { tasks: { type: "array" } }, required: ["tasks"] },
+                },
+            ],
+            buildContext: () => ({ defaultSize: "1024x1024", pageContext: "canvas", imageModels: [] }),
+            callModel: async () => ({ content: "抱歉，我需要更多信息。", toolCalls: [] }),
+            executeTool: async (call) => {
+                const tasks = Array.isArray(call.arguments.tasks) ? (call.arguments.tasks as Array<{ prompt?: string }>) : [];
+                tasks.forEach((task) => executedPrompts.push(String(task.prompt || "")));
+                return { tool: call.tool, ok: true, count: tasks.length, layout: "horizontal", nodes: [] };
+            },
+            signal: new AbortController().signal,
+        });
+
+        // 异主题独立请求：必须按本轮「头像」主题重新提取，绝不执行上一轮的 logo 旧提示词
+        expect(executedPrompts).toHaveLength(4);
+        expect(executedPrompts.some((prompt) => prompt.includes("旧方案") || prompt.includes("logo"))).toBe(false);
+        expect(executedPrompts.every((prompt) => prompt.includes("头像"))).toBe(true);
+        expect(result.roundLimitReached).toBe(false);
+    });
+
+    test("画布批量兜底：与历史共享风格词但主体不同（赛博机甲头像 vs 旧 logo）时，仍按本轮主体重新提取，不继承旧 promptBlocks", async () => {
+        const { runAgentTurn } = await import("@/lib/conversation-agent/runtime");
+        const executedPrompts: string[] = [];
+        const result = await runAgentTurn({
+            locale: "zh-CN",
+            messages: [
+                { id: "u1", role: "user", text: "帮我写3个logo方案提示词", createdAt: 1 },
+                {
+                    id: "a1",
+                    role: "assistant",
+                    text: "给你三个旧方案",
+                    // 与新一轮共享「赛博机甲」风格词，但主体是 logo
+                    promptBlocks: ["旧方案1：赛博机甲logo，金属反光质感", "旧方案2：水墨logo"],
+                    createdAt: 2,
+                },
+                { id: "u2", role: "user", text: "批量生成4张赛博机甲风格的头像", createdAt: 3 },
+            ],
+            tools: [
+                {
+                    name: "canvas_create_image_node",
+                    description: "在画布上创建图片节点",
+                    parameters: { type: "object", properties: { prompt: { type: "string" } }, required: ["prompt"] },
+                },
+                {
+                    name: "canvas_batch_generate_nodes",
+                    description: "在画布上批量创建图片节点",
+                    parameters: { type: "object", properties: { tasks: { type: "array" } }, required: ["tasks"] },
+                },
+            ],
+            buildContext: () => ({ defaultSize: "1024x1024", pageContext: "canvas", imageModels: [] }),
+            callModel: async () => ({ content: "抱歉，我需要更多信息。", toolCalls: [] }),
+            executeTool: async (call) => {
+                const tasks = Array.isArray(call.arguments.tasks) ? (call.arguments.tasks as Array<{ prompt?: string }>) : [];
+                tasks.forEach((task) => executedPrompts.push(String(task.prompt || "")));
+                return { tool: call.tool, ok: true, count: tasks.length, layout: "horizontal", nodes: [] };
+            },
+            signal: new AbortController().signal,
+        });
+
+        // 风格词交集不等于同主题续作：本轮自带「赛博机甲风格的头像」，必须用本轮主体重新提取，绝不执行旧 logo 提示词
+        expect(executedPrompts).toHaveLength(4);
+        expect(executedPrompts.some((prompt) => prompt.includes("旧方案") || prompt.includes("logo"))).toBe(false);
+        expect(executedPrompts.every((prompt) => prompt.includes("赛博机甲") && prompt.includes("头像"))).toBe(true);
+        expect(result.roundLimitReached).toBe(false);
+    });
+
+    test("对话批量兜底：异主题的新请求（批量生成4张头像）不得继承上一轮旧 promptBlocks，也不得执行旧提示词", async () => {
+        const { runAgentTurn } = await import("@/lib/conversation-agent/runtime");
+        const executedPrompts: string[] = [];
+        const result = await runAgentTurn({
+            locale: "zh-CN",
+            messages: [
+                { id: "u1", role: "user", text: "帮我写3个logo方案提示词", createdAt: 1 },
+                {
+                    id: "a1",
+                    role: "assistant",
+                    text: "给你三个旧方案：赛博机甲logo、水墨logo",
+                    promptBlocks: ["旧方案1：赛博机甲logo", "旧方案2：水墨logo"],
+                    createdAt: 2,
+                },
+                { id: "u2", role: "user", text: "批量生成4张头像", createdAt: 3 },
+            ],
+            tools: [
+                {
+                    name: "generate_image",
+                    description: "生成图片",
+                    parameters: { type: "object", properties: { prompt: { type: "string" } }, required: ["prompt"] },
+                },
+            ],
+            buildContext: () => ({ defaultSize: "1024x1024", pageContext: "chat", imageModels: [] }),
+            callModel: async () => ({ content: "抱歉，我需要更多信息。", toolCalls: [] }),
+            executeTool: async (call) => {
+                executedPrompts.push(String(call.arguments.prompt || ""));
+                return { tool: call.tool, ok: true, images: [], count: 1, size: "1024x1024" };
+            },
+            signal: new AbortController().signal,
+        });
+
+        expect(executedPrompts).toHaveLength(4);
+        expect(executedPrompts.some((prompt) => prompt.includes("旧方案") || prompt.includes("logo"))).toBe(false);
+        expect(executedPrompts.every((prompt) => prompt.includes("头像"))).toBe(true);
+        expect(result.roundLimitReached).toBe(false);
+    });
+
+    test("单张兜底：独立请求（帮我做个头像）不得执行上一轮无关的旧生成提示词", async () => {
+        const { runAgentTurn } = await import("@/lib/conversation-agent/runtime");
+        const executedPrompts: string[] = [];
+        const result = await runAgentTurn({
+            locale: "zh-CN",
+            messages: [
+                { id: "u1", role: "user", text: "帮我写一个logo方案提示词", createdAt: 1 },
+                {
+                    id: "a1",
+                    role: "assistant",
+                    text: "给你：",
+                    promptBlocks: ["旧方案：赛博机甲logo，金属反光质感"],
+                    createdAt: 2,
+                },
+                { id: "u2", role: "user", text: "帮我做个头像", createdAt: 3 },
+            ],
+            tools: [
+                {
+                    name: "generate_image",
+                    description: "生成图片",
+                    parameters: { type: "object", properties: { prompt: { type: "string" } }, required: ["prompt"] },
+                },
+            ],
+            buildContext: () => ({ defaultSize: "1024x1024", pageContext: "chat", imageModels: [] }),
+            callModel: async () => ({ content: "抱歉，我需要更多信息。", toolCalls: [] }),
+            executeTool: async (call) => {
+                executedPrompts.push(String(call.arguments.prompt || ""));
+                return { tool: call.tool, ok: true, images: [], count: 1, size: "1024x1024" };
+            },
+            signal: new AbortController().signal,
+        });
+
+        expect(executedPrompts).toHaveLength(1);
+        expect(executedPrompts[0]).toBe("头像");
+        expect(executedPrompts[0]).not.toContain("logo");
+        expect(result.roundLimitReached).toBe(false);
     });
 
     test("生成5张图片时，完成后熔断刹车生效，杜绝大模型在下一轮复读生图工具造成循环失控", async () => {
