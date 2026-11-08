@@ -196,7 +196,7 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
      * 非画布工具不受影响。
      */
     const executeGuardedTool = useCallback(
-        async (call: AgentToolCall, context: { signal: AbortSignal; references?: AgentImageRef[] }, expectedProjectId: string | null | undefined): Promise<AgentToolResult> => {
+        async (call: AgentToolCall, context: { signal: AbortSignal; references?: AgentImageRef[]; sessionId?: string }, expectedProjectId: string | null | undefined): Promise<AgentToolResult> => {
             if (call.tool.startsWith("canvas_")) {
                 const currentProjectId = useAgentStore.getState().canvasContext?.snapshot?.projectId;
                 if (!matchesCanvasProject(expectedProjectId, currentProjectId)) {
@@ -256,6 +256,8 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
                     locale: agentLocaleOf("zh-CN"),
                     messages: history,
                     tools: ALL_AGENT_TOOLS,
+                    // 本轮真实画布会话 id：apply_prompt 等工具按它归属工作台命令，而不是全局 activeSessionId
+                    sessionId,
                     buildContext,
                     callModel,
                     executeTool: (call, ctx) => executeGuardedTool(call, ctx, projectId),
@@ -392,7 +394,7 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
             const startedAt = Date.now();
             try {
                 // 重试同样校验归属：执行瞬间当前画布必须仍是该会话所属项目
-                const result = await executeGuardedTool(toolMessage.call, { signal: controller.signal }, sessionProjectId);
+                const result = await executeGuardedTool(toolMessage.call, { signal: controller.signal, sessionId }, sessionProjectId);
                 appendMessages(sessionId, [
                     {
                         id: nanoid(),

@@ -347,6 +347,8 @@ export default function ChatPage() {
                     locale: agentLocaleOf(i18n.language),
                     messages: history,
                     tools: AGENT_TOOLS,
+                    // 本轮真正运行的会话 id：apply_prompt 等工具按它归属工作台命令，而不是全局 activeSessionId
+                    sessionId: targetSessionId,
                     buildContext: () => ({ ...buildContext(), pageContext: turnPageContext.pageContext }),
                     callModel: createModelCaller(targetSessionId),
                     executeTool: (call, context) => executeAgentTool(call, context),
@@ -597,7 +599,7 @@ export default function ChatPage() {
             controllersRef.current.set(sessionId, controller);
             const startedAt = Date.now();
             try {
-                const result = await executeAgentTool(message.call, { signal: controller.signal });
+                const result = await executeAgentTool(message.call, { signal: controller.signal, sessionId });
                 appendMessages(sessionId, [
                     {
                         id: nanoid(),

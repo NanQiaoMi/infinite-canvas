@@ -37,9 +37,11 @@ function createRunner(options: {
     messages?: AgentMessage[];
     context?: Partial<AgentContextInput>;
     tools?: AgentToolDefinition[];
+    sessionId?: string;
 }) {
     const calls: string[][] = [];
     const toolCalls: AgentToolCall[] = [];
+    const toolContexts: Array<{ sessionId?: string }> = [];
     let index = 0;
     const callModel: AgentModelCall = async ({ messages }) => {
         calls.push(messages.map((message) => `${message.role}:${message.content}`));
@@ -47,8 +49,9 @@ function createRunner(options: {
         index += 1;
         return next;
     };
-    const executeTool: AgentToolExecutor = async (call) => {
+    const executeTool: AgentToolExecutor = async (call, context) => {
         toolCalls.push(call);
+        toolContexts.push({ sessionId: context.sessionId });
         if (options.toolResult) return options.toolResult;
         if (call.tool === "generate_image") return generateSuccess;
         if (call.tool === "edit_image") return editSuccess;
@@ -77,8 +80,9 @@ function createRunner(options: {
         signal: new AbortController().signal,
         intent: options.intent,
         references: options.references,
+        sessionId: options.sessionId,
     };
-    return { run: () => runAgentTurn(runtimeOptions), calls, toolCalls };
+    return { run: () => runAgentTurn(runtimeOptions), calls, toolCalls, toolContexts };
 }
 
 describe("对话运行时", () => {
@@ -97,6 +101,26 @@ describe("对话运行时", () => {
         expect(runner.calls[1].some((entry) => entry.startsWith("user:<tool_result"))).toBe(true);
         expect(events.some((event) => event.type === "tool-start")).toBe(true);
         expect(events.some((event) => event.type === "tool-end")).toBe(true);
+    });
+
+    test("本轮运行会话 sessionId 透传给 executeTool 上下文（apply_prompt 等多会话并发时不误归属到全局 activeSessionId）", async () => {
+        const runner = createRunner({
+            sessionId: "session-chat-42",
+            turns: [turn('```tool\n{"tool":"generate_image","arguments":{"prompt":"红苹果"}}\n```'), turn("已经生成完成。")],
+        });
+        await runner.run();
+        expect(runner.toolCalls).toHaveLength(1);
+        expect(runner.toolContexts).toHaveLength(1);
+        expect(runner.toolContexts[0].sessionId).toBe("session-chat-42");
+    });
+
+    test("未传 sessionId 时 executeTool 上下文 sessionId 为 undefined（工具层回退全局 activeSessionId）", async () => {
+        const runner = createRunner({
+            turns: [turn('```tool\n{"tool":"generate_image","arguments":{"prompt":"红苹果"}}\n```'), turn("已经生成完成。")],
+        });
+        await runner.run();
+        expect(runner.toolCalls).toHaveLength(1);
+        expect(runner.toolContexts[0].sessionId).toBeUndefined();
     });
 
     test("原生 function call 优先执行", async () => {

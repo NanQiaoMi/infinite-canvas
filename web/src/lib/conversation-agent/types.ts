@@ -109,7 +109,7 @@ export type AgentModelCall = (request: {
     onDelta: (text: string) => void;
 }) => Promise<AgentModelTurnResult>;
 
-export type AgentToolExecutor = (call: AgentToolCall, context: { signal: AbortSignal; references?: AgentImageRef[] }) => Promise<AgentToolResult>;
+export type AgentToolExecutor = (call: AgentToolCall, context: { signal: AbortSignal; references?: AgentImageRef[]; sessionId?: string }) => Promise<AgentToolResult>;
 
 export type AgentEvent =
     | { type: "assistant-stream"; text: string }

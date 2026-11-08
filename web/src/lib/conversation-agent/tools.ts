@@ -322,7 +322,7 @@ async function executeEditImage(call: AgentToolCall, context: { signal: AbortSig
     }
 }
 
-async function executeApplyPrompt(call: AgentToolCall, context: { signal: AbortSignal }): Promise<AgentToolResult> {
+async function executeApplyPrompt(call: AgentToolCall, context: { signal: AbortSignal; sessionId?: string }): Promise<AgentToolResult> {
     const args = call.arguments;
     if (context.signal.aborted) return cancelFailure("apply_prompt");
     const target = args.target === "video" ? "video" : args.target === "image" ? "image" : null;
@@ -345,7 +345,7 @@ async function executeApplyPrompt(call: AgentToolCall, context: { signal: AbortS
     }
     const workbench = useWorkbenchAgentStore.getState();
     const run = args.run === true;
-    const attribution = resolveWorkbenchAttribution();
+    const attribution = resolveWorkbenchAttribution(context.sessionId);
     if (target === "image") workbench.dispatchImage({ prompt, run, ...attribution });
     else workbench.dispatchVideo({ prompt, run, ...attribution });
     return { tool: "apply_prompt", ok: true, target, prompt };
@@ -353,10 +353,11 @@ async function executeApplyPrompt(call: AgentToolCall, context: { signal: AbortS
 
 export const ALL_AGENT_TOOLS: AgentToolDefinition[] = [...AGENT_TOOLS, ...CANVAS_AGENT_TOOLS];
 
-/** 标注工作台命令的归属：来源页面 + 当前对话会话 + 当前画布项目，供工作台消费时做来源/会话校验。 */
-function resolveWorkbenchAttribution() {
+/** 标注工作台命令的归属：来源页面 + 真实运行会话 + 当前画布项目，供工作台消费时做来源/会话校验。 */
+function resolveWorkbenchAttribution(runningSessionId?: string) {
     const pathname = typeof window !== "undefined" ? window.location.pathname : "";
-    const sessionId = useConversationAgentStore.getState().activeSessionId || undefined;
+    // 多会话并发时全局 activeSessionId 可能已切到别的会话，优先使用本轮真正执行工具的会话 id。
+    const sessionId = runningSessionId || useConversationAgentStore.getState().activeSessionId || undefined;
     const canvasProjectId = useAgentStore.getState().canvasContext?.snapshot?.projectId || undefined;
     return {
         origin: "conversation" as const,
@@ -366,7 +367,7 @@ function resolveWorkbenchAttribution() {
     };
 }
 
-export async function executeAgentTool(call: AgentToolCall, context: { signal: AbortSignal; references?: AgentImageRef[] }): Promise<AgentToolResult> {
+export async function executeAgentTool(call: AgentToolCall, context: { signal: AbortSignal; references?: AgentImageRef[]; sessionId?: string }): Promise<AgentToolResult> {
     const definition = ALL_AGENT_TOOLS.find((tool) => tool.name === call.tool);
     if (!definition) return failure(call.tool || "unknown", "unsupported", t("toolErrors.unknownTool", { name: call.tool || "?" }) as string);
     const validation = validateArguments(definition.parameters, call.arguments);

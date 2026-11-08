@@ -22,6 +22,8 @@ export type AgentRuntimeOptions = {
     references?: AgentImageRef[];
     /** 本地意图识别结果；缺省时用最后一条 user 消息自动识别。 */
     intent?: AgentIntent;
+    /** 本轮真正运行的会话 id：透传给工具执行上下文，供 apply_prompt 等工具按运行会话归属（而非全局 activeSessionId）。 */
+    sessionId?: string;
 };
 
 /**
@@ -335,7 +337,7 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
     /** 执行工具并记录真实耗时，工具卡片据此展示出图/改图实际等待时长。 */
     const runTool = async (call: AgentToolCall) => {
         const startedAt = Date.now();
-        const result = await options.executeTool(call, { signal: options.signal, references: options.references });
+        const result = await options.executeTool(call, { signal: options.signal, references: options.references, sessionId: options.sessionId });
         return { result, durationMs: Date.now() - startedAt };
     };
 
