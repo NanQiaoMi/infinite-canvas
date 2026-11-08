@@ -341,5 +341,9 @@ describe("本地意图识别", () => {
         expect(detectAgentIntent("画一个", { hasReferences: false }).kind).toBe("chat");
         expect(detectAgentIntent("随便来一张", { hasReferences: false }).prompt).toBe("");
         expect(detectAgentIntent("帮我优化一下", { hasReferences: false }).kind).toBe("chat");
+        // 文案/标题类写作请求不能被短场景规则误判成生成图片
+        expect(detectAgentIntent("帮我写一句 10 字以内的公众号标题，主题是冬日咖啡", { hasReferences: false }).kind).toBe("chat");
+        expect(detectAgentIntent("写一句冬日咖啡的文案", { hasReferences: false }).kind).toBe("chat");
+        expect(detectAgentIntent("写实风格少女", { hasReferences: false }).kind).toBe("generate_image");
     });
 });

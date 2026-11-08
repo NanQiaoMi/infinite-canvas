@@ -118,6 +118,8 @@ const IMAGE_MAX_RATIO = 3;
 const IMAGE_OUTPUT_FORMAT = "png";
 // 与 image-storage 的下载超时保持一致，避免接口挂起时节点一直停在生成中。
 const IMAGE_REQUEST_TIMEOUT_MS = 10 * 60_000;
+// 对话流式请求的空闲超时：超过该时长没有任何数据就主动中断，交给对话运行时自动重试，避免界面无限等待。
+const CONVERSATION_STREAM_IDLE_TIMEOUT_MS = 120_000;
 
 const GEMINI_SUPPORTED_RATIOS = ["1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"];
 
@@ -495,44 +497,87 @@ function consumeResponseStreamText(state: ResponseStreamState, text: string, onD
     }
 }
 
-async function requestStreamingResponse(config: AiConfig, body: Record<string, unknown>, onDelta?: (text: string) => void, options?: RequestOptions): Promise<ToolResponseResult> {
-    const response = await fetch(aiApiUrl(config, "/responses"), {
-        method: "POST",
-        headers: { ...aiHeaders(config, "application/json"), Accept: "text/event-stream" },
-        body: JSON.stringify({ ...body, stream: true }),
-        signal: options?.signal,
-    });
-    if (!response.ok) throw new Error(await readFetchError(response, apiText("requestFailed")));
-    if (!response.body) {
-        const payload = (await response.json()) as ResponseApiPayload;
-        validateResponsePayload(payload);
-        return parseToolResponse(payload);
-    }
+/**
+ * 给流式请求加「空闲超时」：外部取消照常透传，超过 timeoutMs 没有任何新数据时自动中断。
+ * 中断后由上层把错误当作网络错误重试，避免上游卡住导致对话一直停留在执行中。
+ */
+function createIdleTimeoutSignal(external: AbortSignal | undefined, timeoutMs: number) {
+    const controller = new AbortController();
+    let timedOut = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const touch = () => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => {
+            timedOut = true;
+            controller.abort();
+        }, timeoutMs);
+    };
+    const onExternalAbort = () => controller.abort();
+    if (external?.aborted) controller.abort();
+    else external?.addEventListener("abort", onExternalAbort, { once: true });
+    touch();
+    return {
+        signal: controller.signal,
+        touch,
+        get timedOut() {
+            return timedOut;
+        },
+        dispose() {
+            if (timer) clearTimeout(timer);
+            external?.removeEventListener("abort", onExternalAbort);
+        },
+    };
+}
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    const state: ResponseStreamState = { buffer: "", text: "" };
+async function requestStreamingResponse(config: AiConfig, body: Record<string, unknown>, onDelta?: (text: string) => void, options?: RequestOptions): Promise<ToolResponseResult> {
+    const idle = createIdleTimeoutSignal(options?.signal, CONVERSATION_STREAM_IDLE_TIMEOUT_MS);
     try {
-        for (;;) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            consumeResponseStreamText(state, decoder.decode(value, { stream: true }), onDelta);
-            if (state.error) throw new Error(state.error);
+        const response = await fetch(aiApiUrl(config, "/responses"), {
+            method: "POST",
+            headers: { ...aiHeaders(config, "application/json"), Accept: "text/event-stream" },
+            body: JSON.stringify({ ...body, stream: true }),
+            signal: idle.signal,
+        });
+        idle.touch();
+        if (!response.ok) throw new Error(await readFetchError(response, apiText("requestFailed")));
+        if (!response.body) {
+            const payload = (await response.json()) as ResponseApiPayload;
+            idle.touch();
+            validateResponsePayload(payload);
+            return parseToolResponse(payload);
         }
-        consumeResponseStreamText(state, decoder.decode(), onDelta, true);
-    } finally {
-        // 错误或中断提前结束时主动取消底层流，避免连接未正常关闭触发浏览器 ERR_INCOMPLETE_CHUNKED_ENCODING 噪声
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        const state: ResponseStreamState = { buffer: "", text: "" };
         try {
-            await reader.cancel();
-        } catch {
-            // 流已关闭时忽略
+            for (;;) {
+                const { done, value } = await reader.read();
+                idle.touch();
+                if (done) break;
+                consumeResponseStreamText(state, decoder.decode(value, { stream: true }), onDelta);
+                if (state.error) throw new Error(state.error);
+            }
+            consumeResponseStreamText(state, decoder.decode(), onDelta, true);
+        } finally {
+            // 错误或中断提前结束时主动取消底层流，避免连接未正常关闭触发浏览器 ERR_INCOMPLETE_CHUNKED_ENCODING 噪声
+            try {
+                await reader.cancel();
+            } catch {
+                // 流已关闭时忽略
+            }
         }
+        if (state.error) throw new Error(state.error);
+        if (!state.payload) return { content: state.text, toolCalls: [] };
+        validateResponsePayload(state.payload);
+        const result = parseToolResponse(state.payload);
+        return { ...result, content: state.text || result.content };
+    } catch (error) {
+        if (idle.timedOut) throw new Error(apiText("conversationTimeout"));
+        throw error;
+    } finally {
+        idle.dispose();
     }
-    if (state.error) throw new Error(state.error);
-    if (!state.payload) return { content: state.text, toolCalls: [] };
-    validateResponsePayload(state.payload);
-    const result = parseToolResponse(state.payload);
-    return { ...result, content: state.text || result.content };
 }
 
 function toGeminiBody(config: AiConfig, messages: ResponseInputMessage[], extra?: Record<string, unknown>) {
@@ -612,39 +657,50 @@ function toGeminiToolOptions(tools: ResponseFunctionTool[], toolChoice: ToolChoi
 }
 
 async function requestGeminiStreamingResponse(config: AiConfig, body: Record<string, unknown>, onDelta?: (text: string) => void, options?: RequestOptions): Promise<ToolResponseResult> {
-    const response = await fetch(`${geminiApiUrl(config, "streamGenerateContent")}?alt=sse`, {
-        method: "POST",
-        headers: geminiHeaders(config),
-        body: JSON.stringify(body),
-        signal: options?.signal,
-    });
-    if (!response.ok) throw new Error(await readFetchError(response, apiText("requestFailed")));
-    if (!response.body) {
-        const payload = (await response.json()) as GeminiPayload;
-        return parseGeminiToolResponse(payload);
-    }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    const state: GeminiStreamState = { buffer: "", text: "", toolCalls: [] };
+    const idle = createIdleTimeoutSignal(options?.signal, CONVERSATION_STREAM_IDLE_TIMEOUT_MS);
     try {
-        for (;;) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            consumeGeminiStreamText(state, decoder.decode(value, { stream: true }), onDelta);
-            if (state.error) throw new Error(state.error);
+        const response = await fetch(`${geminiApiUrl(config, "streamGenerateContent")}?alt=sse`, {
+            method: "POST",
+            headers: geminiHeaders(config),
+            body: JSON.stringify(body),
+            signal: idle.signal,
+        });
+        idle.touch();
+        if (!response.ok) throw new Error(await readFetchError(response, apiText("requestFailed")));
+        if (!response.body) {
+            const payload = (await response.json()) as GeminiPayload;
+            idle.touch();
+            return parseGeminiToolResponse(payload);
         }
-        consumeGeminiStreamText(state, decoder.decode(), onDelta, true);
-    } finally {
-        // 错误或中断提前结束时主动取消底层流，避免浏览器输出 ERR_INCOMPLETE_CHUNKED_ENCODING
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        const state: GeminiStreamState = { buffer: "", text: "", toolCalls: [] };
         try {
-            await reader.cancel();
-        } catch {
-            // 流已关闭时忽略
+            for (;;) {
+                const { done, value } = await reader.read();
+                idle.touch();
+                if (done) break;
+                consumeGeminiStreamText(state, decoder.decode(value, { stream: true }), onDelta);
+                if (state.error) throw new Error(state.error);
+            }
+            consumeGeminiStreamText(state, decoder.decode(), onDelta, true);
+        } finally {
+            // 错误或中断提前结束时主动取消底层流，避免浏览器输出 ERR_INCOMPLETE_CHUNKED_ENCODING
+            try {
+                await reader.cancel();
+            } catch {
+                // 流已关闭时忽略
+            }
         }
+        if (state.error) throw new Error(state.error);
+        return { content: state.text, toolCalls: state.toolCalls };
+    } catch (error) {
+        if (idle.timedOut) throw new Error(apiText("conversationTimeout"));
+        throw error;
+    } finally {
+        idle.dispose();
     }
-    if (state.error) throw new Error(state.error);
-    return { content: state.text, toolCalls: state.toolCalls };
 }
 
 function consumeGeminiStreamText(state: GeminiStreamState, text: string, onDelta?: (text: string) => void, flush = false) {

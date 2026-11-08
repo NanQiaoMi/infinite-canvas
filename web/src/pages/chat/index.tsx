@@ -5,7 +5,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useTranslation } from "react-i18next";
 
 import i18n from "@/i18n";
-import { nativeToolCallsToAgent } from "@/lib/conversation-agent/protocol";
+import { nativeToolCallsToAgent, serializeToolResult } from "@/lib/conversation-agent/protocol";
 import { runAgentTurn } from "@/lib/conversation-agent/runtime";
 import { agentLocaleOf } from "@/lib/conversation-agent/system-prompt";
 import { AGENT_TOOLS, executeAgentTool } from "@/lib/conversation-agent/tools";
@@ -30,7 +30,7 @@ const modelLabelOf = (option: string) => option.split("::").pop() || option;
 import { formatAgentToolStepLabel, getInitialUnderstandStepLabel } from "@/lib/conversation-agent/formatters";
 import { detectAgentIntent, type AgentIntent } from "@/lib/conversation-agent/intent";
 
-const NETWORK_ERROR_PATTERN = /network error|failed to fetch|load failed|networkerror|econnreset|socket hang up|fetch failed/i;
+const NETWORK_ERROR_PATTERN = /network error|failed to fetch|load failed|networkerror|econnreset|socket hang up|fetch failed|timeout|timed out|超时|无响应|\b50[234]\b/i;
 const isNetworkError = (error: unknown) => NETWORK_ERROR_PATTERN.test(error instanceof Error ? error.message : String(error));
 
 export default function ChatPage() {
@@ -541,6 +541,37 @@ export default function ChatPage() {
         if (previous?.text) void send(previous.text);
     };
 
+    /** 工具失败（如生成中断/网络异常）后就地重试同一工具调用，无需让用户重新描述需求。 */
+    const retryTool = useCallback(
+        async (message: Extract<AgentMessage, { role: "tool" }>) => {
+            const sessionId = activeSession?.id;
+            if (!sessionId || useConversationAgentStore.getState().running) return;
+            const controller = new AbortController();
+            controllersRef.current.set(sessionId, controller);
+            const startedAt = Date.now();
+            try {
+                const result = await executeAgentTool(message.call, { signal: controller.signal });
+                appendMessages(sessionId, [
+                    {
+                        id: nanoid(),
+                        role: "tool",
+                        call: message.call,
+                        result,
+                        text: serializeToolResult(message.call, result),
+                        createdAt: Date.now(),
+                        durationMs: Date.now() - startedAt,
+                    },
+                ]);
+                useQuotaStore.getState().scheduleRefresh();
+            } catch (error) {
+                appendMessages(sessionId, [{ id: nanoid(), role: "error", text: error instanceof Error ? error.message : String(error), createdAt: Date.now() }]);
+            } finally {
+                controllersRef.current.delete(sessionId);
+            }
+        },
+        [activeSession?.id, appendMessages],
+    );
+
     const createAndClose = () => {
         createSession({ scope: "chat" });
         setListOpen(false);
@@ -636,7 +667,7 @@ export default function ChatPage() {
                             {!activeSession || activeSession.messages.length === 0
                                 ? welcome
                                 : activeSession.messages.map((item, index) => (
-                                      <ChatMessage key={item.id} message={item} onRetry={item.role === "error" ? () => retryMessage(index) : undefined} />
+                                      <ChatMessage key={item.id} message={item} onRetry={item.role === "error" ? () => retryMessage(index) : undefined} onToolRetry={item.role === "tool" ? (message) => void retryTool(message) : undefined} />
                                   ))}
                             {steps.length ? <StepTrail steps={steps} running={running} startedAt={turnStartedAt || undefined} /> : null}
                             {completedToolResults.map((item) => (

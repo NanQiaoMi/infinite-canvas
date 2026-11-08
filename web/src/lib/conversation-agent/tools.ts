@@ -13,6 +13,7 @@ import type { ReferenceImage } from "@/types/image";
 
 import { inferImageSizeFromPrompt } from "./aspect-ratio";
 import { CANVAS_AGENT_TOOLS, executeCanvasAgentTool, isCanvasTool } from "./canvas-tools";
+import { runWithGenerationRetry } from "./generation-retry";
 import { validateArguments } from "./protocol";
 import type { AgentImageRef, AgentQuotaSnapshot, AgentToolCall, AgentToolDefinition, AgentToolErrorCode, AgentToolResult } from "./types";
 
@@ -189,7 +190,8 @@ async function executeGenerateImage(call: AgentToolCall, context: { signal: Abor
                   onProgress,
               }
             : { signal: context.signal, onProgress };
-        const generated = await requestGeneration(generationConfig, prompt, requestOptions);
+        // 网络抖动 / 上游 5xx / 超时 / 任务中断时自动重试一次，其余确定性失败直接返回
+        const generated = await runWithGenerationRetry(() => requestGeneration(generationConfig, prompt, requestOptions), context.signal);
         if (currentTaskId) {
             useImageTaskStore.getState().completeActiveTask(currentTaskId, "succeeded");
         }
@@ -271,7 +273,11 @@ async function executeEditImage(call: AgentToolCall, context: { signal: AbortSig
                 return { id: reference.id, name: `${reference.id}.png`, type: blob?.type || "image/png", dataUrl: url, storageKey: reference.storageKey };
             }),
         );
-        const generated = await requestEdit(generationConfig, prompt, references, { signal: context.signal, onProgress });
+        // 网络抖动 / 上游 5xx / 超时 / 任务中断时自动重试一次，其余确定性失败直接返回
+        const generated = await runWithGenerationRetry(
+            () => requestEdit(generationConfig, prompt, references, { signal: context.signal, onProgress }),
+            context.signal,
+        );
         if (currentTaskId) {
             useImageTaskStore.getState().completeActiveTask(currentTaskId, "succeeded");
         }

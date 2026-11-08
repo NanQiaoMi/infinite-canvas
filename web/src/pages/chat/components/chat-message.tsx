@@ -210,7 +210,7 @@ export function ToolResultBody({ result }: { result: AgentToolResult }) {
     );
 }
 
-function ToolMessage({ message }: { message: Extract<AgentMessage, { role: "tool" }> }) {
+function ToolMessage({ message, onRetry }: { message: Extract<AgentMessage, { role: "tool" }>; onRetry?: () => void }) {
     const { t } = useTranslation();
     const [expanded, setExpanded] = useState(false);
     return (
@@ -231,6 +231,17 @@ function ToolMessage({ message }: { message: Extract<AgentMessage, { role: "tool
                 </span>
                 <ChevronDown className={cn("size-3.5 shrink-0 text-stone-400 transition-transform duration-200", expanded && "rotate-180")} />
             </button>
+            {!message.result.ok && onRetry ? (
+                <div className="flex justify-end">
+                    <button
+                        type="button"
+                        className="rounded-full px-2.5 py-1 text-[11px] text-stone-500 transition hover:bg-black/[.05] hover:text-stone-700 dark:text-stone-400 dark:hover:bg-white/[.06] dark:hover:text-stone-200"
+                        onClick={onRetry}
+                    >
+                        {t("chat.tools.retry")}
+                    </button>
+                </div>
+            ) : null}
             <div className={cn("agent-collapse", expanded && "is-open")}>
                 <div>
                     <pre className="mt-1.5 max-h-56 overflow-auto rounded-xl border border-stone-200/80 bg-stone-50 px-3 py-2 font-mono text-[10.5px] leading-5 text-stone-500 hover-scrollbar dark:border-stone-800 dark:bg-stone-900/60 dark:text-stone-400">
@@ -243,7 +254,7 @@ function ToolMessage({ message }: { message: Extract<AgentMessage, { role: "tool
     );
 }
 
-export function ChatMessage({ message, onRetry }: { message: AgentMessage; onRetry?: () => void }) {
+export function ChatMessage({ message, onRetry, onToolRetry }: { message: AgentMessage; onRetry?: () => void; onToolRetry?: (message: Extract<AgentMessage, { role: "tool" }>) => void }) {
     const { t } = useTranslation();
     if (message.role === "user") {
         return (
@@ -276,7 +287,7 @@ export function ChatMessage({ message, onRetry }: { message: AgentMessage; onRet
             </div>
         );
     }
-    if (message.role === "tool") return <ToolMessage message={message} />;
+    if (message.role === "tool") return <ToolMessage message={message} onRetry={onToolRetry ? () => onToolRetry(message) : undefined} />;
     return (
         <div className="agent-message-in w-full">
             <div className="flex max-w-[85%] items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50/70 px-3.5 py-2.5 text-xs leading-5 text-amber-700 shadow-xs dark:border-amber-950 dark:bg-amber-950/20 dark:text-amber-300">

@@ -478,6 +478,7 @@ export function detectAgentIntent(
         compactInput.length <= 30 &&
         !meaninglessCompact &&
         !/(?:改成|换成|修改|编辑|替换|加上|去掉|移除)/.test(input) &&
+        !/(?:写(?!实)|文案|标题|句子|标语|口号|名字|取名|翻译|解释|总结|分析|建议|推荐|教程|步骤|清单|评论|脚本|方案)/.test(input) &&
         !SMALL_TALK_PATTERN.test(input) &&
         !PURE_INQUIRY_PATTERN.test(input) &&
         !/[?？]$/.test(compactInput) &&
