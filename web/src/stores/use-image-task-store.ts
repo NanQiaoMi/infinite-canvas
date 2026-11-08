@@ -44,8 +44,8 @@ function normalizeChannelBaseUrl(baseUrl: string | undefined) {
 
 /**
  * 规划刷新/重进工作台后的恢复：只恢复 workbench 来源、仍在排队/生成中的任务；
- * 渠道 baseUrl 与当前渠道不一致或提示词缺失的任务直接拒绝（返回原因，调用方标记失败并提示），
- * 避免用当前渠道去轮询别的渠道创建的 task_id，也避免空提示词任务恢复。
+ * 渠道 baseUrl 与当前渠道都不为空且不一致、或提示词缺失的任务直接拒绝（返回原因，调用方标记失败并提示），
+ * 避免用当前渠道去轮询别的渠道创建的 task_id，也避免空提示词任务恢复；无指纹的旧任务按同渠道放行。
  * 恢复顺序按持久化的 slotIndex 归位（无 slotIndex 的按创建时间补位，冲突时顺延），保持与原批次的槽位一致。
  */
 export function planWorkbenchRecovery(tasks: PersistedImageTask[], current: { baseUrl?: string }): WorkbenchRecoveryPlan {
@@ -61,7 +61,10 @@ export function planWorkbenchRecovery(tasks: PersistedImageTask[], current: { ba
             rejected.push({ task, reason: "missing-prompt" });
             return;
         }
-        if (normalizeChannelBaseUrl(task.baseUrl) !== currentBaseUrl) {
+        // 旧持久化任务可能没有渠道指纹（本次修复前写入）：仅在两边都有指纹且不一致时拒绝，
+        // 无指纹任务按同渠道放行，避免升级后把可恢复的旧任务误判为跨渠道丢弃。
+        const taskBaseUrl = normalizeChannelBaseUrl(task.baseUrl);
+        if (taskBaseUrl && currentBaseUrl && taskBaseUrl !== currentBaseUrl) {
             rejected.push({ task, reason: "channel-mismatch" });
             return;
         }
@@ -72,6 +75,24 @@ export function planWorkbenchRecovery(tasks: PersistedImageTask[], current: { ba
     });
     entries.sort((left, right) => left.slotIndex - right.slotIndex);
     return { entries, rejected };
+}
+
+export type WorkbenchRecoverySlot =
+    | { kind: "task"; slotIndex: number; task: PersistedImageTask }
+    | { kind: "skipped"; slotIndex: number };
+
+/**
+ * 把恢复计划映射回持久化的绝对槽位：结果数组按最大 slotIndex 补齐，空槽用 skipped 占位，
+ * 保证刷新/重进后每个任务仍落在它原来的格子里，而不是被压缩到前几个下标。
+ */
+export function buildRecoverySlots(entries: WorkbenchRecoveryPlanEntry[]): WorkbenchRecoverySlot[] {
+    if (!entries.length) return [];
+    const maxSlotIndex = Math.max(...entries.map((entry) => entry.slotIndex));
+    const slots: WorkbenchRecoverySlot[] = Array.from({ length: maxSlotIndex + 1 }, (_, slotIndex) => ({ kind: "skipped", slotIndex }));
+    entries.forEach((entry) => {
+        slots[entry.slotIndex] = { kind: "task", slotIndex: entry.slotIndex, task: entry.task };
+    });
+    return slots;
 }
 
 export type RetrySlotSnapshot = { prompt: string; references: ReferenceImage[] };

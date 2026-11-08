@@ -22,7 +22,7 @@ import { requestEdit, requestGeneration, requestPromptOptimization } from "@/ser
 import { deleteStoredImages, ensureImagePreview, getImagePreviewRevision, previewUrlFor, resolveImageUrl, subscribeImagePreviews, uploadImage } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useConversationAgentStore } from "@/stores/use-conversation-agent-store";
-import { planWorkbenchRecovery, resolveRetrySlotSnapshot, useImageTaskStore } from "@/stores/use-image-task-store";
+import { buildRecoverySlots, planWorkbenchRecovery, resolveRetrySlotSnapshot, useImageTaskStore } from "@/stores/use-image-task-store";
 import { resolveImageCommand, useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
 import type { ImageTaskResult } from "@/services/api/image-queue";
 import { useQuotaStore } from "@/stores/use-quota-store";
@@ -42,7 +42,7 @@ type GeneratedImage = {
 
 type GenerationResult = {
     id: string;
-    status: "pending" | "success" | "failed";
+    status: "pending" | "success" | "failed" | "skipped";
     image?: GeneratedImage;
     error?: string;
     taskId?: string;
@@ -130,6 +130,8 @@ export default function ImagePage() {
     const recoveryEpochRef = useRef(0);
     // 页面卸载时被 abort 的请求：其 catch/finally 不得再把取消结果写回持久化任务，任务应保持可恢复。
     const discardedControllersRef = useRef<WeakSet<AbortController>>(new WeakSet());
+    // 页面已卸载：被中断的生成不得再写失败状态/失败日志。
+    const pageUnmountedRef = useRef(false);
     const queueStatus = useImageTaskStore((state) => state.queueStatus);
 
     useEffect(() => {
@@ -162,31 +164,37 @@ export default function ImagePage() {
         setRunning(true);
         setStartedAt(performance.now());
         setElapsedMs(0);
+        // 绝对槽位落位：结果数组按最大 slotIndex 补齐，空槽用 skipped 占位且不渲染卡片。
+        const recoverySlots = buildRecoverySlots(plan.entries);
         setResults(
-            plan.entries.map(({ task }) => ({
-                id: `recover-${task.taskId}`,
-                status: "pending",
-                taskId: task.taskId,
-                phase: task.status === "queued" ? "queued" : "processing",
-                queuePosition: task.queuePosition,
-                estimatedWaitSeconds: task.estimatedWaitSeconds,
-                progress: task.progress,
-                durationSeconds: task.durationSeconds,
-                prompt: task.prompt,
-            })),
+            recoverySlots.map((slot): GenerationResult =>
+                slot.kind === "task"
+                    ? {
+                          id: `recover-${slot.task.taskId}`,
+                          status: "pending",
+                          taskId: slot.task.taskId,
+                          phase: slot.task.status === "queued" ? "queued" : "processing",
+                          queuePosition: slot.task.queuePosition,
+                          estimatedWaitSeconds: slot.task.estimatedWaitSeconds,
+                          progress: slot.task.progress,
+                          durationSeconds: slot.task.durationSeconds,
+                          prompt: slot.task.prompt,
+                      }
+                    : { id: `recover-skipped-${slot.slotIndex}`, status: "skipped" },
+            ),
         );
         const distinctPrompts = Array.from(new Set(plan.entries.map(({ task }) => task.prompt.trim())));
         setResultsPrompt(distinctPrompts.length === 1 ? distinctPrompts[0] : "");
         void Promise.all(
-            plan.entries.map(async ({ task }, index) => {
+            plan.entries.map(async ({ task, slotIndex }) => {
                 const snapshot = {
                     text: task.prompt,
                     config: { ...effectiveConfig, model: task.model, count: "1" },
                     references: [] as ReferenceImage[],
                 };
                 try {
-                    // entries 已按持久化 slotIndex 排序，用当前序号落回相同位置的槽位，避免空槽造成下标错位。
-                    const img = await runGenerationSlot(index, snapshot, { taskId: task.taskId, expectedPrompt: task.prompt, expectedModel: task.model });
+                    // 用持久化的绝对 slotIndex 作为结果下标，空槽由 skipped 占位，刷新后保持原网格位置。
+                    const img = await runGenerationSlot(slotIndex, snapshot, { taskId: task.taskId, expectedPrompt: task.prompt, expectedModel: task.model });
                     if (img) {
                         saveLog(
                             buildLog({
@@ -207,16 +215,19 @@ export default function ImagePage() {
                 }
             }),
         ).finally(() => {
-            if (recoveryEpochRef.current !== epoch) return;
+            if (recoveryEpochRef.current !== epoch || pageUnmountedRef.current) return;
             setRunning(false);
             setStartedAt(0);
             setRecovering(false);
         });
     }, []);
 
-    // 页面卸载时断开在途请求：只 abort 网络轮询（cancelOnAbort=false），服务端任务保持可恢复，不做取消。
+    // 页面卸载时断开在途请求：只 abort 网络轮询（cancelOnAbort=false），服务端任务保持可恢复，不做取消；
+    // 被中断的生成不再写失败状态/结果/失败日志（pageUnmountedRef 供批次收尾判断）。
     useEffect(() => {
+        pageUnmountedRef.current = false;
         return () => {
+            pageUnmountedRef.current = true;
             Object.values(activeControllersRef.current).forEach((controller) => {
                 discardedControllersRef.current.add(controller);
                 controller.abort();
@@ -290,13 +301,20 @@ export default function ImagePage() {
         const CLIENT_GENERATION_CONCURRENCY = 4;
         const settled: Array<PromiseSettledResult<GeneratedImage>> = new Array(generationCount);
         let cursor = 0;
+        // 页面卸载会中断在途请求：此时整批不写失败状态/失败日志，服务端任务保持可恢复。
+        let batchInterrupted = false;
         const workers = Array.from({ length: Math.min(CLIENT_GENERATION_CONCURRENCY, generationCount) }, async () => {
             while (cursor < generationCount) {
                 const slotIndex = cursor;
                 cursor += 1;
                 try {
                     const value = await runGenerationSlot(slotIndex, snapshot);
-                    settled[slotIndex] = value ? { status: "fulfilled", value } : { status: "rejected", reason: t("imageWorkbench.requestCanceled", "请求已取消") };
+                    if (value) {
+                        settled[slotIndex] = { status: "fulfilled", value };
+                    } else {
+                        batchInterrupted = true;
+                        settled[slotIndex] = { status: "rejected", reason: t("imageWorkbench.requestCanceled", "请求已取消") };
+                    }
                 } catch (reason) {
                     settled[slotIndex] = { status: "rejected", reason };
                 }
@@ -309,25 +327,28 @@ export default function ImagePage() {
         const failCount = generationCount - successCount;
         const failed = result.find((item): item is PromiseRejectedResult => item.status === "rejected");
         const error = failed?.reason instanceof Error ? failed.reason.message : failCount ? t("workbench.generationFailed") : undefined;
-        if (agentTaskId) updateAgentTask(agentTaskId, { status: successCount ? "succeeded" : "failed", successCount, failCount, error: successCount ? undefined : error });
+        const skipPersist = batchInterrupted || pageUnmountedRef.current;
+        if (agentTaskId && !skipPersist) updateAgentTask(agentTaskId, { status: successCount ? "succeeded" : "failed", successCount, failCount, error: successCount ? undefined : error });
 
         try {
-            saveLog(
-                buildLog({
-                    prompt: text,
-                    model,
-                    config: { ...snapshot.config, count: String(generationCount) },
-                    references: snapshot.references,
-                    durationMs: performance.now() - batchStartedAt,
-                    successCount,
-                    failCount,
-                    status: successCount ? "success" : "failed",
-                    images: successImages,
-                }),
-            );
-            successCount ? message.success(t("imageWorkbench.generated")) : message.error(failed?.reason instanceof Error ? failed.reason.message : t("workbench.generationFailed"));
+            if (!skipPersist) {
+                saveLog(
+                    buildLog({
+                        prompt: text,
+                        model,
+                        config: { ...snapshot.config, count: String(generationCount) },
+                        references: snapshot.references,
+                        durationMs: performance.now() - batchStartedAt,
+                        successCount,
+                        failCount,
+                        status: successCount ? "success" : "failed",
+                        images: successImages,
+                    }),
+                );
+                successCount ? message.success(t("imageWorkbench.generated")) : message.error(failed?.reason instanceof Error ? failed.reason.message : t("workbench.generationFailed"));
+            }
         } finally {
-            setRunning(false);
+            if (!pageUnmountedRef.current) setRunning(false);
         }
     };
 
@@ -577,7 +598,7 @@ export default function ImagePage() {
 
         try {
             const onProgress = (task: ImageTaskResult) => {
-                if (isDiscarded()) return;
+                if (isDiscarded() || pageUnmountedRef.current) return;
                 currentTaskId = task.task_id;
                 setResults((value) =>
                     updateResultAt(value, index, {
@@ -655,7 +676,7 @@ export default function ImagePage() {
             const image = result[0];
             if (!image) throw new Error(t("imageWorkbench.missingResult"));
             const stored = await uploadImage(image.dataUrl);
-            if (isDiscarded()) return null;
+            if (isDiscarded() || pageUnmountedRef.current) return null;
             const nextImage: GeneratedImage = {
                 id: image.id,
                 dataUrl: stored.url,
@@ -672,7 +693,7 @@ export default function ImagePage() {
             setResults((value) => updateResultAt(value, index, { status: "success", image: nextImage }));
             return nextImage;
         } catch (error) {
-            if (!isDiscarded()) {
+            if (!isDiscarded() && !pageUnmountedRef.current) {
                 if (currentTaskId) {
                     useImageTaskStore.getState().completeActiveTask(
                         currentTaskId,
@@ -732,7 +753,7 @@ export default function ImagePage() {
         setStartedAt(retryStartedAt);
         try {
             const image = await runGenerationSlot(index, snapshot);
-            if (!image) return;
+            if (!image || pageUnmountedRef.current) return;
             saveLog(
                 buildLog({
                     prompt: snapshot.text,
@@ -751,8 +772,10 @@ export default function ImagePage() {
             // runGenerationSlot has already marked the result as failed.
         } finally {
             generatingRef.current = false;
-            setRunning(false);
-            setStartedAt(0);
+            if (!pageUnmountedRef.current) {
+                setRunning(false);
+                setStartedAt(0);
+            }
         }
     };
 
@@ -917,7 +940,9 @@ export default function ImagePage() {
                         <div className="mb-4 flex items-center justify-between gap-3">
                             <div className="flex items-center gap-2">
                                 <span className="shrink-0 whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.14em] text-stone-400/90 dark:text-stone-500">{t("workbench.results")}</span>
-                                {results.length ? <span className="font-mono text-[10px] tabular-nums text-stone-400 dark:text-stone-500">{results.length}</span> : null}
+                                {results.some((result) => result.status !== "skipped") ? (
+                                    <span className="font-mono text-[10px] tabular-nums text-stone-400 dark:text-stone-500">{results.filter((result) => result.status !== "skipped").length}</span>
+                                ) : null}
                                 {queueStatus ? (
                                     <span className="inline-flex items-center gap-1.5 rounded-full border border-stone-200/80 bg-stone-100/70 px-2 py-0.5 text-[10px] text-stone-500 dark:border-stone-800 dark:bg-stone-800/60 dark:text-stone-400">
                                         <Activity className="size-3 text-stone-400" />
@@ -935,7 +960,7 @@ export default function ImagePage() {
                         {results.length ? (
                             <div className="grid gap-3.5 sm:grid-cols-2 2xl:grid-cols-3">
                                 {results.map((result, index) =>
-                                    result.status === "success" && result.image ? (
+                                    result.status === "skipped" ? null : result.status === "success" && result.image ? (
                                         <ResultImageCard key={result.id} image={result.image} index={index} onEdit={addResultToReferences} onDownload={downloadImage} onSaveAsset={saveResultToAssets} />
                                     ) : result.status === "failed" ? (
                                         <FailedImageCard key={result.id} error={result.error || t("workbench.generationFailed")} onRetry={() => retryResult(index)} />

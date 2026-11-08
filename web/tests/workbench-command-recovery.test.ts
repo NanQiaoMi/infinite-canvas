@@ -15,7 +15,7 @@ if (typeof globalThis.localStorage === "undefined") {
 import { beforeEach, describe, expect, it } from "bun:test";
 
 import { readImageTaskEchoMismatch, type ImageTaskResult } from "../src/services/api/image-queue";
-import { planWorkbenchRecovery, resolveRetrySlotSnapshot, useImageTaskStore, type PersistedImageTask } from "../src/stores/use-image-task-store";
+import { buildRecoverySlots, planWorkbenchRecovery, resolveRetrySlotSnapshot, useImageTaskStore, type PersistedImageTask } from "../src/stores/use-image-task-store";
 import {
     WORKBENCH_COMMAND_TTL_MS,
     isWorkbenchCommandExpired,
@@ -212,7 +212,6 @@ describe("刷新恢复计划 (planWorkbenchRecovery)", () => {
             [
                 makePersistedTask({ taskId: "task-current" }),
                 makePersistedTask({ taskId: "task-other-channel", baseUrl: "https://api.other.com/v1" }),
-                makePersistedTask({ taskId: "task-no-base-url", baseUrl: undefined }),
                 makePersistedTask({ taskId: "task-no-prompt", prompt: "   " }),
             ],
             { baseUrl: CURRENT_BASE_URL },
@@ -220,8 +219,24 @@ describe("刷新恢复计划 (planWorkbenchRecovery)", () => {
         expect(plan.entries.map((entry) => entry.task.taskId)).toEqual(["task-current"]);
         const rejectionReasons = Object.fromEntries(plan.rejected.map((entry) => [entry.task.taskId, entry.reason]));
         expect(rejectionReasons["task-other-channel"]).toBe("channel-mismatch");
-        expect(rejectionReasons["task-no-base-url"]).toBe("channel-mismatch");
         expect(rejectionReasons["task-no-prompt"]).toBe("missing-prompt");
+    });
+
+    it("旧持久化任务没有 baseUrl 指纹时按同渠道放行，仅在两边都有指纹且不一致时拒绝", () => {
+        const plan = planWorkbenchRecovery(
+            [
+                makePersistedTask({ taskId: "task-legacy", baseUrl: undefined }),
+                makePersistedTask({ taskId: "task-known", baseUrl: CURRENT_BASE_URL }),
+                makePersistedTask({ taskId: "task-foreign", baseUrl: "https://api.other.com/v1" }),
+            ],
+            { baseUrl: CURRENT_BASE_URL },
+        );
+        expect(plan.entries.map((entry) => entry.task.taskId)).toEqual(["task-legacy", "task-known"]);
+        expect(plan.rejected.map((entry) => entry.task.taskId)).toEqual(["task-foreign"]);
+        // 当前渠道也没有指纹（读不到配置）时，不因缺失指纹拒绝任务
+        const noCurrentFingerprint = planWorkbenchRecovery([makePersistedTask({ taskId: "task-any", baseUrl: CURRENT_BASE_URL })], { baseUrl: undefined });
+        expect(noCurrentFingerprint.rejected).toHaveLength(0);
+        expect(noCurrentFingerprint.entries.map((entry) => entry.task.taskId)).toEqual(["task-any"]);
     });
 
     it("baseUrl 尾部斜杠/大小写差异视为同一渠道；重复 slotIndex 顺延避免撞位", () => {
@@ -234,6 +249,41 @@ describe("刷新恢复计划 (planWorkbenchRecovery)", () => {
         );
         expect(plan.entries).toHaveLength(2);
         expect(plan.entries.map((entry) => entry.slotIndex)).toEqual([0, 1]);
+    });
+});
+
+describe("刷新恢复绝对槽位映射 (buildRecoverySlots)", () => {
+    it("结果数组按最大绝对 slotIndex 补齐，有任务的槽位保持原下标、空槽用 skipped 占位", () => {
+        const plan = planWorkbenchRecovery(
+            [
+                makePersistedTask({ taskId: "task-slot-3", slotIndex: 3 }),
+                makePersistedTask({ taskId: "task-slot-0", slotIndex: 0 }),
+            ],
+            { baseUrl: CURRENT_BASE_URL },
+        );
+        const slots = buildRecoverySlots(plan.entries);
+        expect(slots).toHaveLength(4);
+        expect(slots.map((slot) => slot.slotIndex)).toEqual([0, 1, 2, 3]);
+        expect(slots[0].kind).toBe("task");
+        expect(slots[1].kind).toBe("skipped");
+        expect(slots[2].kind).toBe("skipped");
+        expect(slots[3].kind).toBe("task");
+        if (slots[0].kind === "task") expect(slots[0].task.taskId).toBe("task-slot-0");
+        if (slots[3].kind === "task") expect(slots[3].task.taskId).toBe("task-slot-3");
+    });
+
+    it("没有可恢复任务时返回空数组；连续槽位不产生 skipped 占位", () => {
+        expect(buildRecoverySlots([])).toHaveLength(0);
+        const plan = planWorkbenchRecovery(
+            [
+                makePersistedTask({ taskId: "task-a", slotIndex: 0 }),
+                makePersistedTask({ taskId: "task-b", slotIndex: 1 }),
+            ],
+            { baseUrl: CURRENT_BASE_URL },
+        );
+        const slots = buildRecoverySlots(plan.entries);
+        expect(slots).toHaveLength(2);
+        expect(slots.every((slot) => slot.kind === "task")).toBe(true);
     });
 });
 
