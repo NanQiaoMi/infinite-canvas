@@ -1,6 +1,7 @@
 import axios from "axios";
 
 import i18n from "@/i18n";
+import { trackGenerationAttempt } from "@/lib/conversation-agent/diagnostics";
 import { buildApiUrl, resolveModelRequestConfig, resolveModelScript, withLocalProxy, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
 import { normalizePluginImages, runModelPlugin } from "./model-plugin";
 import { assertQuotaAvailable } from "./quota-guard";
@@ -875,7 +876,7 @@ async function requestOpenAiImageBatch(
     return await parseImagePayload(response.data as ImageApiResponse, gif ? "image/gif" : "image/png");
 }
 
-export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
+async function requestGenerationInner(config: AiConfig, prompt: string, options?: RequestOptions) {
     assertQuotaAvailable("image");
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
     const gif = resolveGifOptions(config, options);
@@ -1021,7 +1022,7 @@ async function requestOpenAiEditBatch(
     return await parseImagePayload(response.data as ImageApiResponse);
 }
 
-export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], options?: RequestOptions) {
+async function requestEditInner(config: AiConfig, prompt: string, references: ReferenceImage[], options?: RequestOptions) {
     assertQuotaAvailable("image");
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
 
@@ -1225,4 +1226,36 @@ export async function requestConversationTurn(
     } catch (error) {
         throw new Error(readAxiosError(error, apiText("requestFailed")));
     }
+}
+
+/** 生图入口：统一记录诊断日志（成功/失败/取消、模型、尺寸、耗时），方便失败时回溯错误点。 */
+export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
+    return trackGenerationAttempt(
+        "generate",
+        {
+            model: config.model || config.imageModel,
+            size: config.size,
+            count: config.count,
+            format: options?.outputFormat ?? "png",
+            prompt: prompt.slice(0, 60),
+        },
+        () => requestGenerationInner(config, prompt, options),
+        () => Boolean(options?.signal?.aborted),
+    );
+}
+
+/** 改图入口：与生图共用诊断记录。 */
+export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], options?: RequestOptions) {
+    return trackGenerationAttempt(
+        "edit",
+        {
+            model: config.model || config.imageModel,
+            size: config.size,
+            count: config.count,
+            references: references.length,
+            prompt: prompt.slice(0, 60),
+        },
+        () => requestEditInner(config, prompt, references, options),
+        () => Boolean(options?.signal?.aborted),
+    );
 }

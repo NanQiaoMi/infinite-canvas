@@ -1,5 +1,5 @@
 import { Dropdown, Input, type GetRef } from "antd";
-import { ArrowUp, BookOpen, ChevronDown, Paperclip, Square, X } from "lucide-react";
+import { ArrowUp, BookOpen, Bug, ChevronDown, Paperclip, Square, X } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -20,6 +20,8 @@ type ChatComposerProps = {
     onAddFiles?: (files: File[]) => void;
     onRemoveReference?: (id: string) => void;
     quotaHint?: string;
+    /** 打开生成诊断（记录生成/模型失败，便于排查问题）。 */
+    onOpenDiagnostics?: () => void;
 };
 
 const COMMANDS = [
@@ -65,7 +67,7 @@ function ReferenceThumb({ image, onRemove }: { image: AgentImageRef; onRemove: (
     );
 }
 
-export function ChatComposer({ value, onChange, onSend, onStop, running, modelLabel, references = [], onAddFiles, onRemoveReference, quotaHint }: ChatComposerProps) {
+export function ChatComposer({ value, onChange, onSend, onStop, running, modelLabel, references = [], onAddFiles, onRemoveReference, quotaHint, onOpenDiagnostics }: ChatComposerProps) {
     const { t } = useTranslation();
     const config = useConfigStore((state) => state.config);
     const allowModelSelection = useConfigStore((state) => state.publicSettings.allowModelSelection);
@@ -261,6 +263,17 @@ export function ChatComposer({ value, onChange, onSend, onStop, running, modelLa
                             <BookOpen className="size-4" />
                             <span className="whitespace-nowrap">{t("prompts.library")}</span>
                         </button>
+                        {onOpenDiagnostics ? (
+                            <button
+                                type="button"
+                                className="flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2 text-[11px] text-stone-500 transition-all duration-150 hover:bg-black/[.05] active:scale-90 dark:text-stone-400 dark:hover:bg-white/[.08]"
+                                onClick={onOpenDiagnostics}
+                                title="生成诊断"
+                            >
+                                <Bug className="size-4" />
+                                <span className="hidden whitespace-nowrap sm:inline">诊断</span>
+                            </button>
+                        ) : null}
                         <span className="hidden items-center gap-1.5 pl-1 text-[11px] text-stone-400 sm:inline-flex dark:text-stone-500">
                             {t("chat.composerHint")}
                             <kbd className="rounded border border-stone-200 px-1 font-mono text-[9px] text-stone-400 dark:border-stone-700 dark:text-stone-500">⌘K</kbd>

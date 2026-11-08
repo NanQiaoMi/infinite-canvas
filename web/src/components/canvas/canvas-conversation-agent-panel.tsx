@@ -29,6 +29,7 @@ import { ALL_AGENT_TOOLS, executeAgentTool } from "@/lib/conversation-agent/tool
 import { agentLocaleOf } from "@/lib/conversation-agent/system-prompt";
 import { formatAgentToolStepLabel, getInitialUnderstandStepLabel } from "@/lib/conversation-agent/formatters";
 import { detectAgentIntent } from "@/lib/conversation-agent/intent";
+import { recordDiagnostic } from "@/lib/conversation-agent/diagnostics";
 import type { AgentEvent, AgentMessage, AgentStep, AgentToolCall } from "@/lib/conversation-agent/types";
 import { nativeToolCallsToAgent, serializeToolResult } from "@/lib/conversation-agent/protocol";
 import { ChatMessage } from "@/pages/chat/components/chat-message";
@@ -307,6 +308,12 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
                 } else {
                     const raw = err instanceof Error ? err.message : String(err);
                     const errorMsg = isNetworkError(err) ? "网络连接异常，请重试" : raw;
+                    recordDiagnostic({
+                        category: "model",
+                        level: "error",
+                        message: isNetworkError(err) ? `canvas model network error: ${raw}` : `canvas model failed: ${raw}`,
+                        detail: { sessionId, page: "canvas" },
+                    });
                     appendMessages(sessionId, [{ id: nanoid(), role: "error", text: errorMsg, createdAt: Date.now() }]);
                     message.error(errorMsg);
                 }

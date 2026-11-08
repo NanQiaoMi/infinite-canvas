@@ -1,4 +1,4 @@
-import { App, Button, Drawer, Spin } from "antd";
+import { App, Button, Drawer, Modal, Spin } from "antd";
 import { ArrowRight, ImageIcon, Menu, PenLine, Sparkles, WandSparkles } from "lucide-react";
 import { nanoid } from "nanoid";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -29,6 +29,15 @@ import { SmoothStreamText } from "./components/smooth-stream-text";
 const modelLabelOf = (option: string) => option.split("::").pop() || option;
 import { formatAgentToolStepLabel, getInitialUnderstandStepLabel } from "@/lib/conversation-agent/formatters";
 import { detectAgentIntent, type AgentIntent } from "@/lib/conversation-agent/intent";
+import {
+    clearDiagnostics,
+    formatDiagnosticsReport,
+    getDiagnosticEvents,
+    recordDiagnostic,
+    subscribeDiagnostics,
+    summarizeDiagnostics,
+    type DiagnosticEvent,
+} from "@/lib/conversation-agent/diagnostics";
 
 const NETWORK_ERROR_PATTERN = /network error|failed to fetch|load failed|networkerror|econnreset|socket hang up|fetch failed|timeout|timed out|超时|无响应|\b50[234]\b/i;
 const isNetworkError = (error: unknown) => NETWORK_ERROR_PATTERN.test(error instanceof Error ? error.message : String(error));
@@ -36,6 +45,11 @@ const isNetworkError = (error: unknown) => NETWORK_ERROR_PATTERN.test(error inst
 export default function ChatPage() {
     const { t } = useTranslation();
     const { message } = App.useApp();
+    // 生成诊断：内存环形缓冲，记录生图/模型失败，可复制报告用于排查
+    const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+    const [diagnosticEvents, setDiagnosticEvents] = useState<DiagnosticEvent[]>(() => getDiagnosticEvents());
+    useEffect(() => subscribeDiagnostics(() => setDiagnosticEvents(getDiagnosticEvents())), []);
+    const diagnosticSummary = summarizeDiagnostics(diagnosticEvents);
     const hydrated = useConversationAgentStore((state) => state.hydrated);
     const sessions = useConversationAgentStore((state) => state.sessions);
     const activeSessionId = useConversationAgentStore((state) => state.activeSessionId);
@@ -476,6 +490,12 @@ export default function ChatPage() {
                     }
                 } else {
                     const raw = error instanceof Error ? error.message : String(error);
+                    recordDiagnostic({
+                        category: "model",
+                        level: "error",
+                        message: isNetworkError(error) ? `model network error: ${raw}` : `model failed: ${raw}`,
+                        detail: { sessionId: targetSessionId, model: useConfigStore.getState().config.textModel },
+                    });
                     appendMessages(targetSessionId, [
                         {
                             id: nanoid(),
@@ -715,6 +735,7 @@ export default function ChatPage() {
                             onAddFiles={(files) => void addReferenceFiles(files)}
                             onRemoveReference={(id) => setReferences((current) => current.filter((item) => item.id !== id))}
                             quotaHint={quotaHint}
+                            onOpenDiagnostics={() => setDiagnosticsOpen(true)}
                         />
                     </div>
                 </div>
@@ -734,6 +755,66 @@ export default function ChatPage() {
                     setInput(`${command} `);
                 }}
             />
+            <Modal open={diagnosticsOpen} onCancel={() => setDiagnosticsOpen(false)} footer={null} width={720} title="生成诊断">
+                <div className="space-y-3">
+                    <div className="grid grid-cols-4 gap-2 text-center">
+                        {[
+                            { label: "生成尝试", value: diagnosticSummary.attempts },
+                            { label: "成功", value: diagnosticSummary.successes },
+                            { label: "失败", value: diagnosticSummary.failures },
+                            { label: "模型错误", value: diagnosticSummary.modelErrors },
+                        ].map((item) => (
+                            <div key={item.label} className="rounded-xl border border-stone-200/80 px-2 py-2 dark:border-stone-800">
+                                <div className="text-lg font-semibold tabular-nums text-stone-700 dark:text-stone-200">{item.value}</div>
+                                <div className="text-[11px] text-stone-400">{item.label}</div>
+                            </div>
+                        ))}
+                    </div>
+                    <div className="max-h-[380px] space-y-1 overflow-y-auto rounded-xl border border-stone-200/80 p-2 dark:border-stone-800">
+                        {diagnosticEvents.length === 0 ? (
+                            <div className="py-6 text-center text-xs text-stone-400">暂无诊断记录，生成或对话后会在这里记录</div>
+                        ) : (
+                            [...diagnosticEvents].reverse().map((event) => (
+                                <div key={event.id} className="rounded-lg px-2 py-1.5 text-[11px]">
+                                    <div className="flex items-center gap-2 font-mono">
+                                        <span className={event.level === "error" ? "text-red-500" : event.level === "warn" ? "text-amber-500" : "text-emerald-500"}>{event.level.toUpperCase()}</span>
+                                        <span className="text-stone-400">{new Date(event.at).toLocaleTimeString()}</span>
+                                        <span className="text-stone-500">{event.category}</span>
+                                    </div>
+                                    <div className="mt-0.5 break-all text-stone-600 dark:text-stone-300">{event.message}</div>
+                                    {event.detail ? <div className="mt-0.5 truncate text-[10px] text-stone-400">{JSON.stringify(event.detail)}</div> : null}
+                                </div>
+                            ))
+                        )}
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                        <span className="text-[11px] text-stone-400">共 {diagnosticEvents.length} 条，仅保存在本浏览器内存、不会上传；复制后可直接发给开发者排查</span>
+                        <div className="flex shrink-0 gap-2">
+                            <Button
+                                size="small"
+                                disabled={!diagnosticEvents.length}
+                                onClick={async () => {
+                                    await navigator.clipboard.writeText(formatDiagnosticsReport(diagnosticEvents));
+                                    message.success("诊断报告已复制");
+                                }}
+                            >
+                                复制诊断报告
+                            </Button>
+                            <Button
+                                size="small"
+                                danger
+                                disabled={!diagnosticEvents.length}
+                                onClick={() => {
+                                    clearDiagnostics();
+                                    message.success("已清空诊断记录");
+                                }}
+                            >
+                                清空
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+            </Modal>
         </div>
     );
 }

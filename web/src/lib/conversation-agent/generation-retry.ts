@@ -3,7 +3,7 @@
  * 参数错误、额度不足、缺少参考图等确定性失败直接返回。
  */
 const RETRYABLE_GENERATION_ERROR_PATTERN =
-    /(?:network error|failed to fetch|load failed|econnreset|econnrefused|etimedout|socket hang up|fetch failed|networkerror|timeout|timed out|超时|网络|502|503|504|429|task_interrupted|deadline exceeded|queue[_ ]?timeout|server error|internal error)/i;
+    /(?:network error|failed to fetch|load failed|econnreset|econnrefused|etimedout|socket hang up|fetch failed|networkerror|unable to connect|不可达|connection refused|timeout|timed out|超时|网络|502|503|504|429|task_interrupted|deadline exceeded|queue[_ ]?timeout|server error|internal error)/i;
 
 export const MAX_GENERATION_ATTEMPTS = 2;
 
