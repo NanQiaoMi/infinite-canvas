@@ -266,5 +266,8 @@ export function serializeToolResult(call: AgentToolCall, result: AgentToolResult
     if (result.tool.startsWith("canvas_")) {
         return `<tool_result name="${call.tool}" status="ok">${JSON.stringify(result)}</tool_result>`;
     }
-    return `<tool_result name="apply_prompt" status="ok">${JSON.stringify({ target: result.target, filled: true })}</tool_result>`;
+    if (result.tool === "apply_prompt") {
+        return `<tool_result name="apply_prompt" status="ok">${JSON.stringify({ target: result.target, filled: true })}</tool_result>`;
+    }
+    return `<tool_result name="${call.tool}" status="ok">${JSON.stringify(result)}</tool_result>`;
 }

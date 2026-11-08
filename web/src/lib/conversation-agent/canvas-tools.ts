@@ -219,7 +219,7 @@ export async function executeCanvasAgentTool(call: AgentToolCall): Promise<Agent
                 prompt,
                 composerContent: prompt,
                 size,
-                generationType: "text-to-image" as const,
+                generationType: "generation" as const,
                 generationMode: "image" as const,
                 ...(background ? { background } : {}),
             };
@@ -282,7 +282,7 @@ export async function executeCanvasAgentTool(call: AgentToolCall): Promise<Agent
                     prompt,
                     composerContent: prompt,
                     size,
-                    generationType: "text-to-image" as const,
+                    generationType: "generation" as const,
                     generationMode: "image" as const,
                     ...(background ? { background } : {}),
                 };

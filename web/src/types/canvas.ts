@@ -81,6 +81,14 @@ export type CanvasNodeMetadata = {
     mimeType?: string;
     bytes?: number;
     durationMs?: number;
+    /** 异步队列阶段：queued / processing 等，用于节点展示排队状态。 */
+    phase?: string;
+    /** 队列前方等待人数（排队中展示）。 */
+    queuePosition?: number;
+    /** 生成进度 0-1（生成中展示进度条）。 */
+    progress?: number;
+    /** 预计等待秒数（排队中展示）。 */
+    estimatedWaitSeconds?: number;
     videoTaskId?: string;
     videoTaskProvider?: "openai" | "gemini";
     groupId?: string;

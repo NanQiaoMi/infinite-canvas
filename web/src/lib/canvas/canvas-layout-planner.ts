@@ -22,8 +22,8 @@ export function computeNextNodePosition(
             // 默认容器大约为 1200x800，视口中心转换到画布坐标
             const approxWidth = 1200;
             const approxHeight = 800;
-            const centerX = (-viewport.x + approxWidth / 2) / (viewport.zoom || 1);
-            const centerY = (-viewport.y + approxHeight / 2) / (viewport.zoom || 1);
+            const centerX = (-viewport.x + approxWidth / 2) / (viewport.k || 1);
+            const centerY = (-viewport.y + approxHeight / 2) / (viewport.k || 1);
             return {
                 x: Math.round(centerX - nodeSize.width / 2),
                 y: Math.round(centerY - nodeSize.height / 2),
@@ -128,5 +128,5 @@ export function computeNodesBoundingViewport(
     const vx = containerSize.width / 2 - centerX * zoom;
     const vy = containerSize.height / 2 - centerY * zoom;
 
-    return { x: Math.round(vx), y: Math.round(vy), zoom: Number(zoom.toFixed(2)) };
+    return { x: Math.round(vx), y: Math.round(vy), k: Number(zoom.toFixed(2)) };
 }

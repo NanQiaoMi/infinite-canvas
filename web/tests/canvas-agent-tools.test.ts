@@ -84,7 +84,8 @@ describe("画布智能布局规划器 (canvas-layout-planner)", () => {
         ];
         const vp = computeNodesBoundingViewport(["n1", "n2"], nodes, { width: 1200, height: 800 });
         expect(vp).not.toBeNull();
-        expect(vp!.zoom).toBeGreaterThan(0);
+        expect(vp!.k).toBeGreaterThan(0);
+        expect(vp!.k).toBeLessThanOrEqual(1.2);
     });
 });
 

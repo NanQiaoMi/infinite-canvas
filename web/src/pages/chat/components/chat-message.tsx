@@ -67,7 +67,8 @@ function toolArgsSummary(call: AgentToolCall) {
 function toolResultSummary(result: AgentToolResult, t: (key: string, options?: Record<string, unknown>) => string) {
     if (!result.ok) return result.code;
     if (result.tool === "generate_image" || result.tool === "edit_image") return t("chat.tools.resultImages", { count: result.count, size: result.size });
-    return result.target === "video" ? t("chat.tools.videoWorkbench") : t("chat.tools.imageWorkbench");
+    if (result.tool === "apply_prompt") return result.target === "video" ? t("chat.tools.videoWorkbench") : t("chat.tools.imageWorkbench");
+    return t("chat.tools.imageWorkbench");
 }
 
 function UserAttachments({ images }: { images: AgentImageRef[] }) {

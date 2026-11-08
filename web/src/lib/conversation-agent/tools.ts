@@ -383,11 +383,14 @@ export async function executeAgentTool(call: AgentToolCall, context: { signal: A
                         );
                         const successfulImages = results.flatMap((r) => (r.ok && "images" in r ? r.images : []));
                         if (successfulImages.length > 0) {
+                            const successfulModel = results
+                                .map((r) => (r.ok && (r.tool === "generate_image" || r.tool === "edit_image") ? r.model : null))
+                                .find((model): model is string => Boolean(model));
                             return {
                                 tool: "generate_image",
                                 ok: true,
                                 images: successfulImages,
-                                model: results.find((r) => r.ok && "model" in r && r.model)?.model || "gpt-image-2.5",
+                                model: successfulModel || "gpt-image-2.5",
                                 size: tasks[0]?.size || "1024x1024",
                                 count: successfulImages.length,
                             };

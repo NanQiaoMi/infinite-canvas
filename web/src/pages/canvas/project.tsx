@@ -2367,7 +2367,7 @@ function InfiniteCanvasPage() {
                                     : n,
                             ),
                         );
-                        if (task.task_id && id) {
+                        if (task.task_id && projectId) {
                             useImageTaskStore.getState().registerActiveTask({
                                 taskId: task.task_id,
                                 source: "canvas",
@@ -2380,7 +2380,7 @@ function InfiniteCanvasPage() {
                                 progress: task.progress,
                                 durationSeconds: task.duration_seconds,
                                 nodeId,
-                                canvasProjectId: id,
+                                canvasProjectId: projectId,
                             });
                         }
                     };
@@ -2535,7 +2535,7 @@ function InfiniteCanvasPage() {
                                                 : n,
                                         ),
                                     );
-                                    if (task.task_id && id) {
+                                    if (task.task_id && projectId) {
                                         useImageTaskStore.getState().registerActiveTask({
                                             taskId: task.task_id,
                                             source: "canvas",
@@ -2548,7 +2548,7 @@ function InfiniteCanvasPage() {
                                             progress: task.progress,
                                             durationSeconds: task.duration_seconds,
                                             nodeId: rootId,
-                                            canvasProjectId: id,
+                                            canvasProjectId: projectId,
                                         });
                                     }
                                 };
@@ -2946,7 +2946,7 @@ function InfiniteCanvasPage() {
                                 : item,
                         ),
                     );
-                    if (task.task_id && id) {
+                    if (task.task_id && projectId) {
                         useImageTaskStore.getState().registerActiveTask({
                             taskId: task.task_id,
                             source: "canvas",
@@ -2959,7 +2959,7 @@ function InfiniteCanvasPage() {
                             progress: task.progress,
                             durationSeconds: task.duration_seconds,
                             nodeId: node.id,
-                            canvasProjectId: id,
+                            canvasProjectId: projectId,
                         });
                     }
                 };
