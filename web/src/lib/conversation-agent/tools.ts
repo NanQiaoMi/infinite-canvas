@@ -390,7 +390,7 @@ export async function executeAgentTool(call: AgentToolCall, context: { signal: A
                                 tool: "generate_image",
                                 ok: true,
                                 images: successfulImages,
-                                model: successfulModel || "gpt-image-2.5",
+                                model: successfulModel || "gpt-image-2.6",
                                 size: tasks[0]?.size || "1024x1024",
                                 count: successfulImages.length,
                             };

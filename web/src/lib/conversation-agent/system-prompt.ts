@@ -156,7 +156,7 @@ const ZH_PROMPT = `你是「无限画布」内置的 AI 创作助手，运行在
 {{special_section}}
 
 ## 工具结果格式（系统回填，你不需要模仿输出）
-<tool_result name="generate_image" status="ok">{"images":[{"id":"img_1","width":1024,"height":1024}],"model":"gpt-image-2.5","size":"1024x1024","count":1,"quota":{"dailyUsed":4,"dailyLimit":100}}</tool_result>
+<tool_result name="generate_image" status="ok">{"images":[{"id":"img_1","width":1024,"height":1024}],"model":"gpt-image-2.6","size":"1024x1024","count":1,"quota":{"dailyUsed":4,"dailyLimit":100}}</tool_result>
 
 <tool_result name="generate_image" status="error" code="quota_exceeded">{"error":"今日图片额度已用完，请稍后再试"}</tool_result>
 
@@ -273,7 +273,7 @@ The system natively supports multi-round self-looping (up to 8 ReAct turns) and 
 4. Final Summary: After completing all asset generations, summarize layer roles and provide layout assembly tips.
 
 ## Tool result format (system-provided; do not imitate)
-<tool_result name="generate_image" status="ok">{"images":[{"id":"img_1","width":1024,"height":1024}],"model":"gpt-image-2.5","size":"1024x1024","count":1,"quota":{"dailyUsed":4,"dailyLimit":100}}</tool_result>
+<tool_result name="generate_image" status="ok">{"images":[{"id":"img_1","width":1024,"height":1024}],"model":"gpt-image-2.6","size":"1024x1024","count":1,"quota":{"dailyUsed":4,"dailyLimit":100}}</tool_result>
 
 <tool_result name="generate_image" status="error" code="quota_exceeded">{"error":"Daily image quota is exhausted."}</tool_result>
 
