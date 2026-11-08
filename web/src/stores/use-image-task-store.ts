@@ -2,6 +2,7 @@ import { create } from "zustand";
 
 import type { AiConfig } from "@/stores/use-config-store";
 import { fetchQueueStatus, cancelImageTask, type ImageTaskStatus, type QueueStatusResult } from "@/services/api/image-queue";
+import type { ReferenceImage } from "@/types/image";
 
 export type ImageTaskSource = "workbench" | "chat" | "canvas";
 
@@ -10,6 +11,8 @@ export interface PersistedImageTask {
     source: ImageTaskSource;
     prompt: string;
     model: string;
+    /** 提交该任务时的 API 渠道 baseUrl 指纹；恢复时用来拒绝跨渠道复用 task_id。 */
+    baseUrl?: string;
     size?: string;
     count?: number;
     createdAt: number;
@@ -25,6 +28,62 @@ export interface PersistedImageTask {
     sessionId?: string;
     canvasProjectId?: string;
     resultDataUrl?: string;
+}
+
+export type WorkbenchRecoveryRejectionReason = "channel-mismatch" | "missing-prompt";
+
+export type WorkbenchRecoveryPlanEntry = { task: PersistedImageTask; slotIndex: number };
+
+export type WorkbenchRecoveryRejection = { task: PersistedImageTask; reason: WorkbenchRecoveryRejectionReason };
+
+export type WorkbenchRecoveryPlan = { entries: WorkbenchRecoveryPlanEntry[]; rejected: WorkbenchRecoveryRejection[] };
+
+function normalizeChannelBaseUrl(baseUrl: string | undefined) {
+    return (baseUrl || "").trim().replace(/\/+$/, "").toLowerCase();
+}
+
+/**
+ * 规划刷新/重进工作台后的恢复：只恢复 workbench 来源、仍在排队/生成中的任务；
+ * 渠道 baseUrl 与当前渠道不一致或提示词缺失的任务直接拒绝（返回原因，调用方标记失败并提示），
+ * 避免用当前渠道去轮询别的渠道创建的 task_id，也避免空提示词任务恢复。
+ * 恢复顺序按持久化的 slotIndex 归位（无 slotIndex 的按创建时间补位，冲突时顺延），保持与原批次的槽位一致。
+ */
+export function planWorkbenchRecovery(tasks: PersistedImageTask[], current: { baseUrl?: string }): WorkbenchRecoveryPlan {
+    const currentBaseUrl = normalizeChannelBaseUrl(current.baseUrl);
+    const pending = tasks
+        .filter((task) => task.source === "workbench" && (task.status === "queued" || task.status === "processing"))
+        .sort((left, right) => (left.slotIndex ?? Number.MAX_SAFE_INTEGER) - (right.slotIndex ?? Number.MAX_SAFE_INTEGER) || left.createdAt - right.createdAt);
+    const entries: WorkbenchRecoveryPlanEntry[] = [];
+    const rejected: WorkbenchRecoveryRejection[] = [];
+    const usedSlots = new Set<number>();
+    pending.forEach((task) => {
+        if (!task.prompt.trim()) {
+            rejected.push({ task, reason: "missing-prompt" });
+            return;
+        }
+        if (normalizeChannelBaseUrl(task.baseUrl) !== currentBaseUrl) {
+            rejected.push({ task, reason: "channel-mismatch" });
+            return;
+        }
+        let slotIndex = typeof task.slotIndex === "number" && task.slotIndex >= 0 ? task.slotIndex : entries.length;
+        while (usedSlots.has(slotIndex)) slotIndex += 1;
+        usedSlots.add(slotIndex);
+        entries.push({ task, slotIndex });
+    });
+    entries.sort((left, right) => left.slotIndex - right.slotIndex);
+    return { entries, rejected };
+}
+
+export type RetrySlotSnapshot = { prompt: string; references: ReferenceImage[] };
+
+/**
+ * 失败卡片"重试"只使用该槽位自己的提示词/参考图快照，绝不回落到输入框当前提示词，
+ * 避免用户改完提示词后把新提示词补进旧批次造成同一网格混排两套提示词。
+ */
+export function resolveRetrySlotSnapshot(slot: { prompt?: string; references?: ReferenceImage[] } | undefined): RetrySlotSnapshot | null {
+    const prompt = typeof slot?.prompt === "string" ? slot.prompt.trim() : "";
+    if (!prompt) return null;
+    return { prompt, references: slot?.references ? [...slot.references] : [] };
 }
 
 const STORAGE_KEY = "infinite-canvas:active_image_tasks";

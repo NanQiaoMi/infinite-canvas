@@ -10,7 +10,8 @@ import { clampVideoSeconds } from "@/lib/media-size";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { modelOptionLabel, modelOptionName, normalizeModelOptionValue, selectableModelsByCapability, useConfigStore } from "@/stores/use-config-store";
-import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
+import { resolveWorkbenchPage, useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
+import { useAgentStore } from "@/stores/use-agent-store";
 
 // Execute site-level Agent tools in the browser, including canvas lists, workbench generation, prompt search, and asset operations.
 // Their data lives locally in the browser through localforage and Zustand, so this module accesses the relevant stores directly.
@@ -63,7 +64,7 @@ export async function runSiteTool(name: SiteToolName, input: SiteToolInput, navi
         case "workbench_image_get_config":
             return getImageConfig();
         case "workbench_image_generate":
-            return runImageWorkbench(input, navigate);
+            return runImageWorkbench(input, navigate, context);
         case "workbench_video_get_config":
             return getVideoConfig();
         case "workbench_video_generate":
@@ -159,7 +160,7 @@ function getImageConfig() {
     };
 }
 
-function runImageWorkbench(input: SiteToolInput, navigate: NavigateFunction) {
+function runImageWorkbench(input: SiteToolInput, navigate: NavigateFunction, context: SiteToolContext) {
     const configStore = useConfigStore.getState();
     const applied: Record<string, unknown> = {};
     if (typeof input.model === "string" && input.model.trim()) {
@@ -180,11 +181,22 @@ function runImageWorkbench(input: SiteToolInput, navigate: NavigateFunction) {
         configStore.updateConfig("count", count);
         applied.count = count;
     }
-    const prompt = typeof input.prompt === "string" ? input.prompt : undefined;
-    const run = input.run !== false;
+    const prompt = typeof input.prompt === "string" && input.prompt.trim() ? input.prompt : undefined;
+    // 没有明确提示词时禁止自动出图：不能拿工作台输入框里的残留提示词直接开跑。
+    const run = input.run !== false && Boolean(prompt);
+    const page = resolveWorkbenchPage(typeof window !== "undefined" ? window.location.pathname : "");
+    const sessionId = useAgentStore.getState().conversation.threadId || undefined;
+    const canvasProjectId = context.canvasSnapshot?.projectId || undefined;
     navigate("/image");
-    const taskId = useWorkbenchAgentStore.getState().dispatchImage({ prompt, run });
-    return { ok: true, navigated: "/image", prompt, run, taskId, applied, note: siteText(run ? "imageGenerationStarted" : "imageConfigApplied") };
+    const taskId = useWorkbenchAgentStore.getState().dispatchImage({
+        prompt,
+        run,
+        origin: "site-tool",
+        page,
+        ...(sessionId ? { sessionId } : {}),
+        ...(canvasProjectId ? { canvasProjectId } : {}),
+    });
+    return { ok: true, navigated: "/image", prompt, run, taskId, applied, promptMissing: !prompt, note: siteText(run ? "imageGenerationStarted" : "imageConfigApplied") };
 }
 
 function getVideoConfig() {

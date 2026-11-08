@@ -3,7 +3,8 @@ import { nanoid } from "nanoid";
 
 import { quotaExhausted, useQuotaStore } from "@/stores/use-quota-store";
 import { selectableModelsByCapability, useConfigStore } from "@/stores/use-config-store";
-import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
+import { resolveWorkbenchPage, useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
+import { useConversationAgentStore } from "@/stores/use-conversation-agent-store";
 import { useAgentStore } from "@/stores/use-agent-store";
 import { useImageTaskStore } from "@/stores/use-image-task-store";
 import { requestEdit, requestGeneration } from "@/services/api/image";
@@ -344,12 +345,26 @@ async function executeApplyPrompt(call: AgentToolCall, context: { signal: AbortS
     }
     const workbench = useWorkbenchAgentStore.getState();
     const run = args.run === true;
-    if (target === "image") workbench.dispatchImage({ prompt, run });
-    else workbench.dispatchVideo({ prompt, run });
+    const attribution = resolveWorkbenchAttribution();
+    if (target === "image") workbench.dispatchImage({ prompt, run, ...attribution });
+    else workbench.dispatchVideo({ prompt, run, ...attribution });
     return { tool: "apply_prompt", ok: true, target, prompt };
 }
 
 export const ALL_AGENT_TOOLS: AgentToolDefinition[] = [...AGENT_TOOLS, ...CANVAS_AGENT_TOOLS];
+
+/** 标注工作台命令的归属：来源页面 + 当前对话会话 + 当前画布项目，供工作台消费时做来源/会话校验。 */
+function resolveWorkbenchAttribution() {
+    const pathname = typeof window !== "undefined" ? window.location.pathname : "";
+    const sessionId = useConversationAgentStore.getState().activeSessionId || undefined;
+    const canvasProjectId = useAgentStore.getState().canvasContext?.snapshot?.projectId || undefined;
+    return {
+        origin: "conversation" as const,
+        page: resolveWorkbenchPage(pathname),
+        ...(sessionId ? { sessionId } : {}),
+        ...(canvasProjectId ? { canvasProjectId } : {}),
+    };
+}
 
 export async function executeAgentTool(call: AgentToolCall, context: { signal: AbortSignal; references?: AgentImageRef[] }): Promise<AgentToolResult> {
     const definition = ALL_AGENT_TOOLS.find((tool) => tool.name === call.tool);

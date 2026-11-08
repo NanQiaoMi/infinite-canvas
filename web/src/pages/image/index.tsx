@@ -21,9 +21,9 @@ import { isRetryableGenerationError } from "@/lib/conversation-agent/generation-
 import { requestEdit, requestGeneration, requestPromptOptimization } from "@/services/api/image";
 import { deleteStoredImages, ensureImagePreview, getImagePreviewRevision, previewUrlFor, resolveImageUrl, subscribeImagePreviews, uploadImage } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
-import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
 import { useConversationAgentStore } from "@/stores/use-conversation-agent-store";
-import { useImageTaskStore } from "@/stores/use-image-task-store";
+import { planWorkbenchRecovery, resolveRetrySlotSnapshot, useImageTaskStore } from "@/stores/use-image-task-store";
+import { resolveImageCommand, useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
 import type { ImageTaskResult } from "@/services/api/image-queue";
 import { useQuotaStore } from "@/stores/use-quota-store";
 import type { ReferenceImage } from "@/types/image";
@@ -51,6 +51,9 @@ type GenerationResult = {
     estimatedWaitSeconds?: number;
     progress?: number;
     durationSeconds?: number;
+    /** 生成本槽位时使用的提示词/参考图快照：失败重试必须复用这份快照，而不是输入框里的当前提示词。 */
+    prompt?: string;
+    references?: ReferenceImage[];
 };
 
 type GenerationLog = {
@@ -80,7 +83,7 @@ const LOG_STORE_KEY = "infinite-canvas:image_generation_logs";
 const logStore = localforage.createInstance({ name: "infinite-canvas", storeName: "image_generation_logs" });
 
 export default function ImagePage() {
-    const { message } = App.useApp();
+    const { message, modal } = App.useApp();
     const { t } = useTranslation();
     useSyncExternalStore(subscribeImagePreviews, getImagePreviewRevision);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -109,6 +112,8 @@ export default function ImagePage() {
     const [autoRunToken, setAutoRunToken] = useState(0);
     const [optimizing, setOptimizing] = useState(false);
     const [optimization, setOptimization] = useState<{ original: string; optimized: string; edited: string } | null>(null);
+    const [recovering, setRecovering] = useState(false);
+    const [resultsPrompt, setResultsPrompt] = useState("");
     const imageCommand = useWorkbenchAgentStore((state) => state.imageCommand);
     const clearImageCommand = useWorkbenchAgentStore((state) => state.clearImageCommand);
     const updateAgentTask = useWorkbenchAgentStore((state) => state.updateTask);
@@ -120,6 +125,11 @@ export default function ImagePage() {
     const submittingRef = useRef(false);
     const generatingRef = useRef(false);
     const lastSubmitRef = useRef<{ text: string; at: number } | null>(null);
+    const promptRef = useRef("");
+    promptRef.current = prompt;
+    const recoveryEpochRef = useRef(0);
+    // 页面卸载时被 abort 的请求：其 catch/finally 不得再把取消结果写回持久化任务，任务应保持可恢复。
+    const discardedControllersRef = useRef<WeakSet<AbortController>>(new WeakSet());
     const queueStatus = useImageTaskStore((state) => state.queueStatus);
 
     useEffect(() => {
@@ -130,13 +140,31 @@ export default function ImagePage() {
         return () => clearInterval(timer);
     }, [effectiveConfig.baseUrl, effectiveConfig.apiKey]);
 
-    // 页面刷新 / 重新进入时恢复未完成的后台生成任务
+    // 页面刷新 / 重新进入时恢复未完成的后台生成任务：
+    // 只恢复当前渠道、提示词完整的 workbench 任务，按持久化 slotIndex 归位；恢复结束必须在 finally 复位 running。
     useEffect(() => {
-        const workbenchTasks = useImageTaskStore.getState().getTasksBySource("workbench");
-        if (!workbenchTasks.length) return;
+        const plan = planWorkbenchRecovery(useImageTaskStore.getState().getTasksBySource("workbench"), { baseUrl: effectiveConfig.baseUrl });
+        const rejectedMessage = (reason: "channel-mismatch" | "missing-prompt") =>
+            reason === "channel-mismatch"
+                ? t("imageWorkbench.recoveryChannelMismatch", "原任务使用的 API 渠道与当前渠道不一致，已放弃恢复，请重新生成")
+                : t("imageWorkbench.recoveryPromptMissing", "原任务缺少提示词，已放弃恢复");
+        plan.rejected.forEach(({ task, reason }) => {
+            useImageTaskStore.getState().completeActiveTask(task.taskId, "failed", rejectedMessage(reason));
+        });
+        if (plan.rejected.length) {
+            message.warning(t("imageWorkbench.recoveryRejected", "部分未完成任务因渠道或提示词变化已放弃恢复，请重新生成"));
+        }
+        if (!plan.entries.length) return;
+
+        const epoch = recoveryEpochRef.current + 1;
+        recoveryEpochRef.current = epoch;
+        setRecovering(true);
+        setRunning(true);
+        setStartedAt(performance.now());
+        setElapsedMs(0);
         setResults(
-            workbenchTasks.map((task) => ({
-                id: task.taskId,
+            plan.entries.map(({ task }) => ({
+                id: `recover-${task.taskId}`,
                 status: "pending",
                 taskId: task.taskId,
                 phase: task.status === "queued" ? "queued" : "processing",
@@ -144,37 +172,56 @@ export default function ImagePage() {
                 estimatedWaitSeconds: task.estimatedWaitSeconds,
                 progress: task.progress,
                 durationSeconds: task.durationSeconds,
+                prompt: task.prompt,
             })),
         );
-        setRunning(true);
-        setStartedAt(Date.now());
-        workbenchTasks.forEach(async (task, idx) => {
-            const snapshot = {
-                text: task.prompt,
-                config: { ...effectiveConfig, model: task.model, count: "1" },
-                references: [],
-            };
-            try {
-                const img = await runGenerationSlot(idx, snapshot, task.taskId);
-                if (img) {
-                    saveLog(
-                        buildLog({
-                            prompt: snapshot.text,
-                            model: task.model,
-                            config: { ...snapshot.config, count: "1" },
-                            references: snapshot.references,
-                            durationMs: 0,
-                            successCount: 1,
-                            failCount: 0,
-                            status: "success",
-                            images: [img],
-                        }),
-                    );
+        const distinctPrompts = Array.from(new Set(plan.entries.map(({ task }) => task.prompt.trim())));
+        setResultsPrompt(distinctPrompts.length === 1 ? distinctPrompts[0] : "");
+        void Promise.all(
+            plan.entries.map(async ({ task }, index) => {
+                const snapshot = {
+                    text: task.prompt,
+                    config: { ...effectiveConfig, model: task.model, count: "1" },
+                    references: [] as ReferenceImage[],
+                };
+                try {
+                    // entries 已按持久化 slotIndex 排序，用当前序号落回相同位置的槽位，避免空槽造成下标错位。
+                    const img = await runGenerationSlot(index, snapshot, { taskId: task.taskId, expectedPrompt: task.prompt, expectedModel: task.model });
+                    if (img) {
+                        saveLog(
+                            buildLog({
+                                prompt: snapshot.text,
+                                model: task.model,
+                                config: { ...snapshot.config, count: "1" },
+                                references: snapshot.references,
+                                durationMs: 0,
+                                successCount: 1,
+                                failCount: 0,
+                                status: "success",
+                                images: [img],
+                            }),
+                        );
+                    }
+                } catch {
+                    // error handled in runGenerationSlot
                 }
-            } catch {
-                // error handled in runGenerationSlot
-            }
+            }),
+        ).finally(() => {
+            if (recoveryEpochRef.current !== epoch) return;
+            setRunning(false);
+            setStartedAt(0);
+            setRecovering(false);
         });
+    }, []);
+
+    // 页面卸载时断开在途请求：只 abort 网络轮询（cancelOnAbort=false），服务端任务保持可恢复，不做取消。
+    useEffect(() => {
+        return () => {
+            Object.values(activeControllersRef.current).forEach((controller) => {
+                discardedControllersRef.current.add(controller);
+                controller.abort();
+            });
+        };
     }, []);
 
     const model = effectiveConfig.imageModel || effectiveConfig.model;
@@ -234,7 +281,8 @@ export default function ImagePage() {
         setRunning(true);
         if (agentTaskId) updateAgentTask(agentTaskId, { status: "running", error: undefined });
         setPreviewLog(null);
-        setResults(Array.from({ length: generationCount }, () => ({ id: nanoid(), status: "pending" })));
+        setResults(Array.from({ length: generationCount }, () => ({ id: nanoid(), status: "pending", prompt: snapshot.text, references: [...snapshot.references] })));
+        setResultsPrompt(snapshot.text);
         const batchStartedAt = performance.now();
         setStartedAt(batchStartedAt);
 
@@ -248,7 +296,7 @@ export default function ImagePage() {
                 cursor += 1;
                 try {
                     const value = await runGenerationSlot(slotIndex, snapshot);
-                    settled[slotIndex] = { status: "fulfilled", value };
+                    settled[slotIndex] = value ? { status: "fulfilled", value } : { status: "rejected", reason: t("imageWorkbench.requestCanceled", "请求已取消") };
                 } catch (reason) {
                     settled[slotIndex] = { status: "rejected", reason };
                 }
@@ -336,6 +384,10 @@ export default function ImagePage() {
     /** 生成入口统一加互斥：优化中/生成中/提交中时忽略重复触发，并对 1.5s 内完全相同的提示词去重。 */
     const generate = async () => {
         if (running || optimizing || submittingRef.current) {
+            // 早退时清空待处理的 agent 任务归属，避免下一次手动生成把结果记到旧任务上。
+            const staleAgentTaskId = agentTaskIdRef.current;
+            agentTaskIdRef.current = undefined;
+            if (staleAgentTaskId) updateAgentTask(staleAgentTaskId, { status: "failed", error: t("workbench.busy") });
             message.info(t("workbench.busy"));
             return;
         }
@@ -366,21 +418,49 @@ export default function ImagePage() {
         await runGenerationBatch(original);
     };
 
-    // Handle image-generation commands from the Agent panel by setting the prompt and optionally starting generation.
+    // 消费 Agent 面板下发的出图指令：先校验时效与来源归属，再决定是否覆盖输入框/自动出图。
+    // 恢复流程进行中时延后消费，等恢复结束（recovering=false）后同一 effect 会再次执行。
     useEffect(() => {
-        if (!imageCommand || imageCommand.nonce === processedCommandRef.current) return;
+        if (recovering) return;
+        if (!imageCommand || imageCommand.nonce <= processedCommandRef.current) return;
         processedCommandRef.current = imageCommand.nonce;
         clearImageCommand();
-        if (typeof imageCommand.prompt === "string") setPrompt(imageCommand.prompt);
-        if (imageCommand.run && running) {
-            if (imageCommand.taskId) updateAgentTask(imageCommand.taskId, { status: "failed", error: t("imageWorkbench.busy") });
+        const failCommandTask = (reason: string) => {
+            if (imageCommand.taskId) updateAgentTask(imageCommand.taskId, { status: "failed", error: reason });
+        };
+        const resolution = resolveImageCommand(imageCommand, {
+            currentPrompt: promptRef.current,
+            currentPage: "image",
+            activeSessionId: useConversationAgentStore.getState().activeSessionId,
+        });
+        if (resolution.action === "ignore") {
+            if (resolution.reason === "expired") {
+                failCommandTask(t("imageWorkbench.commandExpired", "该出图指令已过期，已忽略"));
+                message.info(t("imageWorkbench.commandExpired", "该出图指令已过期，已忽略"));
+            } else {
+                failCommandTask(t("imageWorkbench.promptRequired"));
+            }
             return;
         }
-        if (imageCommand.run) {
+        const applyCommand = () => {
+            if (typeof resolution.prompt === "string") setPrompt(resolution.prompt);
+            if (!resolution.run) return;
             agentTaskIdRef.current = imageCommand.taskId;
             setAutoRunToken((value) => value + 1);
+        };
+        if (!resolution.requiresConfirm) {
+            applyCommand();
+            return;
         }
-    }, [imageCommand, clearImageCommand, running, updateAgentTask]);
+        modal.confirm({
+            title: t("imageWorkbench.overwritePromptTitle", "覆盖当前提示词？"),
+            content: t("imageWorkbench.overwritePromptContent", "来自其他页面/会话的出图指令会覆盖输入框里已输入的提示词，是否继续？"),
+            okText: t("common.confirm", "继续"),
+            cancelText: t("common.cancel"),
+            onOk: applyCommand,
+            onCancel: () => failCommandTask(t("imageWorkbench.commandCanceled", "已取消该出图指令")),
+        });
+    }, [imageCommand, recovering, clearImageCommand, updateAgentTask, message, modal, t]);
 
     useEffect(() => {
         if (!autoRunToken) return;
@@ -429,6 +509,7 @@ export default function ImagePage() {
         setPrompt("");
         setReferences([]);
         setResults([]);
+        setResultsPrompt("");
         setElapsedMs(0);
         setStartedAt(0);
         setSelectedLogIds([]);
@@ -441,6 +522,7 @@ export default function ImagePage() {
         if (previewLog && selectedLogIds.includes(previewLog.id)) {
             setPreviewLog(null);
             setResults([]);
+            setResultsPrompt("");
         }
         setSelectedLogIds([]);
         setDeleteConfirmOpen(false);
@@ -461,10 +543,11 @@ export default function ImagePage() {
         if (log.config.quality) updateConfig("quality", log.config.quality);
         if (log.config.size) updateConfig("size", log.config.size);
         if (log.config.count) updateConfig("count", log.config.count);
-        setResults(log.images.map((image) => ({ id: image.id, status: "success", image })));
+        setResults(log.images.map((image) => ({ id: image.id, status: "success", image, prompt: log.prompt, references: log.references || [] })));
+        setResultsPrompt(log.prompt);
     };
 
-    const buildRequestSnapshot = (textOverride?: string) => {
+    const buildRequestSnapshot = (textOverride?: string, referencesOverride?: ReferenceImage[]) => {
         const text = (textOverride ?? prompt).trim();
         if (!text) {
             message.error(t("imageWorkbench.promptRequired"));
@@ -475,21 +558,26 @@ export default function ImagePage() {
             openConfigDialog(true);
             return null;
         }
-        return { text, config: { ...effectiveConfig, model, count: "1" }, references: [...references] };
+        return { text, config: { ...effectiveConfig, model, count: "1" }, references: [...(referencesOverride ?? references)] };
     };
+
+    type RecoveryTaskExpectation = { taskId: string; expectedPrompt: string; expectedModel: string };
 
     const runGenerationSlot = async (
         index: number,
         snapshot: { text: string; config: AiConfig; references: ReferenceImage[] },
-        existingTaskId?: string,
+        recovery?: RecoveryTaskExpectation,
     ) => {
         const itemStartedAt = performance.now();
-        let currentTaskId: string | undefined = existingTaskId;
+        let currentTaskId: string | undefined = recovery?.taskId;
         const controller = new AbortController();
         activeControllersRef.current[index] = controller;
+        // 页面卸载 abort 的请求不再写回结果/持久化任务（任务保持可恢复）；用户主动取消不在此列。
+        const isDiscarded = () => discardedControllersRef.current.has(controller);
 
         try {
             const onProgress = (task: ImageTaskResult) => {
+                if (isDiscarded()) return;
                 currentTaskId = task.task_id;
                 setResults((value) =>
                     updateResultAt(value, index, {
@@ -499,6 +587,8 @@ export default function ImagePage() {
                         estimatedWaitSeconds: task.estimated_wait_seconds,
                         progress: task.progress,
                         durationSeconds: task.duration_seconds,
+                        prompt: snapshot.text,
+                        references: snapshot.references,
                     }),
                 );
                 if (task.task_id) {
@@ -507,6 +597,7 @@ export default function ImagePage() {
                         source: "workbench",
                         prompt: snapshot.text,
                         model: snapshot.config.model || snapshot.config.imageModel,
+                        baseUrl: snapshot.config.baseUrl,
                         size: snapshot.config.size,
                         createdAt: Date.now(),
                         status: task.status,
@@ -527,7 +618,10 @@ export default function ImagePage() {
             const requestOpts = {
                 signal: controller.signal,
                 onProgress,
-                recoveryTaskId: existingTaskId,
+                recoveryTaskId: recovery?.taskId,
+                // 页面卸载只断开轮询，不取消服务端任务，回到工作台后可继续恢复。
+                cancelOnAbort: false,
+                ...(recovery ? { expectedTask: { prompt: recovery.expectedPrompt, model: recovery.expectedModel } } : {}),
                 ...(gifWanted
                     ? {
                           outputFormat: "gif" as const,
@@ -549,6 +643,11 @@ export default function ImagePage() {
                 } catch (error) {
                     // 排队拥挤/上游限流等可恢复错误：等待后自动重试一次，避免并发排队时直接失败
                     if (controller.signal.aborted || attempt >= 1 || !isRetryableGenerationError(error)) throw error;
+                    // 重试前取消并丢弃首个已创建的异步 task，避免它的结果/状态被挂到本轮新请求上。
+                    if (currentTaskId) {
+                        useImageTaskStore.getState().cancelTask(snapshot.config, currentTaskId);
+                        currentTaskId = undefined;
+                    }
                     await new Promise((resolve) => setTimeout(resolve, 1500));
                 }
             }
@@ -556,6 +655,7 @@ export default function ImagePage() {
             const image = result[0];
             if (!image) throw new Error(t("imageWorkbench.missingResult"));
             const stored = await uploadImage(image.dataUrl);
+            if (isDiscarded()) return null;
             const nextImage: GeneratedImage = {
                 id: image.id,
                 dataUrl: stored.url,
@@ -572,19 +672,21 @@ export default function ImagePage() {
             setResults((value) => updateResultAt(value, index, { status: "success", image: nextImage }));
             return nextImage;
         } catch (error) {
-            if (currentTaskId) {
-                useImageTaskStore.getState().completeActiveTask(
-                    currentTaskId,
-                    controller.signal.aborted ? "cancelled" : "failed",
-                    error instanceof Error ? error.message : String(error),
+            if (!isDiscarded()) {
+                if (currentTaskId) {
+                    useImageTaskStore.getState().completeActiveTask(
+                        currentTaskId,
+                        controller.signal.aborted ? "cancelled" : "failed",
+                        error instanceof Error ? error.message : String(error),
+                    );
+                }
+                setResults((value) =>
+                    updateResultAt(value, index, {
+                        status: "failed",
+                        error: error instanceof Error ? error.message : t("workbench.generationFailed"),
+                    }),
                 );
             }
-            setResults((value) =>
-                updateResultAt(value, index, {
-                    status: "failed",
-                    error: error instanceof Error ? error.message : t("workbench.generationFailed"),
-                }),
-            );
             throw error;
         } finally {
             delete activeControllersRef.current[index];
@@ -609,17 +711,32 @@ export default function ImagePage() {
     };
 
     const retryResult = async (index: number) => {
-        const snapshot = buildRequestSnapshot();
+        // 只使用失败槽位自身保存的提示词/参考图快照，绝不回落到输入框当前提示词。
+        const slotSnapshot = resolveRetrySlotSnapshot(results[index]);
+        if (!slotSnapshot) {
+            message.error(t("imageWorkbench.retrySnapshotMissing", "该结果缺少槽位提示词快照，请重新生成"));
+            return;
+        }
+        if (generatingRef.current || running || recovering) {
+            message.info(t("workbench.busy"));
+            return;
+        }
+        const snapshot = buildRequestSnapshot(slotSnapshot.prompt, slotSnapshot.references);
         if (!snapshot) return;
+        generatingRef.current = true;
+        setRunning(true);
+        setElapsedMs(0);
         setPreviewLog(null);
-        setResults((value) => updateResultAt(value, index, { status: "pending", error: undefined, image: undefined }));
+        setResults((value) => updateResultAt(value, index, { status: "pending", error: undefined, image: undefined, prompt: snapshot.text, references: snapshot.references }));
         const retryStartedAt = performance.now();
+        setStartedAt(retryStartedAt);
         try {
             const image = await runGenerationSlot(index, snapshot);
+            if (!image) return;
             saveLog(
                 buildLog({
                     prompt: snapshot.text,
-                    model,
+                    model: snapshot.config.model || snapshot.config.imageModel,
                     config: { ...snapshot.config, count: "1" },
                     references: snapshot.references,
                     durationMs: performance.now() - retryStartedAt,
@@ -632,6 +749,10 @@ export default function ImagePage() {
             message.success(t("workbench.retrySuccess"));
         } catch {
             // runGenerationSlot has already marked the result as failed.
+        } finally {
+            generatingRef.current = false;
+            setRunning(false);
+            setStartedAt(0);
         }
     };
 
@@ -806,6 +927,11 @@ export default function ImagePage() {
                             </div>
                             {running ? <span className="font-mono text-[10px] tabular-nums text-stone-400 dark:text-stone-500">{t("workbench.waiting", { time: formatDuration(elapsedMs) })}</span> : null}
                         </div>
+                        {results.length && !running && resultsPrompt && prompt.trim() !== resultsPrompt ? (
+                            <div className="mb-3 rounded-xl border border-amber-200/80 bg-amber-50/70 px-3 py-2 text-[11px] text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
+                                {t("imageWorkbench.resultsFromPreviousPrompt", "以上结果来自上一批提示词，修改后的提示词尚未生成；失败格重试会沿用原批次提示词。")}
+                            </div>
+                        ) : null}
                         {results.length ? (
                             <div className="grid gap-3.5 sm:grid-cols-2 2xl:grid-cols-3">
                                 {results.map((result, index) =>

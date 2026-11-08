@@ -13,7 +13,7 @@ if (typeof globalThis.localStorage === "undefined") {
 import { describe, expect, it, mock } from "bun:test";
 import axios from "axios";
 
-import { pollImageTask, cancelImageTask, fetchQueueStatus, type ImageTaskResult } from "../src/services/api/image-queue";
+import { assertImageTaskEcho, pollImageTask, cancelImageTask, fetchQueueStatus, type ImageTaskResult } from "../src/services/api/image-queue";
 import { useImageTaskStore } from "../src/stores/use-image-task-store";
 import type { AiConfig } from "../src/stores/use-config-store";
 
@@ -210,6 +210,78 @@ describe("异步生成任务队列与轮询机制 (image-queue)", () => {
         } finally {
             axios.get = originalGet;
             axios.delete = originalDelete;
+        }
+    });
+
+    it("AbortSignal 中止且 cancelOnAbort=false 时只断开轮询，不取消服务端任务", async () => {
+        let deleteCalled = false;
+        const originalGet = axios.get;
+        const originalDelete = axios.delete;
+
+        axios.get = mock(async () => {
+            return {
+                status: 200,
+                data: {
+                    task_id: "task_keep_alive",
+                    status: "queued",
+                    queue_position: 2,
+                    estimated_wait_seconds: 30,
+                },
+            };
+        }) as unknown as typeof axios.get;
+
+        axios.delete = mock(async () => {
+            deleteCalled = true;
+            return { status: 200, data: { ok: true } };
+        }) as unknown as typeof axios.delete;
+
+        const controller = new AbortController();
+        try {
+            const promise = pollImageTask(mockConfig, "task_keep_alive", {
+                signal: controller.signal,
+                pollIntervalMs: 20,
+                cancelOnAbort: false,
+            });
+            setTimeout(() => controller.abort(), 10);
+            await expect(promise).rejects.toThrow("任务已取消");
+            expect(deleteCalled).toBe(false);
+        } finally {
+            axios.get = originalGet;
+            axios.delete = originalDelete;
+        }
+    });
+
+    it("轮询任务回显与本地归属不一致时立即中止，不再等待后续状态", async () => {
+        let callCount = 0;
+        const originalGet = axios.get;
+
+        axios.get = mock(async () => {
+            callCount += 1;
+            return {
+                status: 200,
+                data: {
+                    task_id: "task_other",
+                    status: "queued",
+                    queue_position: 1,
+                    estimated_wait_seconds: 10,
+                    progress: 0,
+                    duration_seconds: 0,
+                    prompt: "另一个会话的提示词",
+                    model: "gpt-image-2",
+                },
+            };
+        }) as unknown as typeof axios.get;
+
+        try {
+            await expect(
+                pollImageTask(mockConfig, "task_other", {
+                    pollIntervalMs: 5,
+                    validate: (task: ImageTaskResult) => assertImageTaskEcho(task, { prompt: "本地持久化提示词", model: "gpt-image-2" }),
+                }),
+            ).rejects.toThrow("提示词");
+            expect(callCount).toBe(1);
+        } finally {
+            axios.get = originalGet;
         }
     });
 

@@ -11,7 +11,7 @@ import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
 import { imageToDataUrl } from "@/services/image-storage";
 import { imageSizePresets, inferMediaScale } from "@/lib/media-size";
 import type { ReferenceImage } from "@/types/image";
-import { pollImageTask, type ImageTaskResult } from "./image-queue";
+import { assertImageTaskEcho, pollImageTask, type ImageTaskEchoExpectation, type ImageTaskResult, type PollImageTaskOptions } from "./image-queue";
 
 const apiText = (key: string, options?: Record<string, unknown>) => i18n.t(`apiErrors.${key}`, options);
 
@@ -107,6 +107,10 @@ export type RequestOptions = {
     frameDurationMs?: number;
     onProgress?: (task: ImageTaskResult) => void;
     recoveryTaskId?: string;
+    /** 恢复既有任务时的本地归属（提示词/模型），用于校验服务端回显，避免 task_id 张冠李戴。 */
+    expectedTask?: ImageTaskEchoExpectation;
+    /** abort 时是否同时取消服务端任务，默认 true；页面卸载只断开轮询时传 false。 */
+    cancelOnAbort?: boolean;
 };
 
 const IMAGE_QUALITY_VALUES = ["low", "medium", "high", "xhigh", "max"];
@@ -319,9 +323,15 @@ function readStatusError(status: number | undefined, fallback: string) {
     return status ? apiText("httpFailed", { status }) : fallback;
 }
 
-function withSystemPrompt(config: AiConfig, prompt: string) {
-    const systemPrompt = config.systemPrompt.trim();
-    return systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
+// 生图/改图请求只发送用户提示词：全局 systemPrompt 属于对话人设，不能前缀到生图请求里污染画面描述。
+// 轮询任务状态时校验服务端回显的 prompt/model，避免把其它任务的结果挂到当前提示词上。
+function buildTaskPollOptions(options: RequestOptions | undefined, expected: ImageTaskEchoExpectation): PollImageTaskOptions {
+    return {
+        signal: options?.signal,
+        onProgress: options?.onProgress,
+        cancelOnAbort: options?.cancelOnAbort,
+        validate: (task) => assertImageTaskEcho(task, expected),
+    };
 }
 
 function aiApiUrl(config: AiConfig, path: string) {
@@ -837,7 +847,7 @@ async function requestOpenAiImageBatch(
         aiApiUrl(requestConfig, "/images/generations?async=true"),
         {
             model: requestConfig.model,
-            prompt: withSystemPrompt(requestConfig, prompt),
+            prompt,
             n: batchN,
             async: true,
             ...(quality ? { quality } : {}),
@@ -866,11 +876,10 @@ async function requestOpenAiImageBatch(
         (data && typeof data === "object" && "task_id" in data && (data.status === "queued" || data.status === "processing"));
     if (isAsync) {
         const initialTask = data as unknown as ImageTaskResult;
+        const expectation: ImageTaskEchoExpectation = { prompt, model: requestConfig.model };
+        assertImageTaskEcho(initialTask, expectation);
         options?.onProgress?.(initialTask);
-        const completedTask = await pollImageTask(requestConfig, initialTask.task_id, {
-            signal: options?.signal,
-            onProgress: options?.onProgress,
-        });
+        const completedTask = await pollImageTask(requestConfig, initialTask.task_id, buildTaskPollOptions(options, expectation));
         return await parseImagePayload({ data: completedTask.data }, gif ? "image/gif" : "image/png");
     }
     return await parseImagePayload(response.data as ImageApiResponse, gif ? "image/gif" : "image/png");
@@ -883,10 +892,7 @@ async function requestGenerationInner(config: AiConfig, prompt: string, options?
 
     if (options?.recoveryTaskId) {
         try {
-            const completedTask = await pollImageTask(requestConfig, options.recoveryTaskId, {
-                signal: options?.signal,
-                onProgress: options?.onProgress,
-            });
+            const completedTask = await pollImageTask(requestConfig, options.recoveryTaskId, buildTaskPollOptions(options, options.expectedTask || {}));
             return await parseImagePayload({ data: completedTask.data }, gif ? "image/gif" : "image/png");
         } catch (error) {
             throw new Error(readAxiosError(error, apiText("requestFailed")));
@@ -905,7 +911,7 @@ async function requestGenerationInner(config: AiConfig, prompt: string, options?
                 capability: "image",
                 script,
                 config: requestConfig,
-                prompt: withSystemPrompt(requestConfig, prompt),
+                prompt,
                 images: [],
                 params: { size: requestSize, resolution: inferMediaScale(config.size), quality, count: n, ...(background ? { background } : {}) },
                 signal: options?.signal,
@@ -980,7 +986,7 @@ async function requestOpenAiEditBatch(
 ) {
     const formData = new FormData();
     formData.set("model", requestConfig.model);
-    formData.set("prompt", withSystemPrompt(requestConfig, requestPrompt));
+    formData.set("prompt", requestPrompt);
     formData.set("n", String(batchN));
     if (!/gpt-image/.test(requestConfig.model)) {
         formData.set("response_format", "b64_json");
@@ -1012,11 +1018,10 @@ async function requestOpenAiEditBatch(
         (data && typeof data === "object" && "task_id" in data && (data.status === "queued" || data.status === "processing"));
     if (isAsync) {
         const initialTask = data as unknown as ImageTaskResult;
+        const expectation: ImageTaskEchoExpectation = { prompt: requestPrompt, model: requestConfig.model };
+        assertImageTaskEcho(initialTask, expectation);
         options?.onProgress?.(initialTask);
-        const completedTask = await pollImageTask(requestConfig, initialTask.task_id, {
-            signal: options?.signal,
-            onProgress: options?.onProgress,
-        });
+        const completedTask = await pollImageTask(requestConfig, initialTask.task_id, buildTaskPollOptions(options, expectation));
         return await parseImagePayload({ data: completedTask.data });
     }
     return await parseImagePayload(response.data as ImageApiResponse);
@@ -1028,10 +1033,7 @@ async function requestEditInner(config: AiConfig, prompt: string, references: Re
 
     if (options?.recoveryTaskId) {
         try {
-            const completedTask = await pollImageTask(requestConfig, options.recoveryTaskId, {
-                signal: options?.signal,
-                onProgress: options?.onProgress,
-            });
+            const completedTask = await pollImageTask(requestConfig, options.recoveryTaskId, buildTaskPollOptions(options, options.expectedTask || {}));
             return await parseImagePayload({ data: completedTask.data });
         } catch (error) {
             throw new Error(readAxiosError(error, apiText("requestFailed")));
@@ -1051,7 +1053,7 @@ async function requestEditInner(config: AiConfig, prompt: string, references: Re
                 capability: "image",
                 script,
                 config: requestConfig,
-                prompt: withSystemPrompt(requestConfig, requestPrompt),
+                prompt: requestPrompt,
                 images: refs,
                 params: { size: requestSize, resolution: inferMediaScale(config.size), quality, count: n, ...(background ? { background } : {}) },
                 signal: options?.signal,
