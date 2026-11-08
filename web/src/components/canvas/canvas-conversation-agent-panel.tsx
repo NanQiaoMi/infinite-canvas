@@ -29,8 +29,8 @@ import { ALL_AGENT_TOOLS, executeAgentTool } from "@/lib/conversation-agent/tool
 import { agentLocaleOf } from "@/lib/conversation-agent/system-prompt";
 import { formatAgentToolStepLabel, getInitialUnderstandStepLabel } from "@/lib/conversation-agent/formatters";
 import { detectAgentIntent } from "@/lib/conversation-agent/intent";
-import type { AgentEvent, AgentStep, AgentToolCall } from "@/lib/conversation-agent/types";
-import { nativeToolCallsToAgent } from "@/lib/conversation-agent/protocol";
+import type { AgentEvent, AgentMessage, AgentStep, AgentToolCall } from "@/lib/conversation-agent/types";
+import { nativeToolCallsToAgent, serializeToolResult } from "@/lib/conversation-agent/protocol";
 import { ChatMessage } from "@/pages/chat/components/chat-message";
 import { StepTrail } from "@/pages/chat/components/step-trail";
 import { SmoothStreamText } from "@/pages/chat/components/smooth-stream-text";
@@ -320,6 +320,36 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
         [input, running, createSession, appendMessages, setStreamingText, setSteps, setRunning, buildContext, callModel, setRunningTool, message],
     );
 
+    /** 工具失败（生成中断/网络异常）后就地重试同一调用，无需重新描述需求。 */
+    const retryTool = useCallback(
+        async (toolMessage: Extract<AgentMessage, { role: "tool" }>) => {
+            const sessionId = activeSession?.id;
+            if (!sessionId || useConversationAgentStore.getState().running) return;
+            const controller = new AbortController();
+            controllerRef.current = controller;
+            const startedAt = Date.now();
+            try {
+                const result = await executeAgentTool(toolMessage.call, { signal: controller.signal });
+                appendMessages(sessionId, [
+                    {
+                        id: nanoid(),
+                        role: "tool",
+                        call: toolMessage.call,
+                        result,
+                        text: serializeToolResult(toolMessage.call, result),
+                        createdAt: Date.now(),
+                        durationMs: Date.now() - startedAt,
+                    },
+                ]);
+            } catch (error) {
+                appendMessages(sessionId, [{ id: nanoid(), role: "error", text: error instanceof Error ? error.message : String(error), createdAt: Date.now() }]);
+            } finally {
+                if (controllerRef.current === controller) controllerRef.current = null;
+            }
+        },
+        [activeSession?.id, appendMessages],
+    );
+
     const handleStop = () => {
         if (controllerRef.current) {
             controllerRef.current.abort();
@@ -395,7 +425,7 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
                 )}
 
                 {activeSession?.messages.map((msg) => (
-                    <ChatMessage key={msg.id} message={msg} />
+                    <ChatMessage key={msg.id} message={msg} onToolRetry={msg.role === "tool" ? (toolMessage) => void retryTool(toolMessage) : undefined} />
                 ))}
 
                 {running && (

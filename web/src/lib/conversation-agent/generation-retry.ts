@@ -27,3 +27,9 @@ export async function runWithGenerationRetry<T>(
         }
     }
 }
+
+/** 可恢复失败后选择同能力的另一个图片模型做一次降级尝试；GIF 只能降级到 gpt-image-2.6 系列。 */
+export function pickFallbackImageModel(options: string[], current: string, isGif: boolean): string | null {
+    const candidates = options.filter((option) => option !== current && (!isGif || /gpt-image-2\.6/i.test(option)));
+    return candidates[0] ?? null;
+}

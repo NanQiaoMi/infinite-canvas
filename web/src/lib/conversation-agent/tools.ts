@@ -13,7 +13,7 @@ import type { ReferenceImage } from "@/types/image";
 
 import { inferImageSizeFromPrompt } from "./aspect-ratio";
 import { CANVAS_AGENT_TOOLS, executeCanvasAgentTool, isCanvasTool } from "./canvas-tools";
-import { runWithGenerationRetry } from "./generation-retry";
+import { runWithGenerationRetry, isRetryableGenerationError, pickFallbackImageModel } from "./generation-retry";
 import { validateArguments } from "./protocol";
 import type { AgentImageRef, AgentQuotaSnapshot, AgentToolCall, AgentToolDefinition, AgentToolErrorCode, AgentToolResult } from "./types";
 
@@ -162,36 +162,34 @@ async function executeGenerateImage(call: AgentToolCall, context: { signal: Abor
         ...(typeof args.background === "string" ? { background: args.background } : {}),
     };
     let currentTaskId: string | undefined;
-    try {
-        const onProgress = (task: ImageTaskResult) => {
-            currentTaskId = task.task_id;
-            if (task.task_id) {
-                useImageTaskStore.getState().registerActiveTask({
-                    taskId: task.task_id,
-                    source: "chat",
-                    prompt,
-                    model: IMAGE_MODEL_LABEL(modelOption),
-                    size: generationConfig.size,
-                    createdAt: Date.now(),
-                    status: task.status,
-                    queuePosition: task.queue_position,
-                    estimatedWaitSeconds: task.estimated_wait_seconds,
-                    progress: task.progress,
-                    durationSeconds: task.duration_seconds,
-                });
-            }
-        };
-        const requestOptions = isGif
-            ? {
-                  signal: context.signal,
-                  outputFormat: "gif" as const,
-                  frameCount: Math.min(16, Math.max(2, Math.round(Number(args.frame_count) || 9))),
-                  frameDurationMs: Math.min(1000, Math.max(50, Math.round(Number(args.frame_duration_ms) || 200))),
-                  onProgress,
-              }
-            : { signal: context.signal, onProgress };
-        // 网络抖动 / 上游 5xx / 超时 / 任务中断时自动重试一次，其余确定性失败直接返回
-        const generated = await runWithGenerationRetry(() => requestGeneration(generationConfig, prompt, requestOptions), context.signal);
+    const onProgress = (task: ImageTaskResult) => {
+        currentTaskId = task.task_id;
+        if (task.task_id) {
+            useImageTaskStore.getState().registerActiveTask({
+                taskId: task.task_id,
+                source: "chat",
+                prompt,
+                model: IMAGE_MODEL_LABEL(modelOption),
+                size: generationConfig.size,
+                createdAt: Date.now(),
+                status: task.status,
+                queuePosition: task.queue_position,
+                estimatedWaitSeconds: task.estimated_wait_seconds,
+                progress: task.progress,
+                durationSeconds: task.duration_seconds,
+            });
+        }
+    };
+    const requestOptions = isGif
+        ? {
+              signal: context.signal,
+              outputFormat: "gif" as const,
+              frameCount: Math.min(16, Math.max(2, Math.round(Number(args.frame_count) || 9))),
+              frameDurationMs: Math.min(1000, Math.max(50, Math.round(Number(args.frame_duration_ms) || 200))),
+              onProgress,
+          }
+        : { signal: context.signal, onProgress };
+    const finalizeGenerated = async (generated: Awaited<ReturnType<typeof requestGeneration>>, modelName: string): Promise<AgentToolResult> => {
         if (currentTaskId) {
             useImageTaskStore.getState().completeActiveTask(currentTaskId, "succeeded");
         }
@@ -204,23 +202,44 @@ async function executeGenerateImage(call: AgentToolCall, context: { signal: Abor
             width: image.width,
             height: image.height,
             prompt,
-            model: IMAGE_MODEL_LABEL(modelOption),
+            model: IMAGE_MODEL_LABEL(modelName),
         }));
         return {
             tool: "generate_image",
             ok: true,
             images,
-            model: IMAGE_MODEL_LABEL(modelOption),
+            model: IMAGE_MODEL_LABEL(modelName),
             size: generationConfig.size,
             count: images.length,
             ...(isGif ? { format: "gif" } : {}),
             quota: imageQuotaSnapshot(),
         };
+    };
+    try {
+        // 网络抖动 / 上游 5xx / 超时 / 任务中断时自动重试一次，其余确定性失败直接返回
+        const generated = await runWithGenerationRetry(() => requestGeneration(generationConfig, prompt, requestOptions), context.signal);
+        return await finalizeGenerated(generated, modelOption);
     } catch (error) {
-        if (currentTaskId) {
-            useImageTaskStore.getState().completeActiveTask(currentTaskId, context.signal.aborted ? "cancelled" : "failed", error instanceof Error ? error.message : String(error));
+        if (context.signal.aborted) {
+            if (currentTaskId) useImageTaskStore.getState().completeActiveTask(currentTaskId, "cancelled", normalizeError(error));
+            return cancelFailure("generate_image");
         }
-        if (context.signal.aborted) return cancelFailure("generate_image");
+        // 可恢复失败：自动降级到同能力的另一个图片模型再试一次，避免单个模型抖动导致整次生成失败
+        const fallbackOption = isRetryableGenerationError(error)
+            ? pickFallbackImageModel(selectableModelsByCapability(useConfigStore.getState().config, "image"), modelOption, isGif)
+            : null;
+        if (fallbackOption) {
+            if (currentTaskId) useImageTaskStore.getState().completeActiveTask(currentTaskId, "failed", normalizeError(error));
+            try {
+                const generated = await requestGeneration({ ...generationConfig, model: fallbackOption }, prompt, requestOptions);
+                return await finalizeGenerated(generated, fallbackOption);
+            } catch (fallbackError) {
+                if (currentTaskId) useImageTaskStore.getState().completeActiveTask(currentTaskId, "failed", normalizeError(fallbackError));
+                if (context.signal.aborted) return cancelFailure("generate_image");
+                return quotaFailureIfExhausted("generate_image", fallbackError);
+            }
+        }
+        if (currentTaskId) useImageTaskStore.getState().completeActiveTask(currentTaskId, "failed", normalizeError(error));
         return quotaFailureIfExhausted("generate_image", error);
     }
 }

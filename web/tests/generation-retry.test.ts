@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { isRetryableGenerationError, MAX_GENERATION_ATTEMPTS, runWithGenerationRetry } from "@/lib/conversation-agent/generation-retry";
+import { isRetryableGenerationError, MAX_GENERATION_ATTEMPTS, pickFallbackImageModel, runWithGenerationRetry } from "@/lib/conversation-agent/generation-retry";
 
 describe("生成任务重试策略", () => {
     test("网络/超时/上游 5xx 错误可重试，参数与额度错误不重试", () => {
@@ -56,5 +56,12 @@ describe("生成任务重试策略", () => {
             }, controller.signal, 1),
         ).rejects.toThrow("fetch failed");
         expect(canceledCalls).toBe(1);
+    });
+
+    test("降级模型选择：排除当前模型，GIF 只降级到 2.6 系列", () => {
+        expect(pickFallbackImageModel(["ch::a", "ch::b", "ch::gpt-image-2.6"], "ch::a", false)).toBe("ch::b");
+        expect(pickFallbackImageModel(["ch::a"], "ch::a", false)).toBeNull();
+        expect(pickFallbackImageModel(["ch::a", "ch::b"], "ch::a", true)).toBeNull();
+        expect(pickFallbackImageModel(["ch::a", "ch::gpt-image-2.6"], "ch::a", true)).toBe("ch::gpt-image-2.6");
     });
 });
