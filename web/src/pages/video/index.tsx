@@ -396,7 +396,9 @@ export default function VideoPage() {
                 <div className="flex h-12 shrink-0 items-center gap-2 px-3 lg:hidden">
                     <Button size="small" type="text" icon={<Menu className="size-4" />} onClick={() => setLogsOpen(true)} />
                     <span className="text-sm font-semibold">{t("videoWorkbench.title")}</span>
-                    <Button className="ml-auto sm:hidden" size="small" type="text" icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)} />
+                    <span className="ml-auto sm:hidden">
+                        <Button size="small" type="text" icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)} />
+                    </span>
                 </div>
 
                 <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[420px_minmax(0,1fr)] lg:overflow-hidden">
@@ -496,7 +498,7 @@ export default function VideoPage() {
                             </div>
                         </div>
 
-                        <div className="sticky bottom-0 z-10 -mx-5 mt-auto bg-gradient-to-t from-[#faf9f5] via-[#faf9f5]/95 to-transparent px-5 pb-2 pt-8 dark:from-[#1c1b19] dark:via-[#1c1b19]/95">
+                        <div className="sticky bottom-0 z-10 -mx-5 -mb-5 mt-auto bg-gradient-to-t from-[#faf9f5] via-[#faf9f5]/95 to-transparent px-5 pb-2 pt-8 dark:from-[#1c1b19] dark:via-[#1c1b19]/95">
                             <Button
                                 type="primary"
                                 size="large"
@@ -514,7 +516,7 @@ export default function VideoPage() {
 
                     <div className="thin-scrollbar px-5 py-5 lg:min-h-0 lg:overflow-y-auto">
                         <div className="mb-4 flex items-center justify-between gap-3">
-                            <div className="flex flex-wrap items-center gap-2">
+                            <div className="flex items-center gap-2">
                                 <span className="shrink-0 whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.14em] text-stone-400/90 dark:text-stone-500">{t("workbench.results")}</span>
                                 {results.length ? <span className="font-mono text-[10px] tabular-nums text-stone-400 dark:text-stone-500">{results.length}</span> : null}
                             </div>
@@ -605,7 +607,7 @@ function ResultVideoCard({ video, onDownload, onSaveAsset }: { video: GeneratedV
             <video src={video.url} controls className="aspect-video w-full object-contain" />
             <div className="absolute left-2.5 top-2.5 flex flex-wrap items-center gap-1.5 opacity-0 transition-opacity group-hover:opacity-100">
                 <span className="rounded-full bg-black/45 px-2 py-0.5 font-mono text-[10px] tabular-nums text-white/90 backdrop-blur-sm">
-                    {video.width}x{video.height}
+                    {video.width}×{video.height}
                 </span>
                 <span className="rounded-full bg-black/45 px-2 py-0.5 font-mono text-[10px] tabular-nums text-white/90 backdrop-blur-sm">{formatBytes(video.bytes)}</span>
                 <span className="rounded-full bg-black/45 px-2 py-0.5 font-mono text-[10px] tabular-nums text-white/90 backdrop-blur-sm">{formatDuration(video.durationMs)}</span>

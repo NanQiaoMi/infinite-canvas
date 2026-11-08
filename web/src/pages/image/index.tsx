@@ -591,7 +591,9 @@ export default function ImagePage() {
                 <div className="flex h-12 shrink-0 items-center gap-2 px-3 lg:hidden">
                     <Button size="small" type="text" icon={<Menu className="size-4" />} onClick={() => setLogsOpen(true)} />
                     <span className="text-sm font-semibold">{t("imageWorkbench.title")}</span>
-                    <Button size="small" type="text" className="ml-auto sm:hidden" icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)} />
+                    <span className="ml-auto sm:hidden">
+                        <Button size="small" type="text" icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)} />
+                    </span>
                 </div>
                 <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[420px_minmax(0,1fr)] lg:overflow-hidden">
                     <div className="thin-scrollbar flex flex-col border-stone-200/70 px-5 py-5 dark:border-stone-800 lg:min-h-0 lg:overflow-y-auto lg:border-r">
@@ -710,7 +712,7 @@ export default function ImagePage() {
                             </div>
                         </div>
 
-                        <div className="sticky bottom-0 z-10 -mx-5 mt-auto bg-gradient-to-t from-[#faf9f5] via-[#faf9f5]/95 to-transparent px-5 pb-2 pt-8 dark:from-[#1c1b19] dark:via-[#1c1b19]/95">
+                        <div className="sticky bottom-0 z-10 -mx-5 -mb-5 mt-auto bg-gradient-to-t from-[#faf9f5] via-[#faf9f5]/95 to-transparent px-5 pb-2 pt-8 dark:from-[#1c1b19] dark:via-[#1c1b19]/95">
                             <Button
                                 type="primary"
                                 size="large"
