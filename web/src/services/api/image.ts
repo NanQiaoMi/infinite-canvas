@@ -731,6 +731,76 @@ function resolveGifOptions(config: AiConfig, options?: RequestOptions) {
     return { frames, duration };
 }
 
+/**
+ * 将超过 OpenAI 接口限制（单次最多 4 张）的生图/改图数量拆解为并行批次（如 8 -> [4, 4]，5 -> [4, 1]）。
+ */
+export function splitCountIntoChunks(count: number, maxChunk = 4): number[] {
+    if (count <= 0) return [];
+    const total = Math.min(15, Math.floor(Math.abs(count) || 1));
+    if (total <= maxChunk) return [total];
+    const chunks: number[] = [];
+    let remaining = total;
+    while (remaining > 0) {
+        const take = Math.min(remaining, maxChunk);
+        chunks.push(take);
+        remaining -= take;
+    }
+    return chunks;
+}
+
+async function requestOpenAiImageBatch(
+    requestConfig: ReturnType<typeof resolveModelRequestConfig>,
+    prompt: string,
+    batchN: number,
+    quality: string | undefined,
+    requestSize: string | undefined,
+    background: string | undefined,
+    gif: { frames: number; duration: number } | null,
+    options?: RequestOptions,
+) {
+    const response = await axios.post<ImageApiResponse | ImageTaskResult>(
+        aiApiUrl(requestConfig, "/images/generations?async=true"),
+        {
+            model: requestConfig.model,
+            prompt: withSystemPrompt(requestConfig, prompt),
+            n: batchN,
+            async: true,
+            ...(quality ? { quality } : {}),
+            ...(gif
+                ? { size: "auto", output_format: "gif", frame_count: gif.frames, frame_duration_ms: gif.duration }
+                : {
+                      ...(requestSize ? { size: requestSize } : {}),
+                      ...(background ? { background } : {}),
+                      // gpt-image models reject response_format; they always return b64.
+                      ...(/gpt-image/.test(requestConfig.model) ? {} : { response_format: "b64_json" }),
+                      output_format: IMAGE_OUTPUT_FORMAT,
+                  }),
+        },
+        {
+            headers: {
+                ...aiHeaders(requestConfig, "application/json"),
+                Prefer: "respond-async",
+            },
+            signal: options?.signal,
+            timeout: IMAGE_REQUEST_TIMEOUT_MS,
+        },
+    );
+    const data = response.data as unknown as Record<string, unknown>;
+    const isAsync =
+        response.status === 202 ||
+        (data && typeof data === "object" && "task_id" in data && (data.status === "queued" || data.status === "processing"));
+    if (isAsync) {
+        const initialTask = data as unknown as ImageTaskResult;
+        options?.onProgress?.(initialTask);
+        const completedTask = await pollImageTask(requestConfig, initialTask.task_id, {
+            signal: options?.signal,
+            onProgress: options?.onProgress,
+        });
+        return await parseImagePayload({ data: completedTask.data }, gif ? "image/gif" : "image/png");
+    }
+    return await parseImagePayload(response.data as ImageApiResponse, gif ? "image/gif" : "image/png");
+}
+
 export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
     assertQuotaAvailable("image");
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
@@ -781,48 +851,16 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
     const requestSize = resolveRequestSize(config.size);
     const background = normalizeBackground(config.background);
     try {
-        const response = await axios.post<ImageApiResponse | ImageTaskResult>(
-            aiApiUrl(requestConfig, "/images/generations?async=true"),
-            {
-                model: requestConfig.model,
-                prompt: withSystemPrompt(requestConfig, prompt),
-                n,
-                async: true,
-                ...(quality ? { quality } : {}),
-                ...(gif
-                    ? { size: "auto", output_format: "gif", frame_count: gif.frames, frame_duration_ms: gif.duration }
-                    : {
-                          ...(requestSize ? { size: requestSize } : {}),
-                          ...(background ? { background } : {}),
-                          // gpt-image models reject response_format; they always return b64.
-                          ...(/gpt-image/.test(requestConfig.model) ? {} : { response_format: "b64_json" }),
-                          output_format: IMAGE_OUTPUT_FORMAT,
-                      }),
-            },
-            {
-                headers: {
-                    ...aiHeaders(requestConfig, "application/json"),
-                    Prefer: "respond-async",
-                },
-                signal: options?.signal,
-                timeout: IMAGE_REQUEST_TIMEOUT_MS,
-            },
-        );
-        const data = response.data as unknown as Record<string, unknown>;
-        const isAsync =
-            response.status === 202 ||
-            (data && typeof data === "object" && "task_id" in data && (data.status === "queued" || data.status === "processing"));
-        if (isAsync) {
-            const initialTask = data as unknown as ImageTaskResult;
-            options?.onProgress?.(initialTask);
-            const completedTask = await pollImageTask(requestConfig, initialTask.task_id, {
-                signal: options?.signal,
-                onProgress: options?.onProgress,
-            });
-            return await parseImagePayload({ data: completedTask.data }, gif ? "image/gif" : "image/png");
+        if (n <= 4) {
+            return await requestOpenAiImageBatch(requestConfig, prompt, n, quality, requestSize, background, gif, options);
         }
-        const images = await parseImagePayload(response.data as ImageApiResponse, gif ? "image/gif" : "image/png");
-        return images;
+        const chunks = splitCountIntoChunks(n, 4);
+        const results = await Promise.all(
+            chunks.map((chunkN) =>
+                requestOpenAiImageBatch(requestConfig, prompt, chunkN, quality, requestSize, background, gif, options),
+            ),
+        );
+        return results.flat();
     } catch (error) {
         throw new Error(readAxiosError(error, apiText("requestFailed")));
     }
@@ -853,6 +891,60 @@ export async function requestPromptOptimization(config: AiConfig, prompt: string
         .replace(/```$/i, "")
         .replace(/^["'「『]+|["'」』]+$/g, "")
         .trim();
+}
+
+async function requestOpenAiEditBatch(
+    requestConfig: ReturnType<typeof resolveModelRequestConfig>,
+    requestPrompt: string,
+    references: ReferenceImage[],
+    batchN: number,
+    quality: string | undefined,
+    requestSize: string | undefined,
+    background: string | undefined,
+    options?: RequestOptions,
+) {
+    const formData = new FormData();
+    formData.set("model", requestConfig.model);
+    formData.set("prompt", withSystemPrompt(requestConfig, requestPrompt));
+    formData.set("n", String(batchN));
+    if (!/gpt-image/.test(requestConfig.model)) {
+        formData.set("response_format", "b64_json");
+    }
+    formData.set("output_format", IMAGE_OUTPUT_FORMAT);
+    formData.set("async", "true");
+    if (quality) formData.set("quality", quality);
+    if (requestSize) formData.set("size", requestSize);
+    if (background) formData.set("background", background);
+    const files = await Promise.all(references.map(async (image) => dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) })));
+    const imageField = files.length > 1 ? "image[]" : "image";
+    files.forEach((file) => formData.append(imageField, file));
+
+    const response = await axios.post<ImageApiResponse | ImageTaskResult>(
+        aiApiUrl(requestConfig, "/images/edits?async=true"),
+        formData,
+        {
+            headers: {
+                ...aiHeaders(requestConfig),
+                Prefer: "respond-async",
+            },
+            signal: options?.signal,
+            timeout: IMAGE_REQUEST_TIMEOUT_MS,
+        },
+    );
+    const data = response.data as unknown as Record<string, unknown>;
+    const isAsync =
+        response.status === 202 ||
+        (data && typeof data === "object" && "task_id" in data && (data.status === "queued" || data.status === "processing"));
+    if (isAsync) {
+        const initialTask = data as unknown as ImageTaskResult;
+        options?.onProgress?.(initialTask);
+        const completedTask = await pollImageTask(requestConfig, initialTask.task_id, {
+            signal: options?.signal,
+            onProgress: options?.onProgress,
+        });
+        return await parseImagePayload({ data: completedTask.data });
+    }
+    return await parseImagePayload(response.data as ImageApiResponse);
 }
 
 export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], options?: RequestOptions) {
@@ -905,57 +997,18 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(config.size);
     const background = normalizeBackground(config.background);
-    const formData = new FormData();
-    formData.set("model", requestConfig.model);
-    formData.set("prompt", withSystemPrompt(requestConfig, requestPrompt));
-    formData.set("n", String(n));
-    // gpt-image models reject response_format; they always return b64.
-    if (!/gpt-image/.test(requestConfig.model)) {
-        formData.set("response_format", "b64_json");
-    }
-    formData.set("output_format", IMAGE_OUTPUT_FORMAT);
-    formData.set("async", "true");
-    if (quality) {
-        formData.set("quality", quality);
-    }
-    if (requestSize) {
-        formData.set("size", requestSize);
-    }
-    if (background) {
-        formData.set("background", background);
-    }
-    const files = await Promise.all(references.map(async (image) => dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) })));
-    const imageField = files.length > 1 ? "image[]" : "image";
-    files.forEach((file) => formData.append(imageField, file));
 
     try {
-        const response = await axios.post<ImageApiResponse | ImageTaskResult>(
-            aiApiUrl(requestConfig, "/images/edits?async=true"),
-            formData,
-            {
-                headers: {
-                    ...aiHeaders(requestConfig),
-                    Prefer: "respond-async",
-                },
-                signal: options?.signal,
-                timeout: IMAGE_REQUEST_TIMEOUT_MS,
-            },
-        );
-        const data = response.data as unknown as Record<string, unknown>;
-        const isAsync =
-            response.status === 202 ||
-            (data && typeof data === "object" && "task_id" in data && (data.status === "queued" || data.status === "processing"));
-        if (isAsync) {
-            const initialTask = data as unknown as ImageTaskResult;
-            options?.onProgress?.(initialTask);
-            const completedTask = await pollImageTask(requestConfig, initialTask.task_id, {
-                signal: options?.signal,
-                onProgress: options?.onProgress,
-            });
-            return await parseImagePayload({ data: completedTask.data });
+        if (n <= 4) {
+            return await requestOpenAiEditBatch(requestConfig, requestPrompt, references, n, quality, requestSize, background, options);
         }
-        const images = await parseImagePayload(response.data as ImageApiResponse);
-        return images;
+        const chunks = splitCountIntoChunks(n, 4);
+        const results = await Promise.all(
+            chunks.map((chunkN) =>
+                requestOpenAiEditBatch(requestConfig, requestPrompt, references, chunkN, quality, requestSize, background, options),
+            ),
+        );
+        return results.flat();
     } catch (error) {
         throw new Error(readAxiosError(error, apiText("requestFailed")));
     }
