@@ -370,7 +370,11 @@ export function detectAgentIntent(
     const previousPrompt = findLastGenerationPrompt(options?.history);
     const assistantSuggestions = extractAssistantSuggestions(options?.history);
     const matchesSuggestion = assistantSuggestions.some((s) => input.includes(s) || s.includes(input));
-    const isFollowUp = (FOLLOW_UP_PATTERN.test(input) || /^(再来|再出|换一版|换个风格|换个姿势|再生成一次|再来一次)$/.test(input) || matchesSuggestion || isAspectOnly) && Boolean(previousPrompt);
+    // 提示词优化/改写类追问不能误判为「继续生成」：如「再优化一版」「润色一下提示词」
+    const isPromptRefineRequest =
+        /^(?:请|帮我|麻烦)?\s*(?:再|重新|继续)?\s*(?:优化|润色|改写|完善|扩写|精简|调整|重写)/.test(input) &&
+        !/(?:生成|出图|画一|画个|画张|来一|做一|做个)/.test(input);
+    const isFollowUp = !isPromptRefineRequest && (FOLLOW_UP_PATTERN.test(input) || /^(再来|再出|换一版|换个风格|换个姿势|再生成一次|再来一次)$/.test(input) || matchesSuggestion || isAspectOnly) && Boolean(previousPrompt);
     if (isFollowUp && previousPrompt) {
         const modification = isAspectOnly ? "" : extractFollowUpModification(input);
         const combined = modification ? `${previousPrompt}，${modification}` : previousPrompt;

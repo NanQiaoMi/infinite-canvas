@@ -319,4 +319,13 @@ describe("本地意图识别", () => {
         expect(natural.kind).toBe("generate_image");
         expect(natural.explicitCommand).toBe(false);
     });
+
+    test("提示词优化类追问不会被误判为继续生成", () => {
+        const history = [{ role: "assistant", text: "优化版提示词：雨夜霓虹街道上的撑伞少女，电影感光影" }];
+        const refine = detectAgentIntent("再优化一版，更暗黑电影感", { hasReferences: false, history });
+        expect(refine.kind).toBe("chat");
+
+        const followUp = detectAgentIntent("再来一张，换个风格", { hasReferences: false, history });
+        expect(followUp.kind).toBe("generate_image");
+    });
 });

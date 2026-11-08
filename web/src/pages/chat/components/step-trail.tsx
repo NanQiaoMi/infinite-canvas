@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronRight, LoaderCircle, Sparkles, Terminal } from "lucide-react";
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { AgentStep, AgentStepStatus } from "@/lib/conversation-agent/types";
@@ -54,12 +54,27 @@ export function StepTrail({
     steps,
     running,
     defaultExpanded,
+    startedAt,
 }: {
     steps: AgentStep[];
     running: boolean;
     defaultExpanded?: boolean;
+    /** 本轮开始时间；运行中用于展示已等待秒数。 */
+    startedAt?: number;
 }) {
     const { t } = useTranslation();
+    // 运行中展示已等待秒数，长模型/出图任务给用户明确的时间反馈
+    const [elapsedSec, setElapsedSec] = useState(0);
+    useEffect(() => {
+        if (!running) return;
+        const tick = () => {
+            setElapsedSec((value) => (startedAt ? Math.max(0, Math.floor((Date.now() - startedAt) / 1000)) : value + 1));
+        };
+        tick();
+        const timer = setInterval(tick, 1000);
+        return () => clearInterval(timer);
+    }, [running, startedAt]);
+    const formatElapsed = (seconds: number) => (seconds >= 60 ? `${Math.floor(seconds / 60)}m${String(seconds % 60).padStart(2, "0")}s` : `${seconds}s`);
 
     // 默认折叠策略：进行中时展开让用户看实时进度；完成态默认收起，只留精致摘要
     const isExpandedByDefault = defaultExpanded ?? running;
@@ -79,7 +94,7 @@ export function StepTrail({
 
     // 动态生成 Claude 风格的折叠条文案
     const summaryText = running
-        ? t("chat.steps.summaryRunning", { count: steps.length })
+        ? `${t("chat.steps.summaryRunning", { count: steps.length })} · ${formatElapsed(elapsedSec)}`
         : t("chat.steps.summaryDone", {
               count: steps.length,
               tools: toolCount > 0 ? t("chat.steps.summaryToolsPart", { count: toolCount }) : "",

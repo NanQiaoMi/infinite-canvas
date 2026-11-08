@@ -297,6 +297,13 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
     };
     const requestedImageCount = intent.batchCount || (intentTool ? 1 : 0);
 
+    /** 执行工具并记录真实耗时，工具卡片据此展示出图/改图实际等待时长。 */
+    const runTool = async (call: AgentToolCall) => {
+        const startedAt = Date.now();
+        const result = await options.executeTool(call, { signal: options.signal, references: options.references });
+        return { result, durationMs: Date.now() - startedAt };
+    };
+
     const runIntentTool = async (prompt: string, customSize?: string, customTitle?: string, customCount?: number) => {
         const defaultSize = options.buildContext().defaultSize;
         const size = customSize || intent.size || inferImageSizeFromPrompt(prompt, defaultSize);
@@ -350,10 +357,10 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
             };
         }
         options.onEvent?.({ type: "tool-start", call });
-        const result = await options.executeTool(call, { signal: options.signal, references: options.references });
+        const { result, durationMs } = await runTool(call);
         options.onEvent?.({ type: "tool-end", call, result });
         totalImagesGenerated += countImagesFromToolResult(result);
-        newMessages.push({ id: nanoid(), role: "tool", call, result, text: serializeToolResult(call, result), createdAt: Date.now() });
+        newMessages.push({ id: nanoid(), role: "tool", call, result, text: serializeToolResult(call, result), createdAt: Date.now(), durationMs });
         return result;
     };
 
@@ -481,9 +488,9 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
                             arguments: { tasks, layout, run: true },
                         };
                         options.onEvent?.({ type: "tool-start", call });
-                        const result = await options.executeTool(call, { signal: options.signal, references: options.references });
+                        const { result, durationMs } = await runTool(call);
                         options.onEvent?.({ type: "tool-end", call, result });
-                        newMessages.push({ id: nanoid(), role: "tool", call, result, text: serializeToolResult(call, result), createdAt: Date.now() });
+                        newMessages.push({ id: nanoid(), role: "tool", call, result, text: serializeToolResult(call, result), createdAt: Date.now(), durationMs });
                         if (result.ok === false && result.code === "canceled") return { messages: newMessages, aborted: true, roundLimitReached: false };
                         continue;
                     } else {
@@ -505,9 +512,9 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
                                 },
                             };
                             options.onEvent?.({ type: "tool-start", call });
-                            const result = await options.executeTool(call, { signal: options.signal, references: options.references });
+                            const { result, durationMs } = await runTool(call);
                             options.onEvent?.({ type: "tool-end", call, result });
-                            newMessages.push({ id: nanoid(), role: "tool", call, result, text: serializeToolResult(call, result), createdAt: Date.now() });
+                            newMessages.push({ id: nanoid(), role: "tool", call, result, text: serializeToolResult(call, result), createdAt: Date.now(), durationMs });
                             if (result.ok === false && result.code === "canceled") return { messages: newMessages, aborted: true, roundLimitReached: false };
                             continue;
                         }
@@ -627,24 +634,24 @@ export async function runAgentTurn(options: AgentRuntimeOptions): Promise<AgentT
             effectiveCalls.forEach((call) => options.onEvent?.({ type: "tool-start", call }));
             const executedResults = await Promise.all(
                 effectiveCalls.map(async (call) => {
-                    const result = await options.executeTool(call, { signal: options.signal, references: options.references });
+                    const { result, durationMs } = await runTool(call);
                     options.onEvent?.({ type: "tool-end", call, result });
-                    return { call, result };
+                    return { call, result, durationMs };
                 }),
             );
             for (const item of executedResults) {
                 totalImagesGenerated += countImagesFromToolResult(item.result);
-                newMessages.push({ id: nanoid(), role: "tool", call: item.call, result: item.result, text: serializeToolResult(item.call, item.result), createdAt: Date.now() });
+                newMessages.push({ id: nanoid(), role: "tool", call: item.call, result: item.result, text: serializeToolResult(item.call, item.result), createdAt: Date.now(), durationMs: item.durationMs });
                 if (item.result.ok === false && item.result.code === "canceled") return { messages: newMessages, aborted: true, roundLimitReached: false };
             }
         } else {
             for (const call of effectiveCalls) {
                 if (options.signal?.aborted) return { messages: newMessages, aborted: true, roundLimitReached: false };
                 options.onEvent?.({ type: "tool-start", call });
-                const result = await options.executeTool(call, { signal: options.signal, references: options.references });
+                const { result, durationMs } = await runTool(call);
                 options.onEvent?.({ type: "tool-end", call, result });
                 totalImagesGenerated += countImagesFromToolResult(result);
-                newMessages.push({ id: nanoid(), role: "tool", call, result, text: serializeToolResult(call, result), createdAt: Date.now() });
+                newMessages.push({ id: nanoid(), role: "tool", call, result, text: serializeToolResult(call, result), createdAt: Date.now(), durationMs });
                 if (result.ok === false && result.code === "canceled") return { messages: newMessages, aborted: true, roundLimitReached: false };
             }
         }

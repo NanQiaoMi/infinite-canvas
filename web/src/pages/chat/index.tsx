@@ -159,38 +159,33 @@ export default function ChatPage() {
                         messages.map((item) => ({ role: item.role, content: item.content })),
                         { systemPrompt, tools: nativeTools ? tools.map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters })) : [], onDelta, signal },
                     );
-                let turn;
-                try {
-                    turn = await run();
-                } catch (error) {
-                    if (signal.aborted || !isNetworkError(error)) throw error;
-                    useConversationAgentStore.getState().setSessionRun(targetSessionId, (current) => {
-                        const runningStep = current.steps.find((s) => s.status === "running");
-                        if (runningStep) {
-                            return {
-                                ...current,
-                                steps: current.steps.map((s) => (s.id === runningStep.id ? { ...s, status: "waiting-retry" as const } : s)),
-                            };
-                        }
-                        return {
+                let turn: Awaited<ReturnType<typeof requestConversationTurn>>;
+                const maxRetries = 2;
+                for (let attempt = 0; ; attempt += 1) {
+                    try {
+                        turn = await run();
+                        break;
+                    } catch (error) {
+                        if (signal.aborted || !isNetworkError(error) || attempt >= maxRetries) throw error;
+                        // 网络抖动自动重试：最多 2 次，退避 900ms / 1800ms，并在思维链里明确展示第几次重试
+                        useConversationAgentStore.getState().setSessionRun(targetSessionId, (current) => ({
                             ...current,
                             steps: [
                                 ...current.steps,
                                 {
-                                    id: `retry-${Date.now()}`,
+                                    id: `retry-${Date.now()}-${attempt}`,
                                     kind: "retry" as const,
-                                    label: t("chat.steps.networkWaitRetry"),
+                                    label: `${t("chat.steps.networkWaitRetry")}（${attempt + 1}/${maxRetries}）`,
                                     status: "waiting-retry" as const,
                                 },
                             ],
-                        };
-                    });
-                    await new Promise((resolve) => setTimeout(resolve, 900));
-                    useConversationAgentStore.getState().setSessionRun(targetSessionId, (current) => ({
-                        ...current,
-                        steps: current.steps.map((s) => (s.status === "waiting-retry" ? { ...s, status: "running" as const } : s)),
-                    }));
-                    turn = await run();
+                        }));
+                        await new Promise((resolve) => setTimeout(resolve, 900 * (attempt + 1)));
+                        useConversationAgentStore.getState().setSessionRun(targetSessionId, (current) => ({
+                            ...current,
+                            steps: current.steps.map((s) => (s.status === "waiting-retry" ? { ...s, status: "done" as const } : s)),
+                        }));
+                    }
                 }
                 const native = nativeToolCallsToAgent(turn.toolCalls.map((call) => ({ name: call.name, arguments: call.arguments })));
                 return { content: turn.content, toolCalls: native.calls, toolCallErrors: native.errors };
@@ -643,7 +638,7 @@ export default function ChatPage() {
                                 : activeSession.messages.map((item, index) => (
                                       <ChatMessage key={item.id} message={item} onRetry={item.role === "error" ? () => retryMessage(index) : undefined} />
                                   ))}
-                            {steps.length ? <StepTrail steps={steps} running={running} /> : null}
+                            {steps.length ? <StepTrail steps={steps} running={running} startedAt={turnStartedAt || undefined} /> : null}
                             {completedToolResults.map((item) => (
                                 <div key={item.id} className="agent-message-in w-full space-y-2">
                                     <ToolResultBody result={item.result} />

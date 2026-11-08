@@ -225,7 +225,10 @@ function ToolMessage({ message }: { message: Extract<AgentMessage, { role: "tool
                 </span>
                 <span className="shrink-0 font-medium text-stone-700 dark:text-stone-200">{toolLabel(message.call.tool, t)}</span>
                 <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-stone-400 dark:text-stone-500">{toolArgsSummary(message.call)}</span>
-                <span className="shrink-0 font-mono text-[10px] tabular-nums text-stone-400 dark:text-stone-500">{toolResultSummary(message.result, t)}</span>
+                <span className="shrink-0 font-mono text-[10px] tabular-nums text-stone-400 dark:text-stone-500">
+                    {toolResultSummary(message.result, t)}
+                    {message.durationMs ? ` · ${(message.durationMs / 1000).toFixed(1)}s` : ""}
+                </span>
                 <ChevronDown className={cn("size-3.5 shrink-0 text-stone-400 transition-transform duration-200", expanded && "rotate-180")} />
             </button>
             <div className={cn("agent-collapse", expanded && "is-open")}>

@@ -61,7 +61,7 @@ export type AgentStep = {
 export type AgentMessage =
     | { id: string; role: "user"; text: string; attachments?: AgentImageRef[]; createdAt: number; threadId?: string; turnId?: string; itemId?: string }
     | { id: string; role: "assistant"; text: string; raw?: string; promptBlocks: string[]; steps?: AgentStep[]; createdAt: number; threadId?: string; turnId?: string; itemId?: string }
-    | { id: string; role: "tool"; call: AgentToolCall; result: AgentToolResult; text: string; createdAt: number; threadId?: string; turnId?: string; itemId?: string }
+    | { id: string; role: "tool"; call: AgentToolCall; result: AgentToolResult; text: string; createdAt: number; durationMs?: number; threadId?: string; turnId?: string; itemId?: string }
     | { id: string; role: "error"; text: string; createdAt: number; threadId?: string; turnId?: string; itemId?: string };
 
 export type AgentSession = {

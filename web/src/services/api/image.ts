@@ -512,13 +512,22 @@ async function requestStreamingResponse(config: AiConfig, body: Record<string, u
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     const state: ResponseStreamState = { buffer: "", text: "" };
-    for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        consumeResponseStreamText(state, decoder.decode(value, { stream: true }), onDelta);
-        if (state.error) throw new Error(state.error);
+    try {
+        for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            consumeResponseStreamText(state, decoder.decode(value, { stream: true }), onDelta);
+            if (state.error) throw new Error(state.error);
+        }
+        consumeResponseStreamText(state, decoder.decode(), onDelta, true);
+    } finally {
+        // 错误或中断提前结束时主动取消底层流，避免连接未正常关闭触发浏览器 ERR_INCOMPLETE_CHUNKED_ENCODING 噪声
+        try {
+            await reader.cancel();
+        } catch {
+            // 流已关闭时忽略
+        }
     }
-    consumeResponseStreamText(state, decoder.decode(), onDelta, true);
     if (state.error) throw new Error(state.error);
     if (!state.payload) return { content: state.text, toolCalls: [] };
     validateResponsePayload(state.payload);
@@ -618,13 +627,22 @@ async function requestGeminiStreamingResponse(config: AiConfig, body: Record<str
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     const state: GeminiStreamState = { buffer: "", text: "", toolCalls: [] };
-    for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        consumeGeminiStreamText(state, decoder.decode(value, { stream: true }), onDelta);
-        if (state.error) throw new Error(state.error);
+    try {
+        for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            consumeGeminiStreamText(state, decoder.decode(value, { stream: true }), onDelta);
+            if (state.error) throw new Error(state.error);
+        }
+        consumeGeminiStreamText(state, decoder.decode(), onDelta, true);
+    } finally {
+        // 错误或中断提前结束时主动取消底层流，避免浏览器输出 ERR_INCOMPLETE_CHUNKED_ENCODING
+        try {
+            await reader.cancel();
+        } catch {
+            // 流已关闭时忽略
+        }
     }
-    consumeGeminiStreamText(state, decoder.decode(), onDelta, true);
     if (state.error) throw new Error(state.error);
     return { content: state.text, toolCalls: state.toolCalls };
 }

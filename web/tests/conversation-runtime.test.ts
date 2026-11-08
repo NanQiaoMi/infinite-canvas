@@ -189,6 +189,7 @@ describe("对话运行时", () => {
         expect(runner.toolCalls[0].arguments.prompt).toBe("一只红色苹果，白色背景，棚拍质感");
         expect(result.messages.map((message) => message.role)).toEqual(["tool"]);
         expect(result.messages[0].role === "tool" && result.messages[0].result.ok).toBe(true);
+        expect(result.messages[0].role === "tool" && typeof result.messages[0].durationMs).toBe("number");
         expect(result.directToolResult).toEqual(generateSuccess);
         expect(events.map((event) => event.type)).toEqual(["tool-start", "tool-end"]);
     });
