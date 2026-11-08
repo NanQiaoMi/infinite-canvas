@@ -4,6 +4,11 @@
 
 <h1 align="center">无限画布 (infinite-canvas)</h1>
 
+> **二次开发声明（二开项目）**
+> 本仓库是 [basketikun/infinite-canvas](https://github.com/basketikun/infinite-canvas) 的**二次开发（二开）项目**，不是官方仓库，也不代表上游项目或其维护者。
+> 原始代码与设计版权归原作者所有，遵循 MIT License（见 [LICENSE](LICENSE)）；本仓库在上游基础上做了功能开发与更新，改动概览与归属说明见 [NOTICE.md](NOTICE.md)。
+
+
 <p align="center">
   <a href="https://linux.do/"><img src="https://img.shields.io/badge/Linux.do-Community-2b6de8?style=flat-square" alt="Linux.do"></a>
   <a href="https://render.com/deploy?repo=https://github.com/basketikun/infinite-canvas"><img src="https://img.shields.io/badge/Render-Deploy-46e3b7?style=flat-square&logo=render&logoColor=111111" alt="Deploy to Render"></a>
