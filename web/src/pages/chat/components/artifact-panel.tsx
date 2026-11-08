@@ -43,10 +43,11 @@ export function ArtifactPanel() {
         return () => window.removeEventListener("keydown", handler);
     }, [artifact, closeArtifact]);
 
-    // 切会话会关闭产物面板：同时清空面板内的图片地址与续聊指令，避免上一个会话的内容带到下一个会话。
+    // 切会话会关闭产物面板：同时清空面板内的图片地址、提示词与续聊指令，避免上一个会话的内容带到下一个会话。
     useEffect(() => {
         if (artifact) return;
         setUrl("");
+        setPrompt("");
         setInstruction("");
     }, [artifact]);
 

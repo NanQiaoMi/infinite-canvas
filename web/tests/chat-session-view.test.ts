@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { isCurrentThreadEvent } from "@/lib/agent/agent-event-formatters";
+import { isAgentThreadEvent } from "@/lib/agent/agent-event-formatters";
 import { consumeLaunchPageContext, isSessionRunning, selectActiveChatSession, selectChatSessions, sessionSwitchResetPlan } from "@/lib/conversation-agent/session-view";
 import type { AgentSession } from "@/lib/conversation-agent/types";
 
@@ -95,32 +95,32 @@ describe("consumeLaunchPageContext：启动上下文只注入启动后的首轮"
     });
 });
 
-describe("isCurrentThreadEvent：本地 Codex 事件线程归属", () => {
+describe("isAgentThreadEvent：本地 Codex 事件线程归属", () => {
     const current = { threadId: "thread-1", turnId: "turn-1" };
 
     test("同线程同轮次事件放行", () => {
-        expect(isCurrentThreadEvent({ threadId: "thread-1", turnId: "turn-1" }, current)).toBe(true);
+        expect(isAgentThreadEvent({ threadId: "thread-1", turnId: "turn-1" }, current)).toBe(true);
     });
 
     test("非当前线程事件丢弃", () => {
-        expect(isCurrentThreadEvent({ threadId: "thread-0", turnId: "turn-0" }, current)).toBe(false);
+        expect(isAgentThreadEvent({ threadId: "thread-0", turnId: "turn-0" }, current)).toBe(false);
     });
 
     test("同线程但旧轮次事件丢弃", () => {
-        expect(isCurrentThreadEvent({ threadId: "thread-1", turnId: "turn-0" }, current)).toBe(false);
+        expect(isAgentThreadEvent({ threadId: "thread-1", turnId: "turn-0" }, current)).toBe(false);
     });
 
     test("事件缺少线程字段时向后兼容放行", () => {
-        expect(isCurrentThreadEvent({}, current)).toBe(true);
-        expect(isCurrentThreadEvent({ threadId: "", turnId: "" }, current)).toBe(true);
+        expect(isAgentThreadEvent({}, current)).toBe(true);
+        expect(isAgentThreadEvent({ threadId: "", turnId: "" }, current)).toBe(true);
     });
 
     test("兼容 snake_case 字段", () => {
-        expect(isCurrentThreadEvent({ thread_id: "thread-1", turn_id: "turn-1" }, current)).toBe(true);
-        expect(isCurrentThreadEvent({ thread_id: "thread-0", turn_id: "turn-0" }, current)).toBe(false);
+        expect(isAgentThreadEvent({ thread_id: "thread-1", turn_id: "turn-1" }, current)).toBe(true);
+        expect(isAgentThreadEvent({ thread_id: "thread-0", turn_id: "turn-0" }, current)).toBe(false);
     });
 
     test("当前轮次未知时不因 turnId 丢弃（线程仍匹配）", () => {
-        expect(isCurrentThreadEvent({ threadId: "thread-1", turnId: "turn-9" }, { threadId: "thread-1", turnId: "" })).toBe(true);
+        expect(isAgentThreadEvent({ threadId: "thread-1", turnId: "turn-9" }, { threadId: "thread-1", turnId: "" })).toBe(true);
     });
 });
