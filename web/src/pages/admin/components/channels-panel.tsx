@@ -1,10 +1,11 @@
-import { App, Button, Drawer, Input, Popconfirm, Select, Space, Switch, Table, Tag } from "antd";
+import { App, Button, Drawer, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tag } from "antd";
 import type { TableColumnsType } from "antd";
-import { CloudDownload, Pencil, Plus, Trash2 } from "lucide-react";
+import { Activity, CloudDownload, Pencil, Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { ModelScriptEditor } from "@/components/layout/model-script-editor";
+import { getDiagnosticEvents, hydrateDiagnostics, summarizeChannelHealth, type DiagnosticChannelHealth } from "@/lib/conversation-agent/diagnostics";
 import { serverApi } from "@/services/api/server";
 import { guessCapability } from "@/stores/use-config-store";
 import type { AdminChannel, AdminChannelInput, ServerApiFormat, ServerCapability, ServerToolProtocol } from "@/types/server";
@@ -53,6 +54,9 @@ export function ChannelsPanel() {
     const [fetchedModels, setFetchedModels] = useState<string[]>([]);
     const [importOpen, setImportOpen] = useState(false);
     const [scriptTarget, setScriptTarget] = useState<{ index: number } | null>(null);
+    const [healthOpen, setHealthOpen] = useState(false);
+    const [healthLoading, setHealthLoading] = useState(false);
+    const [healthRows, setHealthRows] = useState<DiagnosticChannelHealth[]>([]);
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -72,6 +76,18 @@ export function ChannelsPanel() {
     }, [load]);
 
     const openCreate = () => setDraft(emptyDraft());
+
+    /** 汇总本浏览器最近 7 天的生成诊断，按渠道给出失败率与最后错误。 */
+    const openHealth = async () => {
+        setHealthOpen(true);
+        setHealthLoading(true);
+        try {
+            await hydrateDiagnostics();
+            setHealthRows(summarizeChannelHealth(getDiagnosticEvents()));
+        } finally {
+            setHealthLoading(false);
+        }
+    };
 
     const openEdit = (channel: AdminChannel) => {
         setDraft({
@@ -259,9 +275,14 @@ export function ChannelsPanel() {
         <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="text-xs text-stone-500">{t("server.admin.channels.description")}</div>
-                <Button type="primary" size="small" icon={<Plus className="size-4" />} onClick={openCreate}>
-                    {t("server.admin.channels.add")}
-                </Button>
+                <Space size={8}>
+                    <Button size="small" icon={<Activity className="size-4" />} onClick={() => void openHealth()}>
+                        渠道健康检查
+                    </Button>
+                    <Button type="primary" size="small" icon={<Plus className="size-4" />} onClick={openCreate}>
+                        {t("server.admin.channels.add")}
+                    </Button>
+                </Space>
             </div>
             <Table<AdminChannel> size="small" rowKey="id" loading={loading || saving} pagination={false} columns={columns} dataSource={channels} />
             <div>
@@ -393,6 +414,41 @@ export function ChannelsPanel() {
                 }}
                 onClose={() => setScriptTarget(null)}
             />
+
+            <Modal open={healthOpen} onCancel={() => setHealthOpen(false)} footer={null} width={760} title="渠道健康检查">
+                {healthLoading ? (
+                    <div className="py-8 text-center text-xs text-stone-400">正在汇总本浏览器诊断数据…</div>
+                ) : healthRows.length === 0 ? (
+                    <div className="py-8 text-center text-xs text-stone-400">暂无诊断数据。先在对话或画布中生成几次，再回来查看渠道健康度。</div>
+                ) : (
+                    <div className="space-y-2">
+                        {healthRows.map((row) => (
+                            <div key={row.channel} className="rounded-xl border border-stone-200/80 p-3 dark:border-stone-800">
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <span className="font-mono text-sm font-medium text-stone-700 dark:text-stone-200">{row.channel}</span>
+                                    <span className={row.failureRate >= 50 ? "text-xs text-red-500" : "text-xs text-stone-400"}>
+                                        尝试 {row.attempts} · 失败 {row.failures} · 失败率 {row.failureRate}%
+                                    </span>
+                                </div>
+                                <div className="mt-1 space-y-0.5 text-[11px] text-stone-500 dark:text-stone-400">
+                                    {row.models.map((model) => (
+                                        <div key={model.model}>
+                                            {model.model}：尝试 {model.attempts} · 失败 {model.failures}
+                                        </div>
+                                    ))}
+                                    {row.lastError ? (
+                                        <div className="break-all text-red-500/90">
+                                            最近错误：{row.lastError}
+                                            {row.lastErrorAt ? `（${new Date(row.lastErrorAt).toLocaleString()}）` : ""}
+                                        </div>
+                                    ) : null}
+                                </div>
+                            </div>
+                        ))}
+                        <div className="text-[11px] text-stone-400">数据来源：本浏览器最近 7 天的生成诊断（最多 500 条），不会上传。若某渠道失败率明显偏高，建议检查 Base URL、上游服务与 API Key。</div>
+                    </div>
+                )}
+            </Modal>
         </div>
     );
 }

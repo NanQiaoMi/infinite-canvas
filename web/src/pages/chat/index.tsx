@@ -33,9 +33,11 @@ import {
     clearDiagnostics,
     formatDiagnosticsReport,
     getDiagnosticEvents,
+    hydrateDiagnostics,
     recordDiagnostic,
     subscribeDiagnostics,
     summarizeDiagnostics,
+    summarizeDiagnosticsByDay,
     type DiagnosticEvent,
 } from "@/lib/conversation-agent/diagnostics";
 
@@ -48,8 +50,12 @@ export default function ChatPage() {
     // 生成诊断：内存环形缓冲，记录生图/模型失败，可复制报告用于排查
     const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
     const [diagnosticEvents, setDiagnosticEvents] = useState<DiagnosticEvent[]>(() => getDiagnosticEvents());
-    useEffect(() => subscribeDiagnostics(() => setDiagnosticEvents(getDiagnosticEvents())), []);
+    useEffect(() => {
+        void hydrateDiagnostics();
+        return subscribeDiagnostics(() => setDiagnosticEvents(getDiagnosticEvents()));
+    }, []);
     const diagnosticSummary = summarizeDiagnostics(diagnosticEvents);
+    const diagnosticDaily = summarizeDiagnosticsByDay(diagnosticEvents, 7);
     const hydrated = useConversationAgentStore((state) => state.hydrated);
     const sessions = useConversationAgentStore((state) => state.sessions);
     const activeSessionId = useConversationAgentStore((state) => state.activeSessionId);
@@ -770,7 +776,29 @@ export default function ChatPage() {
                             </div>
                         ))}
                     </div>
-                    <div className="max-h-[380px] space-y-1 overflow-y-auto rounded-xl border border-stone-200/80 p-2 dark:border-stone-800">
+                    <div className="rounded-xl border border-stone-200/80 p-3 dark:border-stone-800">
+                        <div className="mb-2 flex items-center justify-between text-[11px] text-stone-400">
+                            <span>最近 7 天生成失败率</span>
+                            <span>仅统计本浏览器记录</span>
+                        </div>
+                        <div className="space-y-1.5">
+                            {diagnosticDaily.map((bucket) => (
+                                <div key={bucket.day} className="flex items-center gap-2 text-[11px]">
+                                    <span className="w-10 shrink-0 font-mono text-stone-400">{bucket.day}</span>
+                                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-black/[.04] dark:bg-white/[.08]">
+                                        <div
+                                            className={bucket.failures > 0 ? "h-full rounded-full bg-red-400/80" : "h-full rounded-full bg-emerald-400/70"}
+                                            style={{ width: `${bucket.attempts ? Math.max(4, bucket.failureRate) : 0}%` }}
+                                        />
+                                    </div>
+                                    <span className="w-28 shrink-0 text-right font-mono text-stone-400">
+                                        {bucket.attempts} 次 · 失败 {bucket.failures}（{bucket.failureRate}%）
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                    <div className="max-h-[320px] space-y-1 overflow-y-auto rounded-xl border border-stone-200/80 p-2 dark:border-stone-800">
                         {diagnosticEvents.length === 0 ? (
                             <div className="py-6 text-center text-xs text-stone-400">暂无诊断记录，生成或对话后会在这里记录</div>
                         ) : (

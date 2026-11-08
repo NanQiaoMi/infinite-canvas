@@ -6,7 +6,9 @@ import {
     getDiagnosticEvents,
     recordDiagnostic,
     subscribeDiagnostics,
+    summarizeChannelHealth,
     summarizeDiagnostics,
+    summarizeDiagnosticsByDay,
     trackGenerationAttempt,
 } from "@/lib/conversation-agent/diagnostics";
 
@@ -69,14 +71,50 @@ describe("生成诊断日志", () => {
         expect(notified).toBe(2);
         unsubscribe();
 
-        for (let index = 0; index < 130; index += 1) {
+        for (let index = 0; index < 520; index += 1) {
             recordDiagnostic({ category: "generation", level: "info", message: `event-${index}` });
         }
         const events = getDiagnosticEvents();
-        expect(events).toHaveLength(120);
-        expect(events[events.length - 1].message).toBe("event-129");
+        expect(events).toHaveLength(500);
+        expect(events[events.length - 1].message).toBe("event-519");
 
         clearDiagnostics();
         expect(getDiagnosticEvents()).toHaveLength(0);
+    });
+
+    test("最近 7 天失败率按天分桶", () => {
+        clearDiagnostics();
+        const now = new Date("2026-11-08T12:00:00+08:00").getTime();
+        recordDiagnostic({ category: "generation", level: "info", message: "ok-today" });
+        recordDiagnostic({ category: "generation", level: "error", message: "fail-today" });
+        recordDiagnostic({ category: "generation", level: "error", message: "fail-today-2" });
+        const events = getDiagnosticEvents();
+        const days = summarizeDiagnosticsByDay(events, 7, now);
+        expect(days).toHaveLength(7);
+        const today = days[days.length - 1];
+        expect(today.attempts).toBe(3);
+        expect(today.failures).toBe(2);
+        expect(today.failureRate).toBe(67);
+        expect(days[0].attempts).toBe(0);
+    });
+
+    test("渠道健康检查按渠道聚合失败率与最后错误", () => {
+        clearDiagnostics();
+        recordDiagnostic({ category: "generation", level: "info", message: "ok", detail: { model: "ch-a::img-1" } });
+        recordDiagnostic({ category: "generation", level: "error", message: "fail 1", detail: { model: "ch-a::img-1" } });
+        recordDiagnostic({ category: "generation", level: "error", message: "fail 2", detail: { model: "ch-a::img-2" } });
+        recordDiagnostic({ category: "generation", level: "info", message: "ok", detail: { model: "ch-b::img-1" } });
+        recordDiagnostic({ category: "model", level: "error", message: "model fail", detail: { model: "ch-a::text" } });
+
+        const health = summarizeChannelHealth(getDiagnosticEvents());
+        expect(health).toHaveLength(2);
+        const channelA = health.find((row) => row.channel === "ch-a");
+        expect(channelA?.attempts).toBe(3);
+        expect(channelA?.failures).toBe(2);
+        expect(channelA?.failureRate).toBe(67);
+        expect(channelA?.lastError).toBe("fail 2");
+        expect(channelA?.models.find((model) => model.model === "img-1")?.failures).toBe(1);
+        const channelB = health.find((row) => row.channel === "ch-b");
+        expect(channelB?.failures).toBe(0);
     });
 });
