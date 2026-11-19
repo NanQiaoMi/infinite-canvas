@@ -292,17 +292,20 @@ export function registerAdminRoutes(router: Router, deps: AdminDeps) {
         verifyWrite(req);
         const body = await readJsonBody<{ baseUrl?: string; apiKey?: string; apiFormat?: string; channelId?: string }>(req, 64 * 1024);
         let { baseUrl, apiKey, apiFormat } = body;
+        let configuredModels: string[] = [];
         if (body.channelId) {
             const existing = listChannels(deps.db, deps.config.secret, { includeDisabled: true }).find((channel) => channel.id === body.channelId);
             if (existing) {
                 baseUrl = baseUrl || existing.baseUrl;
                 apiKey = apiKey || existing.apiKey;
                 apiFormat = apiFormat || existing.apiFormat;
+                configuredModels = existing.models.map((model) => model.name);
             }
         }
         if (!baseUrl || !apiKey) throw new HttpError(400, "channel_test_missing", "缺少 Base URL 或 API Key");
         const models = await fetchChannelModels(baseUrl, apiKey, apiFormat || "openai", deps.config.runningInDocker);
-        return jsonResponse({ ok: true, models });
+        // 上游按账号套餐只暴露部分模型，合并已配置模型，避免「探索模型」把可用模型误删。
+        return jsonResponse({ ok: true, models: Array.from(new Set([...models, ...configuredModels])) });
     });
 
     router.get("/api/admin/quota-policy", (req) => {

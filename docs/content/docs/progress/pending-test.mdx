@@ -7,6 +7,13 @@ description: Implemented changes that still need manual verification
 
 The current release needs manual verification in these areas:
 
+- Upstream API compatibility layer (for upstreams such as ChatGPT2API that only expose `/api/image-tasks`):
+  1. Submitting from the image workbench or canvas batch generation returns a queued/running task within about a second instead of hanging on a synchronous response or failing with `该地址不在管理员配置的渠道范围内`;
+  2. Completed images render normally (result URLs are fetched through `/api/relay`, no broken cross-origin images);
+  3. Image edits with reference images succeed on the same channel;
+  4. Admin "explore models" lists every model configured on the channel instead of the upstream's plan-trimmed subset;
+  5. Queue status and the 40581-style `/health` and `/api/model-catalog` endpoints work on the ChatGPT2API channel too.
+
 - 生图并发批次切分与超限自适应（解决 4 张上限 422 报错）验证：
   1. 超过 4 张（如 8 张）生图请求自动切分与汇聚：在 AI 对话或工作台中输入「生成8张可爱猫咪图」，请求自动切分为两个并发批次 `[4, 4]` 派发至后端，控制台与日志中绝不再出现 HTTP 422 `n: Input should be less than or equal to 4` 拒绝报错，前端汇聚展示全部 8 张图片；
   2. 尺寸与长宽比追问继承：在前序已生成图片的会话中，发送「生成8张横屏的」或「来4张竖屏的」，系统自动锁定 16:9 (1536x864) 或 9:16 (864x1536) 规格并继承上一轮完整画面描述，绝不将提示词清空或退化为「横屏的」；

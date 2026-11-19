@@ -2,6 +2,7 @@
 
 ## Unreleased
 
++ [新增] 服务端新增上游接口兼容层，让只支持 `/api/image-tasks` 异步协议的上游也能直接用于画布生图：自动把 `/v1/images/generations`、`/v1/images/edits` 适配为上游异步任务，补齐 `/v1/tasks/{id}`、`/v1/images/tasks/{id}`、`/api/tasks/{id}` 任务查询与 `DELETE` 取消，`/v1/queue/status`、`/api/queue/status` 队列水位，`/health`、`/api/model-catalog`（含 `/refresh`）健康检查与模型目录，以及 `/v1/models` 合并渠道已配置模型的完整清单；任务回显提示词与模型，图片结果地址统一改写为经 `/api/relay` 取回，管理员「探索模型」不再因上游按套餐裁剪而丢失已配置模型。
 + [修复] 批量生图刷新恢复补全：批次开始时持久化完整计划，刷新/重进工作台后除已提交任务续轮询外，尚未提交的排队槽位会按原批次提示词自动补提交，结果区恢复完整槽位、不再丢失部分批量任务；工作台的任务恢复与队列水位查询改为在服务端模式探测完成后执行，避免旧持久化配置绕过 `/api/relay` 直连内部地址被 CORS 拦截。
 
 + [修复] 解决生图张数超过4张时后端拒绝异常，支持自动批次拆解与继承横屏尺寸生图：为生图与改图接口（`requestGeneration` / `requestEdit`）增加批次拆解与并行调度（`splitCountIntoChunks`），当张数超过单次接口上限（4张）时自动切分为不超过4张的并发批次请求并汇聚结果，根除 422 验证报错（`n: Input should be less than or equal to 4`）；意图引擎新增尺寸与长宽比识别，并强化负面提示词过滤（`stripNegativePrompt`），杜绝负面提示词中的 LOGO、文字反向误判业务场景；支持「生成8张横屏的」「来4张竖屏的」等追问指令精准继承上一轮真实提示词，自动提取张数并锁定 16:9 (1536x864) 或 9:16 (864x1536) 规格；修复 `stripInstructionPrefix` 误删「画」字导致「拼贴画」「插画」被截断的问题；页面并发执行时将 `lastToolStepId` 升级为 `activeToolStepsMap` 映射表，确保各批次步骤独立完成，消除步骤卡死。

@@ -8,6 +8,7 @@ import { log } from "./logger";
 import { quotaStatusFor, reserveQuota, settleQuota, type ReserveFailure } from "./quota";
 import { assertPublicHost, isUrlUnderBase, rewriteUrlForDocker, type RateLimiter } from "./security";
 import type { Capability, ClientRecord, QuotaPolicy, QuotaStatus } from "./types";
+import { handleCompatRequest, isCompatTarget } from "./upstream-compat";
 
 const CAPABILITY_LABELS: Record<Capability, string> = {
     image: "图片",
@@ -80,7 +81,11 @@ export function createRelayHandler(deps: RelayDeps) {
         if (method === "CONNECT" || method === "TRACE") throw new HttpError(405, "method_not_allowed", "不支持的请求方法");
 
         const channels = listChannels(deps.db, deps.config.secret);
-        const channel = findChannelForTarget(channels, target);
+        let channel = findChannelForTarget(channels, target);
+        // 兼容层需要覆盖渠道 Base URL 之外的同源别名（/health、/api/queue/status 等），按 origin 兜底匹配。
+        if (!channel && isCompatTarget(target)) {
+            channel = channels.find((item) => item.enabled && new URL(item.baseUrl).origin === target.origin) ?? null;
+        }
         if (!channel) return handleMediaRelay(deps, req, ctx, target, method);
         if (!channel.apiKey) throw new HttpError(502, "channel_key_missing", "渠道未配置 API Key，请联系管理员");
 
@@ -107,6 +112,24 @@ export function createRelayHandler(deps: RelayDeps) {
             });
             if (!reservation.ok) return quotaExceededResponse(deps, policy, client, info.capability, reservation.failure);
             eventId = reservation.eventId;
+        }
+
+        // 上游若只支持 /api/image-tasks，先把请求体交回给兼容层重放。
+        if (isCompatTarget(target)) {
+            try {
+                const response = await handleCompatRequest(channel, req, target, bodyBytes, deps.config.relayTimeoutMs);
+                if (response) {
+                    if (eventId !== null) {
+                        settleQuota(deps.db, eventId, response.ok ? "committed" : policy.refundOnFailure ? "released" : "committed", response.status);
+                    }
+                    const headers = new Headers(response.headers);
+                    for (const [name, value] of quotaHeaderEntries(quotaStatusFor(deps.db, policy, client, undefined, adminExempt), info.capability)) headers.set(name, value);
+                    return new Response(response.body, { status: response.status, headers });
+                }
+            } catch (error) {
+                if (eventId !== null) settleQuota(deps.db, eventId, policy.refundOnFailure ? "released" : "committed", null);
+                throw error;
+            }
         }
 
         const tryResponsesFallback = async (originalError?: unknown): Promise<Response | null> => {
@@ -196,7 +219,8 @@ async function parseRequestInfo(method: string, target: URL, bodyBytes: Uint8Arr
                     if (Array.isArray(modality)) modalities = modality.map(String);
                 }
             } else if (normalizedType.includes("multipart/form-data") || normalizedType.includes("application/x-www-form-urlencoded")) {
-                const form = await new Request("http://internal.local/relay", { method: "POST", headers: { "content-type": contentType }, body: bodyBytes }).formData();
+                // boundary 大小写敏感，解析时必须使用原始 content-type。
+                const form = await new Response(bodyBytes as unknown as BodyInit, { headers: { "content-type": contentType } }).formData();
                 const modelValue = form.get("model");
                 if (typeof modelValue === "string") model = modelValue;
                 const countValue = form.get("n");
