@@ -1,181 +1,98 @@
 <p align="center">
-  <img src="web/public/logo.svg" width="96" alt="infinite-canvas logo">
+  <img src="web/public/logo.svg" width="88" alt="无限画布 Logo">
 </p>
 
-<h1 align="center">无限画布 (infinite-canvas) · NanQiaoMi 二开版</h1>
+<h1 align="center">无限画布 · Infinite Canvas</h1>
 
-> **二次开发声明**：本仓库是 [basketikun/infinite-canvas](https://github.com/basketikun/infinite-canvas) 的二次开发（二开）项目，不是官方仓库，也不代表上游项目或其维护者。原始代码与设计版权归原作者所有，遵循 MIT License（见 [LICENSE](LICENSE)）。本地更新明细见 [LOCAL-UPDATES.md](LOCAL-UPDATES.md)，协议与免责见 [NOTICE.md](NOTICE.md)。
+<p align="center">
+  浏览器端的 AI 创作工作台：生成、连接、重组，让创作从一次生成变成连续推演。
+</p>
 
----
+<p align="center">
+  <img alt="React 19" src="https://img.shields.io/badge/React-19-087ea4?logo=react&logoColor=white">
+  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-3178c6?logo=typescript&logoColor=white">
+  <img alt="Vite" src="https://img.shields.io/badge/Vite-7-646cff?logo=vite&logoColor=white">
+  <img alt="Bun" src="https://img.shields.io/badge/Bun-1.3-fbf0df?logo=bun&logoColor=black">
+  <img alt="License MIT" src="https://img.shields.io/badge/License-MIT-2ea44f">
+</p>
 
-## 一、我的版本状态
+> **二次开发声明**：本仓库是 [basketikun/infinite-canvas](https://github.com/basketikun/infinite-canvas) 的二次开发项目，不是官方仓库，也不代表上游或其维护者。原始代码与设计版权归原作者所有，遵循 [MIT License](LICENSE)。二开说明见 [NOTICE.md](NOTICE.md)，本地变更见 [LOCAL-UPDATES.md](LOCAL-UPDATES.md)。当前基线为上游 `v0.20.0`，仍处于开发阶段。
 
-| 项目 | 值 |
-|---|---|
-| 分支 | `feat/conversation-agent` / `fix/context-pollution-hardening` |
-| 基线 | 上游 `v0.20.0` |
-| 本地更新 | **128 个提交**（含合并；不含合并 112 个） |
-| 版本状态 | 仍是 `v0.20.0`，**未发版、开发中** |
-| 代码改动 | 183 个文件，+32992 / −570 |
-| 宣传片 | [`promo/L43_活体实机录屏/`](promo/L43_活体实机录屏/)《小方上岗记》90 秒 |
+## 项目介绍
 
-这个版本围绕一件事做：**把「无限画布」从一个 AI 生图工具，变成一间能自己接活、自己排布、自己纠错的工作室。**
+无限画布把「提示词 → 生成 → 排布 → 复用」放在同一块可无限平移、缩放的画布上。文本、图片、视频、音频与生成配置都是可继续编辑的节点，可以连线组成可追溯、可复用的创作流程。
 
----
+AI 请求由浏览器直接发往你配置的 OpenAI 兼容接口，画布、资产与生成记录默认保存在本机浏览器；也可以部署可选的服务端模式，统一托管渠道、额度与管理后台。
 
-## 二、二开详细介绍
+<p align="center">
+  <img src="docs/public/screenshots/canvas.webp" alt="无限画布">
+  <br>
+  <sub>无限画布 · 系列海报网格排布，左侧元素面板可检索、定位与显隐</sub>
+</p>
 
-### 1. 对话 Agent：从「聊天框」到「工作台」
+## 核心功能
 
-上游的对话更像「一问一答 + 调一次生图接口」。这个版本把对话做成了完整的任务执行器：
+- **画布工作流**：文本、图片、视频、音频、生成配置与分组节点，连线传递提示词与参考图，结果保留参数，可重试与二次编辑。
+- **AI 生成**：多渠道 OpenAI 兼容接口，图片张数、比例、参考图、透明背景与自定义调用脚本；任务排队、自动重试、刷新后恢复。
+- **AI 对话与画布助手**：一句话拆成多步，自主调用工具完成生成、改图与画布排布，过程可见。
+- **本地 Agent（Codex / Claude）**：画布右上角的 Agent 面板可在 Codex 与 Claude 之间切换，支持流式对话、会话历史与搜索、Skill、权限审批、文件改动 diff 与断线自动重连。
+- **画布 MCP**：Claude Code、Codex、Antigravity 等本地 AI 工具可通过 `infinite-canvas` MCP 直接读取和操作当前画布。
+- **提示词与素材**：聚合多个提示词源，支持搜索与插入画布；「我的资产」统一收藏图片、视频与文本。
+- **服务端模式（可选）**：集中配置渠道与默认模型，按能力设置每日 / 每周 / 每 IP 额度，提供管理后台与审计。
+- **同步与插件**：WebDAV 同步画布与资产；画布插件可扩展节点类型、渲染与工具栏动作。
 
-- **任务拆解 + 工具循环（ReAct）**：一句话会被拆成多步，模型自己决定调用哪个工具、失败后是否重试、要不要继续下一步，直到把结果交出来。
-- **意图由模型主决策**：显式命令（`/prompt`、`/image`、`/edit`）仍然直连对应流程，其余模糊输入交给模型判断是「出图 / 改图 / 优化提示词 / 追问」。
-- **模型决定构图与参数**：画面比例、构图方式、生图参数不再写死，由模型根据需求推断，并在回复里说明理由。
-- **步骤可见**：执行步骤、工具卡、等待阶段、失败与重试都在对话流里实时呈现，不再是黑盒转圈。
+完整功能说明见 [features.mdx](docs/content/docs/overview/features.mdx)。
 
-### 2. 生图链路：排队、并发、重试、恢复
+## 快速开始
 
-生图是最容易「炸」的环节，这个版本主要补稳定性：
-
-- **排队与互斥去重**：同一任务不会重复提交；任务进入队列后按客户端并发上限执行。
-- **可恢复错误自动重试**：网络抖动、限流、超时等可恢复错误自动重试，重试次数与状态在界面上可见。
-- **失败就地重试**：失败卡片可以直接点「重试」，不用重新描述一遍需求。
-- **刷新恢复**：页面刷新后，未完成的任务会从记忆里恢复并继续轮询，不会丢任务。
-- **超量拆批**：一次要超过 4 张时自动拆成多个批次，避免接口 422；长宽比与追问上下文会继承。
-- **GIF**：支持生成 9 帧 / 5fps 的动图，帧率可调 1–20fps；默认模型升级为 `gpt-image-2.6`。
-- **默认模型与额度**：默认生图模型、张数上限、服务端额度都可在配置或管理后台调整。
-
-### 3. 画布 Agent：12 张图排成一张网格
-
-- 画布页接入原生 AI 对话 Agent，可以直接说「把这组海报做成 12 张的系列，排成网格」。
-- 12 张图按 **4 列 × 3 行**自动排布，节点自动命名（系列 01…12），并自动连线。
-- 「居中聚焦」一键把整个网格收进视口；节点支持创建、更新、连线、删除、聚焦等工具操作。
-- 画布 Agent 与普通对话**物理隔离**：项目、会话、运行态互不串扰，避免把 A 项目的上下文带进 B 项目。
-
-### 4. 生成诊断：出问题时有据可查
-
-- 新增「生成诊断」面板，统计生成尝试、成功、失败、模型错误。
-- **最近 7 天生成失败率趋势**，按天展示；数据只保存在本机浏览器，不上传。
-- 支持「复制诊断报告」，方便排查；附带渠道健康检查，能看出是网络、限流还是模型侧问题。
-
-### 5. 服务端模式：渠道、额度、管理后台
-
-除浏览器直连模式外，这个版本补齐了服务端模式：
-
-- **渠道管理**：多套 API 渠道统一配置与启停。
-- **额度策略**：每日额度、每周额度、每 IP 上限；服务端默认每日 100 / 每周 700，仅首次初始化写入，之后可在管理后台修改（浏览器直连模式不受此限制）。
-- **访客与使用统计**：记录客户端、用量与审计日志。
-- **长任务超时**：服务端空闲超时调到 255s，支持长时间生成不中断。
-
-### 6. 界面与排版：把「能用」做成「耐看」
-
-- 内置 **Cascadia Mono**（英文/数字）与 **方正小标宋简体**（中文）WOFF2 字体，全局统一加载。
-- 对齐 Claude 风格的人文主义衬线排版：标题层级、行距、字距、留白都做了统一。
-- 对话、生图工作台、视频创作台三端设计语言统一；侧栏裁切、生图显现时序、思维链时间线等细节都做了打磨。
-- 支持深色主题：页面、侧栏、卡片、墙纸一起切换，不是只换个背景色。
-
-### 7. 稳定性：多会话隔离与历史污染治理
-
-- 每个会话按 `threadId` / `turnId` / `itemId` 归属消息，实时事件只补充未物化的 turn，历史快照成为权威后不重复合并。
-- 跨会话、跨项目、跨身份（本地 Agent / 服务端）都有门禁，防止上下文污染与额度推诿。
-- 修复了多类线上问题：长文本加工被误判为出图、批量提示词畸变、历史套话复读、白屏、组件属性越界等。
-- 清理 22 个历史 TypeScript 错误，`typecheck` 归零。
-
-### 8. 宣传片《小方上岗记》
-
-`promo/L43_活体实机录屏/` 里是这个版本的 90 秒 L43 风格演示片：像素小人「小方」× 真实界面重绘，一镜到底，从对话出图、12 张排布、失败重试、刷新恢复一直演到生成诊断与片尾 end card。含制作简报、项目与更新全解、分镜脚本、制作提示词包、制作日志与视频号发布文案，以及可运行的 `film/` 源码和构建脚本。
-
-> 宣传片是衍生作品，不是官方物料；片中演示图由本地生图接口生成，12 张系列为提示词变体。
-
-### 9. 工程化与文档
-
-- 构建、渲染、演示图生成脚本齐全（`promo/L43_活体实机录屏/tools_*.py|mjs|sh`）。
-- 文档按「概览 / 功能 / 进度 / 待验收」分层维护，改了什么、待测什么在 `docs/content/docs/progress/` 里可查。
-- 每次有用户可感知的改动，都会在 `CHANGELOG.md` 的 `Unreleased` 里按「新增/调整/修复/优化」记录。
-
----
-
-## 三、与上游的关系
-
-- 本仓库 fork 自 [basketikun/infinite-canvas](https://github.com/basketikun/infinite-canvas)，GitHub 页面会显示 `forked from`；但本地提交不属于上游，也不代表已被上游合并。
-- 想合并回上游请走上游 PR 流程；本仓库不代为处理。
-- 同步上游：
-
-```bash
-git fetch origin
-git merge origin/main
-git push myfork feat/conversation-agent
-```
-
----
-
-## 四、快速开始
-
-> 本仓库是二开版，以下命令请使用本仓库地址；上游原仓库为 [basketikun/infinite-canvas](https://github.com/basketikun/infinite-canvas)。
-
-AI API Key、Base URL、画布、素材和生成记录默认保存在浏览器本地。
+环境要求：Bun 1.x；可选 Docker 24+；Node.js 18+（使用本地 Agent 时）。
 
 ### 本地开发
 
 ```bash
 git clone https://github.com/NanQiaoMi/infinite-canvas.git
-cd infinite-canvas
-cd web
+cd infinite-canvas/web
 bun install
 bun run dev
 ```
 
-### Docker 运行（静态模式）
+打开 `http://localhost:3000`，在右上角「配置」中填写 `Base URL`、`API Key` 与模型名。
+
+### 服务端模式（渠道 + 额度 + 管理后台）
 
 ```bash
-git clone https://github.com/NanQiaoMi/infinite-canvas.git
-cd infinite-canvas
-docker compose up -d
-```
-
-运行后默认端口3000，可访问 `http://localhost:3000`。
-
-首次打开后进入右上角配置，填入自己的 OpenAI 兼容 `Base URL` 和 `API Key`。
-
-如果默认的OpenAI接口调用方式与您的API不同，可自定义生图/视频脚本调用。
-
-### 服务端模式（管理员统一配置 + 额度 + 访客记录）
-
-本仓库额外提供一套本地服务端模式（上游发布镜像仍为静态模式，不受影响）：
-
-- API Key、渠道与模型只保存在服务端，普通用户打开即用，无需配置；
-- 服务端记录匿名访客的 IP 与浏览器指纹，图片额度默认每日 100 张 / 每周 700 张并自动刷新；
-- `/admin` 管理后台可管理渠道、默认模型、按能力额度、IP 上限、使用统计与访客记录，并支持手动重置额度与封禁访客。
-
-```bash
-cp .env.example .env      # 至少修改 ADMIN_PASSWORD
+cp .env.example .env   # 至少修改 ADMIN_USERNAME / ADMIN_PASSWORD
 docker compose -f docker-compose.local.yml up -d --build
 ```
 
-- 普通用户入口：`http://localhost:3002`
-- 管理后台：`http://localhost:3002/admin`
+访问 `http://localhost:3002`，管理后台为 `/admin`。数据保存在 `./data`，请勿提交或公开暴露。
 
-> 容器内访问宿主机上的服务（例如本机 `chatgpt2api`）时，渠道 Base URL 请填 `http://host.docker.internal:<端口>`；新版服务端会自动把 `localhost` / `127.0.0.1` 改写为 `host.docker.internal`。
+### 本地 Agent 与画布 MCP
 
-数据保存在 `./data`（SQLite 与签名密钥），升级或重启不会丢失。
+1. 启动本仓库的 Canvas Agent（新版网页需要本仓库版本的 Agent）：
 
-## 五、文档入口
+   ```bash
+   cd canvas-agent
+   npm install
+   npm run dev
+   ```
 
-- [本地更新详单](LOCAL-UPDATES.md)：128 个提交逐条清单
-- [二开说明与协议](NOTICE.md)
-- [项目与本次更新全解](promo/L43_活体实机录屏/01_项目与本次更新全解.md)
-- [90 秒分镜脚本](promo/L43_活体实机录屏/02_90秒活体实机录屏分镜脚本.md)
-- [宣传片制作日志](promo/L43_活体实机录屏/04_制作日志.md)
-- [视频号发布文案](promo/L43_活体实机录屏/05_视频号发布文案.md)
-- 功能文档：`docs/content/docs/overview/features.mdx`；待办：`docs/content/docs/progress/todo.mdx`
+2. 在画布右上角打开 `Agent`，把终端里 Agent 打印的 `Local URL` 与 `Connect token` 两行粘贴到连接框即可连接；顶部可切换 Codex / Claude。使用 Claude 前需先在终端运行 `claude` 并执行 `/login`。
+3. 让 Claude Code、Codex、Antigravity 直接操作画布：参考 [canvas-agent/README.md](canvas-agent/README.md) 注册 `infinite-canvas` MCP；Agent 运行且网页已连接时工具即可生效。
 
----
+## 安全说明
 
-## 六、开源协议与署名
+- 浏览器直连模式下 API Key 保存在浏览器本地，并由前端直接请求所配置的接口，请只在可信设备和 HTTPS 环境下使用。
+- 画布与资产保存在浏览器本地，暂未提供云同步账号体系，换设备可使用 WebDAV 同步。
+- 管理后台请仅在内网或受保护的反向代理后开放；插件运行在页面上下文中，只安装可信来源的插件。
 
-本项目使用 [MIT License](LICENSE)。任何人都可以免费使用、复制、修改、分发、再授权和商业使用本项目，也可以用于闭源产品。
+## 文档
 
-- 上游项目：`basketikun/infinite-canvas`，Copyright (c) 2026 basketikun 及贡献者
-- 本仓库二开部分由 NanQiaoMi 维护；上游名称、Logo 与品牌归原作者所有
-- 本仓库不代表上游官方，也不暗示任何官方背书或关联
+- [AI 文档索引](docs/index.md) · [功能说明](docs/content/docs/overview/features.mdx)
+- [待办](docs/content/docs/progress/todo.mdx) · [待验收](docs/content/docs/progress/pending-test.mdx)
+- [更新日志](CHANGELOG.md) · [Canvas Agent 说明](canvas-agent/README.md)
+- [二开说明](NOTICE.md) · [安全说明](SECURITY.md)
+
+## 协议
+
+本项目使用 [MIT License](LICENSE)。上游项目 `basketikun/infinite-canvas` 版权归 basketikun 及贡献者所有；本仓库二开部分由 NanQiaoMi 维护，上游名称、Logo 与品牌归原作者所有，本仓库不代表上游官方。
