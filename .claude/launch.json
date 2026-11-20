@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web",
+      "runtimeExecutable": "web/node_modules/.bin/vite",
+      "runtimeArgs": ["web", "--host", "127.0.0.1", "--port", "3005", "--strictPort"],
+      "port": 3005
+    }
+  ]
+}
