@@ -76,6 +76,7 @@ const MESSAGE_PREVIEW_MAX_LENGTH = 500_000;
 const DEFAULT_AGENT_URL = "http://127.0.0.1:17371";
 const AGENT_PROTOCOL_VERSION = 7;
 const HISTORY_RETRY_DELAYS_MS = [0, 150, 350, 700, 1200];
+const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000, 16000, 30000];
 const AGENT_REASONING_EFFORTS = new Set<AgentReasoningEffort>(["minimal", "low", "medium", "high", "xhigh", "max", "ultra"]);
 const rt = (key: string, options?: Record<string, unknown>) => i18n.t(`agent.runtime.${key}`, options);
 
@@ -88,6 +89,8 @@ function syncRuntime(next: AgentRuntimeName) {
     } catch {}
     useAgentStore.getState().setAgentState({
         runtime: next,
+        threadSearch: "",
+        threadsNextCursor: "",
         models: [],
         model: localStorage.getItem(`canvas-agent-model:${next}`) || "",
         reasoningEffort: (localStorage.getItem(`canvas-agent-reasoning-effort:${next}`) as AgentReasoningEffort | null) || "",
@@ -95,7 +98,16 @@ function syncRuntime(next: AgentRuntimeName) {
 }
 
 type AgentWorkspace = { workspacePath: string; activeThreadId?: string };
-type AgentThreadsResponse = { ok?: boolean; workspace?: AgentWorkspace; conversation?: AgentConversationState; data?: AgentThreadSummary[] };
+type AgentThreadsResponse = { ok?: boolean; workspace?: AgentWorkspace; conversation?: AgentConversationState; data?: AgentThreadSummary[]; nextCursor?: string | null };
+/** 历史列表请求路径，带上当前搜索词与分页游标（空值不拼入）。 */
+function threadsPath(cursor = "") {
+    const params = new URLSearchParams();
+    const searchTerm = useAgentStore.getState().threadSearch;
+    if (searchTerm) params.set("searchTerm", searchTerm);
+    if (cursor) params.set("cursor", cursor);
+    const query = params.toString();
+    return agentPath(`/threads${query ? `?${query}` : ""}`);
+}
 type AgentThreadResponse = { ok?: boolean; workspace?: AgentWorkspace; conversation?: AgentConversationState; thread?: AgentThreadSummary; messages?: AgentChatItem[]; settledTurnIds?: string[]; historyReady?: boolean };
 type AgentWorkspaceResponse = { ok?: boolean; workspace?: AgentWorkspace; conversation?: AgentConversationState };
 type AgentTurnResponse = { ok?: boolean; threadId?: string };
@@ -151,7 +163,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
     // canvasContext is intentionally excluded because project updates it every frame during dragging and resizing.
     // The panel uses it only for ref synchronization and debounced postState calls, never during rendering.
     // Subscribing here would rerender the panel every frame and amplify the #185 crash, so it is observed imperatively below.
-    const { width, url, token, connected, enabled, prompt, attachments, sending, waiting, tokenUsage, eventLogs, threads, activeThreadId, workspacePath, loadingThreads, activeTab, confirmTools, runtime, permissionMode, models, model, reasoningEffort, activity, conversation, connectError, pendingTool, pendingApprovals } = useAgentStore(
+    const { width, url, token, connected, enabled, prompt, attachments, sending, waiting, tokenUsage, eventLogs, threads, threadsNextCursor, threadSearch, activeThreadId, workspacePath, loadingThreads, activeTab, confirmTools, runtime, permissionMode, models, model, reasoningEffort, activity, conversation, connectError, reconnectAttempt, pendingTool, pendingApprovals } = useAgentStore(
         useShallow((state) => ({
             width: state.width,
             url: state.url,
@@ -165,6 +177,8 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
             tokenUsage: state.tokenUsage,
             eventLogs: state.eventLogs,
             threads: state.threads,
+            threadsNextCursor: state.threadsNextCursor,
+            threadSearch: state.threadSearch,
             activeThreadId: state.activeThreadId,
             workspacePath: state.workspacePath,
             loadingThreads: state.loadingThreads,
@@ -178,6 +192,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
             activity: state.activity,
             conversation: state.conversation,
             connectError: state.connectError,
+            reconnectAttempt: state.reconnectAttempt,
             pendingTool: state.pendingTool,
             pendingApprovals: state.pendingApprovals,
         })),
@@ -202,7 +217,16 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
     const attachmentUrlsRef = useRef(new Set<string>());
     const clientIdRef = useRef("");
     const [clientReady, setClientReady] = useState(false);
+    const [reconnectNonce, setReconnectNonce] = useState(0);
+    const reconnectAttemptRef = useRef(0);
+    const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const reconnectNow = () => {
+        if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+        setReconnectNonce((nonce) => nonce + 1);
+    };
     const loadThreadsSequenceRef = useRef(0);
+    const loadingMoreThreadsRef = useRef(false);
     const threadMessagesRef = useRef(new Map<string, AgentChatItem[]>());
     const authoritativeHistoryTurnsRef = useRef(new Set<string>());
     const liveTurnKeysRef = useRef(new Set<string>());
@@ -311,7 +335,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
         let sequence = ++loadThreadsSequenceRef.current;
         setAgentState({ loadingThreads: true });
         try {
-            const data = await fetchAgentJson<AgentThreadsResponse>(endpoint, token, agentPath(`/threads`));
+            const data = await fetchAgentJson<AgentThreadsResponse>(endpoint, token, threadsPath());
             if (sequence !== loadThreadsSequenceRef.current) return;
             if (data.conversation) {
                 applyConversationState(data.conversation);
@@ -321,7 +345,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
             const currentThreadId = current.activeThreadId || data.workspace?.activeThreadId || "";
             if (!data.conversation && currentThreadId !== current.activeThreadId) sequence = applyWorkspaceChange({ activeThreadId: currentThreadId });
             if (sequence !== loadThreadsSequenceRef.current || useAgentStore.getState().activeThreadId !== currentThreadId) return;
-            setAgentState({ threads: data.data || [], workspacePath: data.workspace?.workspacePath || "" });
+            setAgentState({ threads: data.data || [], threadsNextCursor: data.nextCursor || "", workspacePath: data.workspace?.workspacePath || "" });
             if (currentThreadId && !skipHistory) {
                 await loadThreadSnapshot(currentThreadId, sequence, undefined, expectedTurnId);
             } else {
@@ -334,6 +358,37 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
             if (sequence === loadThreadsSequenceRef.current && !threadOperationRef.current) setAgentState({ loadingThreads: false });
         }
     }, [applyConversationState, applyWorkspaceChange, endpoint, loadThreadSnapshot, setAgentState, token]);
+    const loadMoreThreads = useCallback(async () => {
+        const current = useAgentStore.getState();
+        if (!current.connected || !current.threadsNextCursor || loadingMoreThreadsRef.current) return;
+        const sequence = loadThreadsSequenceRef.current;
+        loadingMoreThreadsRef.current = true;
+        try {
+            const data = await fetchAgentJson<AgentThreadsResponse>(endpoint, token, threadsPath(current.threadsNextCursor));
+            if (sequence !== loadThreadsSequenceRef.current || useAgentStore.getState().threadSearch !== current.threadSearch) return;
+            const latest = useAgentStore.getState();
+            const ids = new Set(latest.threads.map((thread) => thread.id));
+            setAgentState({ threads: [...latest.threads, ...(data.data || []).filter((thread) => !ids.has(thread.id))], threadsNextCursor: data.nextCursor || "" });
+        } catch (error) {
+            addEventLog(rt("historyReadFailed"), error);
+        } finally {
+            loadingMoreThreadsRef.current = false;
+        }
+    }, [endpoint, setAgentState, token]);
+    /** 搜索只刷新历史列表，不触碰当前对话的历史快照与实时消息去重状态。 */
+    const searchThreads = useCallback(async (term: string) => {
+        const threadSearch = term.trim();
+        setAgentState({ threadSearch, loadingThreads: true });
+        try {
+            const data = await fetchAgentJson<AgentThreadsResponse>(endpoint, token, threadsPath());
+            if (useAgentStore.getState().threadSearch !== threadSearch) return;
+            setAgentState({ threads: data.data || [], threadsNextCursor: data.nextCursor || "" });
+        } catch (error) {
+            addEventLog(rt("historyReadFailed"), error);
+        } finally {
+            if (useAgentStore.getState().threadSearch === threadSearch) setAgentState({ loadingThreads: false });
+        }
+    }, [endpoint, setAgentState, token]);
     // Imperatively subscribe to canvasContext to keep the ref current and debounce snapshot reports without rerendering the panel.
     useEffect(() => {
         let timer: ReturnType<typeof setTimeout> | null = null;
@@ -358,7 +413,10 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
     useEffect(() => () => attachmentUrlsRef.current.forEach((url) => URL.revokeObjectURL(url)), []);
 
     useEffect(() => {
-        if (!clientReady || !enabled || !token.trim()) return;
+        if (!clientReady || !enabled || !token.trim()) {
+            reconnectAttemptRef.current = 0;
+            return;
+        }
         localStorage.setItem("canvas-agent-url", endpoint);
         localStorage.setItem("canvas-agent-token", token);
         const clientId = clientIdRef.current;
@@ -382,7 +440,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
                 protocolRejected = true;
                 source.close();
                 connectedRef.current = false;
-                setAgentState({ enabled: false, connected: false, waiting: false, sending: false, activity: rt("restartRequired"), connectError: text, silentConnect: false, fragmentBootstrap: false, pendingTool: null, pendingApprovals: [] });
+                setAgentState({ enabled: false, connected: false, waiting: false, sending: false, activity: rt("restartRequired"), connectError: text, reconnectAttempt: 0, silentConnect: false, fragmentBootstrap: false, pendingTool: null, pendingApprovals: [] });
                 useAgentSkillStore.getState().reset();
                 addEventLog(rt("versionMismatch"), text, hello);
                 if (!headless) message.error(text);
@@ -404,8 +462,10 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
                 : current.messages.filter((item) => !isConnectionErrorMessage(item));
             errorLoggedRef.current = false;
             connectedRef.current = true;
+            reconnectAttemptRef.current = 0;
             setAgentState({
                 connected: true,
+                reconnectAttempt: 0,
                 activity: pendingApprovals.length ? rt("awaitingApproval") : busy ? rt("codexRunning") : rt("connected"),
                 waiting: busy,
                 sending: false,
@@ -572,18 +632,42 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
         });
         source.onerror = () => {
             if (disposed || protocolRejected) return;
-            const wasConnected = connectedRef.current;
+            // 已连接过（或正在重连）的断开才自动重连；首次连接失败保持原行为。
+            const reconnecting = reconnectAttemptRef.current > 0;
+            const wasConnected = connectedRef.current || reconnecting;
             const silent = useAgentStore.getState().silentConnect && !wasConnected;
             const text = rt(wasConnected ? "connectionLostDescription" : "connectionFailedDescription");
-            if (!errorLoggedRef.current || wasConnected) {
+            if (!reconnecting && (!errorLoggedRef.current || wasConnected)) {
                 addEventLog(rt(wasConnected ? "connectionLost" : "connectionFailed"), text);
                 if (!headless && !silent) message.error(text);
             }
             errorLoggedRef.current = true;
             connectedRef.current = false;
             pendingToolRef.current = null;
+            useAgentSkillStore.getState().reset();
+            if (wasConnected) {
+                source.close();
+                const attempt = ++reconnectAttemptRef.current;
+                const delay = RECONNECT_DELAYS_MS[Math.min(attempt, RECONNECT_DELAYS_MS.length) - 1];
+                setAgentState({
+                    activity: rt("reconnecting", { attempt, seconds: delay / 1000 }),
+                    connected: false,
+                    waiting: false,
+                    sending: false,
+                    silentConnect: false,
+                    fragmentBootstrap: false,
+                    pendingTool: null,
+                    pendingApprovals: [],
+                    reconnectAttempt: attempt,
+                });
+                reconnectTimerRef.current = setTimeout(() => {
+                    reconnectTimerRef.current = null;
+                    setReconnectNonce((nonce) => nonce + 1);
+                }, delay);
+                return;
+            }
             setAgentState({
-                activity: rt(wasConnected ? "connectionLost" : "connectionFailed"),
+                activity: rt("connectionFailed"),
                 connected: false,
                 waiting: false,
                 sending: false,
@@ -593,20 +677,19 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
                 pendingTool: null,
                 pendingApprovals: [],
             });
-            useAgentSkillStore.getState().reset();
-            if (!wasConnected) {
-                source.close();
-                setAgentState({ enabled: false });
-            }
+            source.close();
+            setAgentState({ enabled: false });
         };
         return () => {
             disposed = true;
             source.close();
+            if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+            reconnectTimerRef.current = null;
             connectedRef.current = false;
             loadThreadsSequenceRef.current += 1;
             useAgentSkillStore.getState().reset();
         };
-    }, [applyConversationState, applyWorkspaceChange, clientReady, enabled, endpoint, loadSkills, loadThreads, message, setAgentState, token]);
+    }, [applyConversationState, applyWorkspaceChange, clientReady, enabled, endpoint, loadSkills, loadThreads, message, reconnectNonce, setAgentState, token]);
 
     useEffect(() => {
         if (connected) void loadThreads();
@@ -934,7 +1017,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
 
     const toggleAgentConnection = async ({ silent = false }: { silent?: boolean } = {}) => {
         if (enabled) {
-            clearAgentSession({ enabled: false, connected: false, activity: rt("offline"), connectError: "" });
+            clearAgentSession({ enabled: false, connected: false, activity: rt("offline"), connectError: "", reconnectAttempt: 0 });
             return;
         }
         const urlToken = searchParams.get("agentToken") || "";
@@ -1427,6 +1510,10 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
                 <AgentHistoryView
                     theme={theme}
                     threads={threads}
+                    hasMore={Boolean(threadsNextCursor)}
+                    search={threadSearch}
+                    onSearch={searchThreads}
+                    onLoadMore={loadMoreThreads}
                     activeThreadId={activeThreadId}
                     workspacePath={workspacePath}
                     loading={loadingThreads}
@@ -1448,6 +1535,12 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
                 />
             ) : (
                 <>
+                    {reconnectAttempt > 0 ? (
+                        <div className="flex shrink-0 items-center justify-between gap-2 px-3 py-1 text-xs" style={{ color: theme.node.muted }}>
+                            <span className="min-w-0 truncate">{activity}</span>
+                            <button type="button" className="shrink-0 rounded px-1.5 py-0.5 hover:bg-black/5 dark:hover:bg-white/10" style={{ color: theme.node.muted }} onClick={reconnectNow}>{rt("reconnectNow")}</button>
+                        </div>
+                    ) : null}
                     <AgentChatTimeline theme={theme} pendingTool={pendingTool} pendingApprovals={pendingApprovals} sending={sending} waiting={waiting} onRejectTool={rejectPendingTool} onApproveTool={approvePendingTool} onApprovalDecision={decideApproval} />
                     <AgentTaskProgress theme={theme} busy={sending || waiting} />
                     {tokenUsage ? <AgentUsageBar usage={tokenUsage} theme={theme} /> : null}

@@ -99,17 +99,22 @@ export async function readClaudeThread(_emit: AgentEmit, threadId: string, cwd =
 }
 
 /** 查询当前工作空间中的 Claude 会话。 */
-export async function listClaudeThreads(_emit: AgentEmit, options: { cwd: string; searchTerm?: string; limit?: number }) {
+export async function listClaudeThreads(_emit: AgentEmit, options: { cwd: string; searchTerm?: string; limit?: number; cursor?: string }) {
     const term = (options.searchTerm || "").trim().toLocaleLowerCase();
-    const sessions = await listSessions({ dir: options.cwd, limit: options.limit || 40 }).catch((error) => {
+    const limit = options.limit || 40;
+    const offset = Math.max(0, Number(options.cursor) || 0);
+    // 搜索需要覆盖全部会话，先取全量再分页；无搜索词时直接按偏移分页。
+    const sessions = await listSessions({ dir: options.cwd, ...(term ? {} : { limit: limit + 1, offset }) }).catch((error) => {
         logger.warn("Failed to list Claude sessions", { error });
         return [] as SDKSessionInfo[];
     });
-    const data = sessions
+    const data = (term ? sessions : sessions.slice(0, limit))
         .filter((item) => !field(item, "archived") && (!item.cwd || samePath(item.cwd, options.cwd)))
         .map((item) => summarizeSession(item, options.cwd))
         .filter((item) => !term || `${item.name || ""}\n${item.preview}`.toLocaleLowerCase().includes(term));
-    return { data, nextCursor: null, backwardsCursor: null };
+    const page = term ? data.slice(offset, offset + limit) : data.slice(0, limit);
+    const hasMore = term ? data.length > offset + limit : sessions.length > limit;
+    return { data: page, nextCursor: hasMore ? String(offset + limit) : null, backwardsCursor: null };
 }
 
 /** 归档指定 Claude 会话并清理画布侧历史。 */

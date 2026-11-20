@@ -85,6 +85,7 @@ type CodexRequestSpec = {
             sourceKinds: Array<"cli" | "vscode" | "appServer" | "exec">;
             cwd: string;
             searchTerm?: string;
+            cursor?: string;
         };
         result: { data: CodexThread[]; nextCursor: string | null; backwardsCursor: string | null };
     };

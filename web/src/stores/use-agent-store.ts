@@ -65,6 +65,8 @@ type AgentStore = {
     tokenUsage: AgentTokenUsage | null;
     eventLogs: AgentEventLog[];
     threads: AgentThreadSummary[];
+    threadsNextCursor: string;
+    threadSearch: string;
     activeThreadId: string;
     activeTurnId: string;
     workspacePath: string;
@@ -81,6 +83,7 @@ type AgentStore = {
     bootstrapStatus: AgentBootstrapStatus | null;
     mcpStartupStatuses: Record<string, AgentBootstrapStatus>;
     connectError: string;
+    reconnectAttempt: number;
     pendingTool: AgentPendingToolCall | null;
     pendingApprovals: AgentPendingApproval[];
     setAgentState: (patch: Partial<Omit<AgentStore, "setAgentState" | "connectAgent" | "disconnectAgent" | "addMessage" | "addEventLog" | "clearEventLogs" | "openPanel" | "closePanel" | "togglePanel" | "setCanvasContext">>) => void;
@@ -120,6 +123,8 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     tokenUsage: null,
     eventLogs: [],
     threads: [],
+    threadsNextCursor: "",
+    threadSearch: "",
     activeThreadId: "",
     activeTurnId: "",
     workspacePath: "",
@@ -136,6 +141,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     bootstrapStatus: null,
     mcpStartupStatuses: {},
     connectError: "",
+    reconnectAttempt: 0,
     pendingTool: null,
     pendingApprovals: [],
     setAgentState: (patch) => set(patch),
@@ -170,7 +176,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
         agentSource = null;
         if (connectTimer) clearTimeout(connectTimer);
         connectTimer = null;
-        set({ enabled: false, connected: false, silentConnect: false, fragmentBootstrap: false, activity: i18n.t("agent.state.offline"), conversation: { revision: 0, conversationId: "", threadId: "", status: "idle", mcpStatuses: {} }, bootstrapStatus: null, mcpStartupStatuses: {}, ...patch });
+        set({ enabled: false, connected: false, silentConnect: false, fragmentBootstrap: false, reconnectAttempt: 0, activity: i18n.t("agent.state.offline"), conversation: { revision: 0, conversationId: "", threadId: "", status: "idle", mcpStatuses: {} }, bootstrapStatus: null, mcpStartupStatuses: {}, ...patch });
     },
     addMessage: (item) => set((state) => ({ messages: [...state.messages, item] })),
     addEventLog: (item) => set((state) => ({ eventLogs: [...state.eventLogs.slice(-160), item] })),

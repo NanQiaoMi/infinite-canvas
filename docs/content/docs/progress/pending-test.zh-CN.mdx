@@ -5,6 +5,7 @@ description: 当前版本已实现但仍需人工验证的变更项
 
 # 待测试
 
+- 本地 Agent 断线重连与历史分页：关闭 Canvas Agent 后面板顶部出现「连接已断开，N 秒后第 M 次重连」提示与「立即重连」按钮（按 1/2/4/8/16 秒、之后每 30 秒重试），Agent 恢复后自动重连；历史页有搜索框（回车搜索、清空恢复、无结果显示「没有匹配的对话」），滚动到底自动加载下一页 40 条；对话运行中搜索不影响当前对话。
 - 本地 Agent 细节优化：新建或恢复 Claude 对话时显示画布 MCP 的真实状态（MCP 启动失败时显示失败原因而不是“就绪”）；Codex ⇄ Claude 切换后各自恢复自己的模型与推理强度；不支持推理强度的模型可以选择并隐藏强度选项；Claude 只加载技能页中启用的 Skill；忙碌与审批失效提示仍正常出现。
 - `canvas-agent install-mcp`：`--dry-run` 只列出各客户端将执行的操作而不写入；正式运行后 Claude Code 注册为用户级、Antigravity 写入 `~/.gemini/config/mcp_config.json`（首次修改生成 `.bak`）、已启用 Infinite Canvas 插件时跳过 Codex，最后输出「MCP 自检通过：N 个工具」；重启各 Agent 后能看到 infinite-canvas 工具。
 - 本地 Agent Codex / Claude 切换（Claude 通过 Claude Agent SDK 运行；首次使用前需在终端运行 `claude` 并执行 `/login`，或配置 `ANTHROPIC_API_KEY`）：

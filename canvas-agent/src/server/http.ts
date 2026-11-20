@@ -247,7 +247,7 @@ export function startHttpServer() {
     }));
     app.get("/agent/:runtime/threads", route(async (req, res) => {
         const workspace = ensureSiteWorkspace(config);
-        const result = await runtimeOf(req).listThreads(emit, { cwd: workspace.workspacePath, searchTerm: String(req.query.searchTerm || "") });
+        const result = await runtimeOf(req).listThreads(emit, { cwd: workspace.workspacePath, searchTerm: String(req.query.searchTerm || ""), cursor: String(req.query.cursor || "") || undefined });
         res.json({ ok: true, workspace, conversation: session.conversationStateSnapshot, ...result });
     }));
     app.post("/agent/:runtime/threads/new", codexMutation(async (req, res) => {

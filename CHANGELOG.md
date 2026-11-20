@@ -2,6 +2,7 @@
 
 ## Unreleased
 
++ [优化] 本地 Agent 断线后自动重连（1/2/4/8/16 秒后每 30 秒重试，可立即重连）；历史对话支持服务端搜索与滚动分页。
 + [优化] 本地 Agent：Claude 对话准备阶段真实检测画布 MCP 是否启动成功；模型与推理强度按 Codex / Claude 分别记忆，不支持推理强度的模型也可选择；Claude 只加载技能页启用的 Skill；前端改用错误码判断忙碌与审批失效。
 + [新增] Canvas Agent 新增 `install-mcp` 命令，一键为 Claude Code、Codex、Antigravity 注册 Infinite Canvas MCP（固定 node 绝对路径启动），并自动自检工具列表。
 + [新增] 本地 Agent 支持在 Codex 与 Claude 之间切换：Claude 通过 Claude Agent SDK 接入，与 Codex 同样支持流式对话、会话历史与恢复、模型与推理强度选择、Skill 管理与提炼、工具权限审批和中断。

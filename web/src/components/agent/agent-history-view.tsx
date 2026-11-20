@@ -1,6 +1,6 @@
-import { useState } from "react";
-import { Button, Checkbox } from "antd";
-import { FolderOpen, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { useEffect, useState, type UIEvent } from "react";
+import { Button, Checkbox, Input } from "antd";
+import { FolderOpen, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -9,6 +9,10 @@ import type { AgentThreadSummary } from "@/stores/use-agent-store";
 export function AgentHistoryView({
     theme,
     threads,
+    hasMore,
+    search,
+    onSearch,
+    onLoadMore,
     activeThreadId,
     workspacePath,
     loading,
@@ -21,6 +25,10 @@ export function AgentHistoryView({
 }: {
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
     threads: AgentThreadSummary[];
+    hasMore: boolean;
+    search: string;
+    onSearch: (term: string) => void;
+    onLoadMore: () => void;
     activeThreadId: string;
     workspacePath: string;
     loading: boolean;
@@ -32,7 +40,13 @@ export function AgentHistoryView({
     onDeleteThreads: (threadIds: string[]) => void;
 }) {
     const { i18n, t } = useTranslation();
+    const [draft, setDraft] = useState(search);
     const [selectedIds, setSelectedIds] = useState(() => new Set<string>());
+    useEffect(() => setDraft(search), [search]);
+    const onScroll = (event: UIEvent<HTMLDivElement>) => {
+        const element = event.currentTarget;
+        if (hasMore && !loading && element.scrollHeight - element.scrollTop - element.clientHeight < 80) onLoadMore();
+    };
     const selectedThreads = threads.filter((thread) => selectedIds.has(thread.id));
     const allSelected = Boolean(threads.length) && selectedThreads.length === threads.length;
     const canResume = connected && !loading && !busy;
@@ -44,7 +58,7 @@ export function AgentHistoryView({
         });
     };
     return (
-        <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto p-3">
+        <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto p-3" onScroll={onScroll}>
             <div className="space-y-3">
                 <div className="flex min-w-0 items-center gap-2 text-xs" style={{ color: theme.node.muted }}>
                     <FolderOpen className="size-3.5 shrink-0" />
@@ -53,6 +67,19 @@ export function AgentHistoryView({
                         {workspacePath || t("agent.history.defaultWorkspace")}
                     </span>
                 </div>
+                <Input
+                    size="small"
+                    allowClear
+                    disabled={!connected}
+                    value={draft}
+                    placeholder={t("agent.history.searchPlaceholder")}
+                    prefix={<Search className="size-3.5" />}
+                    onChange={(event) => {
+                        setDraft(event.target.value);
+                        if (!event.target.value) onSearch("");
+                    }}
+                    onPressEnter={() => onSearch(draft)}
+                />
                 <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2 text-sm" style={{ color: theme.node.muted }}>
                         {threads.length ? <Checkbox checked={allSelected} indeterminate={Boolean(selectedThreads.length) && !allSelected} disabled={loading || busy} onChange={() => setSelectedIds(allSelected ? new Set() : new Set(threads.map((thread) => thread.id)))} /> : null}
@@ -117,9 +144,14 @@ export function AgentHistoryView({
                             </div>
                         );
                     })}
+                    {hasMore ? (
+                        <div className="py-2 text-center text-xs" style={{ color: theme.node.muted }}>
+                            {t("agent.history.loadingMore")}
+                        </div>
+                    ) : null}
                     {!threads.length ? (
                         <div className="px-3 py-8 text-center text-sm" style={{ color: theme.node.muted }}>
-                            {t(connected ? "agent.history.noWorkspaceThreads" : "agent.history.connectHint")}
+                            {t(!connected ? "agent.history.connectHint" : search ? "agent.history.noResults" : "agent.history.noWorkspaceThreads")}
                         </div>
                     ) : null}
                 </div>

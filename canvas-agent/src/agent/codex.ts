@@ -103,7 +103,7 @@ export async function resumeCodexThread(emit: AgentEmit, threadId: string, cwd?:
 }
 
 /** 查询当前工作空间中的 Codex 线程。 */
-export async function listCodexThreads(emit: AgentEmit, options: { cwd: string; searchTerm?: string; limit?: number }) {
+export async function listCodexThreads(emit: AgentEmit, options: { cwd: string; searchTerm?: string; limit?: number; cursor?: string }) {
     const app = await getCodexApp(emit);
     const result = await app.listThreads({
         limit: options.limit || 40,
@@ -112,6 +112,7 @@ export async function listCodexThreads(emit: AgentEmit, options: { cwd: string; 
         sourceKinds: ["cli", "vscode", "appServer", "exec"],
         cwd: options.cwd,
         ...(options.searchTerm ? { searchTerm: options.searchTerm } : {}),
+        ...(options.cursor ? { cursor: options.cursor } : {}),
     });
     const data = Array.isArray(field(result, "data")) ? (field(result, "data") as unknown[]).map(summarizeCodexThread).filter((thread) => threadInWorkspace(thread, options.cwd)) : [];
     return { data, nextCursor: field(result, "nextCursor") || null, backwardsCursor: field(result, "backwardsCursor") || null };
