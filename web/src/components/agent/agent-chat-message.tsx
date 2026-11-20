@@ -276,8 +276,7 @@ export function AgentToolCard({ title, text, detail, theme }: { title: string; t
 
 function AgentReasoningSummary({ text, detail, theme }: { text: string; detail?: unknown; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
     const { t } = useTranslation();
-    const status = String(objectField(detail, "status") || "");
-    const running = ["inProgress", "in_progress", "running", "started", "pending"].includes(status);
+    const running = RUNNING_STATUSES.has(detailStatus(detail));
     return (
         <details className="group min-w-0 text-left">
             <summary className="cursor-pointer list-none py-1 text-sm" style={{ color: theme.node.muted }}>
@@ -362,9 +361,9 @@ function AgentCommandEntry({ item, index, theme }: { item: AgentCommandItem; ind
 }
 
 function commandViewState(detail: unknown) {
-    const status = String(objectField(detail, "status") || "").toLowerCase();
+    const status = detailStatus(detail);
     return {
-        running: ["inprogress", "in_progress", "running", "started", "pending"].includes(status),
+        running: RUNNING_STATUSES.has(status),
         failed: ["failed", "error"].includes(status),
     };
 }
@@ -520,15 +519,26 @@ function AgentMessageAttachments({ attachments, alignRight }: { attachments: Age
 }
 
 function toolCardState(title: string, text: string, detail?: unknown) {
+    const status = detailStatus(detail);
+    const noEffect = { label: tr("noEffect"), color: "#d97706", icon: <CircleAlert className="size-4" />, isError: false };
+    const canceled = { label: tr("canceled"), color: "#dc2626", icon: <XCircle className="size-4" />, isError: true };
+    const failed = { label: tr("failed"), color: "#dc2626", icon: <XCircle className="size-4" />, isError: true };
+    const running = { label: tr("running"), color: "#d97706", icon: <LoaderCircle className="size-4 animate-spin" />, isError: false };
+    const completed = { label: tr("completed"), color: "#16a34a", icon: <CheckCircle2 className="size-4" />, isError: false };
+    const recorded = { label: tr("recorded"), color: "#2563eb", icon: <Wrench className="size-4" />, isError: false };
+    if (status === "noop") return noEffect;
+    if (["declined", "rejected", "cancelled", "canceled"].includes(status)) return canceled;
+    if (["failed", "error"].includes(status)) return failed;
+    if (RUNNING_STATUSES.has(status)) return running;
+    if (["completed", "succeeded", "success"].includes(status)) return completed;
+    if (status) return recorded;
     const raw = `${title} ${text} ${normalizeText(objectField(detail, "error"))}`;
     const lower = raw.toLowerCase();
-    const status = String(objectField(detail, "status") || "").toLowerCase();
-    if (status === "noop" || /未生效|无需|没有找到|没有.*可|已存在/.test(raw)) return { label: tr("noEffect"), color: "#d97706", icon: <CircleAlert className="size-4" />, isError: false };
-    if (["declined", "rejected", "cancelled", "canceled"].includes(status) || /拒绝|取消/.test(raw)) return { label: tr("canceled"), color: "#dc2626", icon: <XCircle className="size-4" />, isError: true };
-    if (["failed", "error"].includes(status) || /失败|错误/.test(raw) || lower.includes("failed") || lower.includes("error")) return { label: tr("failed"), color: "#dc2626", icon: <XCircle className="size-4" />, isError: true };
-    if (["inprogress", "in_progress", "running", "started", "pending"].includes(status)) return { label: tr("running"), color: "#d97706", icon: <LoaderCircle className="size-4 animate-spin" />, isError: false };
-    if (["completed", "succeeded", "success"].includes(status) || /完成|成功/.test(raw)) return { label: tr("completed"), color: "#16a34a", icon: <CheckCircle2 className="size-4" />, isError: false };
-    return { label: tr("recorded"), color: "#2563eb", icon: <Wrench className="size-4" />, isError: false };
+    if (/未生效|无需|没有找到|没有.*可|已存在/.test(raw)) return noEffect;
+    if (/拒绝|取消/.test(raw)) return canceled;
+    if (/失败|错误/.test(raw) || lower.includes("failed") || lower.includes("error")) return failed;
+    if (/完成|成功/.test(raw)) return completed;
+    return recorded;
 }
 
 function toolIcon(kind: string | undefined, fallback: ReactNode) {
@@ -598,6 +608,12 @@ function normalizeText(value: unknown) {
 
 function objectField(value: unknown, key: string) {
     return value && typeof value === "object" ? (value as Record<string, unknown>)[key] : undefined;
+}
+
+const RUNNING_STATUSES = new Set(["inprogress", "in_progress", "running", "started", "pending"]);
+
+function detailStatus(detail: unknown) {
+    return String(objectField(detail, "status") || "").toLowerCase();
 }
 
 function tr(key: string, options?: Record<string, unknown>) {

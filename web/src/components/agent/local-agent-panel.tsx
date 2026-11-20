@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { App, Button, Segmented, Tooltip } from "antd";
-import dayjs from "dayjs";
 import { Bot, History, MessageSquare, PanelRightClose, PlugZap, Plus, Sparkles, Terminal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -9,65 +8,43 @@ import i18n from "@/i18n";
 import { readAgentUrlBootstrap } from "@/lib/agent/agent-url-bootstrap";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { upscaleDataUrl } from "@/lib/canvas/canvas-image-data";
-import { imageMetadata } from "@/lib/canvas/canvas-node-factory";
-import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
 import { resolveCanvasReferenceImages } from "@/lib/canvas/canvas-resource-references";
 import { readImageMeta } from "@/lib/image-utils";
 import { randomId } from "@/lib/utils";
-import { uploadImage } from "@/services/image-storage";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useAgentSkillStore } from "@/stores/use-agent-skill-store";
 import { useShallow } from "zustand/react/shallow";
 import { useAgentStore, type AgentAttachment, type AgentBootstrapStatus, type AgentCanvasContext, type AgentCanvasReference, type AgentChatItem, type AgentConversationState, type AgentModel, type AgentPendingApproval, type AgentPendingToolCall, type AgentPermissionMode, type AgentReasoningEffort, type AgentRuntimeName, type AgentThreadSummary } from "@/stores/use-agent-store";
-import { type CanvasAgentOp, type CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
-import { isSiteTool, runSiteTool } from "@/lib/agent/agent-site-tools";
 import { isAgentThreadEvent as isCurrentThreadToolCall } from "@/lib/agent/agent-event-formatters";
-import { acknowledgeCodexHistory, activateAgentClient, AgentApiError, agentPath, discoverAgentConfig, fetchAgentJson, interruptCodexTurn, postCodexApproval, postState, postToolResult } from "@/services/api/canvas-agent";
+import { acknowledgeCodexHistory, activateAgentClient, AgentApiError, agentPath, discoverAgentConfig, fetchAgentJson, interruptCodexTurn, postCodexApproval, postState } from "@/services/api/canvas-agent";
 import { AgentChatTimeline, AgentTaskProgress, AgentUsageBar } from "./agent-chat";
 import { AgentChatComposer } from "./agent-chat-composer";
 import { AgentConnectView } from "./agent-connect-view";
 import {
-    activityDeltaFallback,
-    activityDetail,
-    activityKind,
-    activityPlaceholder,
     agentAttachmentToChatAttachment,
-    agentErrorView,
-    agentTitle,
     attachmentPayloadBytes,
     compactText,
-    eventUsage,
-    formatAgentActivity,
-    formatAgentEvent,
-    formatAgentEventLog,
-    formatAgentPlan,
     formatBytes,
     bindPendingTurnMessages,
-    isCanvasWriteTool,
     isConnectionErrorMessage,
     isCurrentThreadEvent,
-    isReasoningSummary,
     mergeAgentMessages,
-    mergeStreamText,
     normalizeHistoryMessages,
-    normalizeText,
     parseEventData,
     promptWithAttachments,
     promptWithCanvasReferences,
-    reasoningActivityText,
     registerLiveAgentTurn,
     scopeChatItem,
-    stringText,
-    toolName,
-    turnPlanStatus,
     upsertAgentMessage,
-    type AgentEventItem,
     type AgentEventPayload,
 } from "./agent-event-formatters";
 import { AgentHistoryView } from "./agent-history-view";
 import { AgentLogView } from "./agent-log-view";
 import { AgentPanelTabs } from "./agent-panel-tabs";
 import { AgentSkillsView } from "./agent-skills-view";
+import { createId, readDataUrl, rt } from "./agent-panel-utils";
+import { useAgentEvents } from "./use-agent-events";
+import { useAgentToolCalls } from "./use-agent-tool-calls";
 
 const MAX_ATTACHMENTS = 6;
 const MAX_ATTACHMENT_PAYLOAD_BYTES = 28 * 1024 * 1024;
@@ -78,7 +55,6 @@ const AGENT_PROTOCOL_VERSION = 7;
 const HISTORY_RETRY_DELAYS_MS = [0, 150, 350, 700, 1200];
 const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000, 16000, 30000];
 const AGENT_REASONING_EFFORTS = new Set<AgentReasoningEffort>(["minimal", "low", "medium", "high", "xhigh", "max", "ultra"]);
-const rt = (key: string, options?: Record<string, unknown>) => i18n.t(`agent.runtime.${key}`, options);
 
 /** 切换本地运行时，并让界面文案中的 {{agent}} 跟随当前运行时。 */
 function syncRuntime(next: AgentRuntimeName) {
@@ -201,8 +177,6 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
     const conversationReady = conversation.status === "ready" || conversation.status === "warning";
     const conversationBusy = conversation.status === "preparing" || conversation.status === "running";
     const closePanel = useAgentStore((state) => state.closePanel);
-    const pushMessage = useAgentStore((state) => state.addMessage);
-    const pushEventLog = useAgentStore((state) => state.addEventLog);
     const clearEventLogs = useAgentStore((state) => state.clearEventLogs);
     const loadSkills = useAgentSkillStore((state) => state.loadSkills);
     const clearSkillSelection = useAgentSkillStore((state) => state.clearSelection);
@@ -901,81 +875,6 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
         setAgentState({ attachments: attachments.filter((item) => item.id !== id) });
     };
 
-    const handleToolCall = async (endpoint: string, token: string, payload: AgentPendingToolCall) => {
-        if (confirmToolsRef.current && isCanvasWriteTool(payload.name)) {
-            if (pendingToolRef.current) {
-                await postToolResult(endpoint, token, clientIdRef.current, { requestId: payload.requestId, error: rt("pendingCanvasTool") });
-                return;
-            }
-            pendingToolRef.current = payload;
-            setAgentState({ pendingTool: payload });
-            addEventLog(rt("awaitingConfirmation"), payload, payload);
-            return;
-        }
-        await runToolCall(endpoint, token, payload);
-    };
-
-    const runToolCall = async (endpoint: string, token: string, payload: AgentPendingToolCall) => {
-        if (isSiteTool(payload.name)) {
-            try {
-                addEventLog(toolName(payload.name), payload, payload);
-                const result = await runSiteTool(payload.name, payload.input || {}, navigate, { canvasSnapshot: canvasContextRef.current?.snapshot || null });
-                await postToolResult(endpoint, token, clientIdRef.current, { requestId: payload.requestId, result });
-                addEventLog(rt("toolCompleted", { tool: toolName(payload.name) }), result, result);
-            } catch (error) {
-                const message = error instanceof Error ? error.message : rt("toolExecutionFailed");
-                await postToolResult(endpoint, token, clientIdRef.current, { requestId: payload.requestId, error: message });
-            }
-            return;
-        }
-        try {
-            const input: { ops?: CanvasAgentOp[]; path?: string } = payload.input || {};
-            addEventLog(toolName(payload.name), payload, payload);
-            let result: unknown;
-            let appliedOps = input.ops || [];
-            if (payload.name === "site_navigate") {
-                const path = input.path || "/";
-                navigate(path);
-                result = { ok: true, path };
-            } else if (payload.name === "canvas_apply_ops") {
-                const context = canvasContextRef.current;
-                if (!context) throw new Error(rt("openCanvasFirst"));
-                result = context.applyOps(appliedOps);
-                void postState(endpoint, token, clientIdRef.current, result as CanvasAgentSnapshot);
-            } else if (payload.name === "canvas_create_attachment_nodes") {
-                const context = canvasContextRef.current;
-                if (!context) throw new Error(rt("openCanvasFirst"));
-                appliedOps = await attachmentNodeOps(endpoint, token, clientIdRef.current, payload.input?.nodes);
-                result = context.applyOps(appliedOps);
-                await postState(endpoint, token, clientIdRef.current, result as CanvasAgentSnapshot);
-            } else {
-                const snapshot = canvasContextRef.current?.snapshot;
-                if (!snapshot) throw new Error(rt("openCanvasFirst"));
-                result = snapshot;
-            }
-            await postToolResult(endpoint, token, clientIdRef.current, { requestId: payload.requestId, result });
-            addEventLog(rt("toolCompleted", { tool: toolName(payload.name) }), result, result);
-        } catch (error) {
-            const message = error instanceof Error ? error.message : rt("canvasOperationFailed");
-            await postToolResult(endpoint, token, clientIdRef.current, { requestId: payload.requestId, error: message });
-        }
-    };
-
-    const rejectPendingTool = async () => {
-        if (!pendingTool) return;
-        await postToolResult(endpoint, token, clientIdRef.current, { requestId: pendingTool.requestId, error: rt("canvasToolCanceled") });
-        pendingToolRef.current = null;
-        setAgentState({ pendingTool: null });
-    };
-
-    const approvePendingTool = async () => {
-        if (!pendingTool) return;
-        const tool = pendingTool;
-        pendingToolRef.current = null;
-        setAgentState({ pendingTool: null });
-        await runToolCall(endpoint, token, tool);
-    };
-
     const decideApproval = async (approval: AgentPendingApproval, decision: "accept" | "acceptForSession" | "decline") => {
         const current = useAgentStore.getState();
         const pending = current.pendingApprovals.find((item) => item.requestId === approval.requestId);
@@ -1217,227 +1116,8 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
         });
     };
 
-    const addMessage = (item: Omit<AgentChatItem, "id"> & { id?: string }) => {
-        const text = normalizeText(item.text);
-        if (!text && !item.attachments?.length) return;
-        const current = useAgentStore.getState();
-        const itemId = item.itemId || item.id || createId();
-        const next = scopeChatItem({ ...item, id: item.id || itemId, itemId, text } as AgentChatItem, item.threadId ?? current.activeThreadId, item.turnId ?? current.activeTurnId);
-        setAgentState({ messages: upsertAgentMessage(current.messages, next) });
-    };
-
-    const addEventLog = (title: string, text: unknown, raw?: unknown) => {
-        const value = normalizeText(text) || title;
-        const last = useAgentStore.getState().eventLogs.at(-1);
-        if (last?.title === title && last.text === value) return;
-        pushEventLog({ id: `${Date.now()}-${Math.random()}`, time: dayjs().format("YYYY-MM-DD HH:mm:ss"), title, text: value, raw });
-    };
-
-    const upsertActivityMessage = (item: AgentChatItem) => {
-        setAgentState({ messages: upsertAgentMessage(useAgentStore.getState().messages, item) });
-    };
-
-    const appendActivityDelta = (event: AgentEventPayload) => {
-        const item = event.item;
-        if (!item?.id) return;
-        const text = stringText(item.text) || stringText(item.delta);
-        const isDelta = Boolean(stringText(item.delta));
-        if (!text) return;
-        if (item.type === "reasoning") {
-            const scoped = scopeEventChatItem(event, activityDeltaFallback(item, text), "synthetic:reasoning");
-            const current = useAgentStore.getState().messages.find((message) => message.id === scoped.id);
-            const activityItems = { ...(current?.activityItems || {}) };
-            const previous = activityItems[item.id] || "";
-            activityItems[item.id] = isDelta ? `${previous === activityPlaceholder("reasoning") ? "" : previous}${text}` : text;
-            upsertActivityMessage({ ...scoped, title: i18n.t("agent.events.reasoning"), text: reasoningActivityText(activityItems), activityItems, detail: activityDetail(current?.detail || scoped.detail, "reasoning", "inProgress") });
-            return;
-        }
-        const scoped = scopeEventChatItem(event, activityDeltaFallback(item, text), item.id);
-        const currentMessages = useAgentStore.getState().messages;
-        const index = currentMessages.findIndex((message) => message.id === scoped.id);
-        if (index < 0) {
-            if (!text.trim()) return;
-            upsertActivityMessage(scoped);
-            return;
-        }
-        const current = currentMessages[index];
-        if (item.type === "command_execution") {
-            const detail = activityDetail(current.detail, "command", "inProgress");
-            detail.output = isDelta ? `${stringText(detail.output)}${text}` : text;
-            setAgentState({ messages: currentMessages.map((message, itemIndex) => itemIndex === index ? { ...message, detail } : message) });
-            return;
-        }
-        const placeholder = activityPlaceholder(item.type);
-        if (!text.trim() && current.text === placeholder) return;
-        const nextText = isDelta ? `${current.text === placeholder ? "" : current.text}${text}` : mergeStreamText(current.text, text);
-        setAgentState({ messages: currentMessages.map((message, itemIndex) => itemIndex === index ? { ...message, text: nextText, detail: { ...activityDetail(message.detail, activityKind(item.type), "inProgress") } } : message) });
-    };
-
-    const upsertEventActivity = (event: AgentEventPayload, item: Omit<AgentChatItem, "id">) => {
-        const itemId = event.item?.id;
-        if (!itemId) return;
-        if (event.item?.type === "reasoning") {
-            const scoped = scopeEventChatItem(event, { ...item, id: "synthetic:reasoning" }, "synthetic:reasoning");
-            const current = useAgentStore.getState().messages.find((message) => message.id === scoped.id);
-            const activityItems = { ...(current?.activityItems || {}) };
-            const previous = activityItems[itemId] || "";
-            const incoming = normalizeText(item.text);
-            activityItems[itemId] = incoming === "已完成分析" && previous && previous !== activityPlaceholder("reasoning") ? previous : incoming;
-            upsertActivityMessage({ ...scoped, title: i18n.t("agent.events.reasoning"), text: reasoningActivityText(activityItems, incoming), activityItems });
-            return;
-        }
-        upsertActivityMessage(scopeEventChatItem(event, { ...item, id: itemId }, itemId));
-    };
-
-    const finishEmptyReasoningActivity = (event: AgentEventPayload) => {
-        const itemId = event.item?.id;
-        if (!itemId) return;
-        const scopedId = scopeEventChatItem(event, { id: "synthetic:reasoning", role: "tool", text: "" }, "synthetic:reasoning").id;
-        const currentMessages = useAgentStore.getState().messages;
-        const index = currentMessages.findIndex((message) => message.id === scopedId);
-        if (index < 0) return;
-        const current = currentMessages[index];
-        const activityItems = { ...(current.activityItems || {}) };
-        delete activityItems[itemId];
-        if (!Object.values(activityItems).some(isReasoningSummary)) {
-            setAgentState({ messages: currentMessages.filter((_, itemIndex) => itemIndex !== index) });
-            return;
-        }
-        setAgentState({ messages: currentMessages.map((message, itemIndex) => itemIndex === index ? { ...message, text: reasoningActivityText(activityItems), activityItems, detail: activityDetail(message.detail, "reasoning", "completed") } : message) });
-    };
-
-    const finishPlanActivity = (event: AgentEventPayload) => {
-        const id = scopeEventChatItem(event, { id: "synthetic:plan", role: "tool", text: "" }, "synthetic:plan").id;
-        const currentMessages = useAgentStore.getState().messages;
-        const index = currentMessages.findIndex((message) => message.id === id);
-        if (index < 0) return;
-        const current = currentMessages[index];
-        const detail = activityDetail(current.detail, "todo", turnPlanStatus(current.detail, event.status));
-        setAgentState({ messages: currentMessages.map((message, itemIndex) => itemIndex === index ? { ...message, detail } : message) });
-    };
-
-    const showAgentError = (value: unknown, event?: AgentEventPayload, log = true) => {
-        const error = agentErrorView(value);
-        const item = event
-            ? scopeEventChatItem(event, { id: "synthetic:error", role: "error", title: error.title, text: error.text }, "synthetic:error")
-            : scopeChatItem({ id: createId(), role: "error", title: error.title, text: error.text }, useAgentStore.getState().activeThreadId, useAgentStore.getState().activeTurnId);
-        const state = useAgentStore.getState();
-        const current = state.messages.find((message) => message.id === item.id);
-        if (current && !normalizeText(value)) return;
-        upsertActivityMessage(item);
-        setAgentState({ activity: rt("processingFailed"), pendingApprovals: [] });
-        if (log) addEventLog(rt("processingFailed"), error.text, value);
-    };
-
-    const handleAgentEvent = async (event: AgentEventPayload) => {
-        if (event.type === "usage.updated") setAgentState({ tokenUsage: eventUsage(event) });
-        const log = event.replayed ? null : formatAgentEventLog(event);
-        const activity = formatAgentActivity(event);
-        if (log) addEventLog(log.title, log.text);
-        if (event.type === "turn.started" && (event.turnId || event.turn_id)) {
-            const scope = eventScope(event);
-            const current = useAgentStore.getState();
-            if (!scope.threadId || !scope.turnId) return;
-            liveTurnKeysRef.current.add(`${scope.threadId}\0${scope.turnId}`);
-            setAgentState({ activeTurnId: scope.turnId, bootstrapStatus: null, mcpStartupStatuses: {}, messages: bindPendingTurnMessages(current.messages, scope.threadId, scope.turnId) });
-        }
-        if (event.type === "item.updated" && event.item?.type === "agent_message" && event.item.id) {
-            const delta = stringText(event.item.delta);
-            appendStreamText(event, delta || stringText(event.item.text), Boolean(delta));
-            return;
-        }
-        if (event.type === "item.updated" && event.item) {
-            appendActivityDelta(event);
-            return;
-        }
-        if (event.type === "plan.updated" && event.turn_id) {
-            const plan = formatAgentPlan(event);
-            if (plan) upsertActivityMessage(scopeEventChatItem(event, { ...plan, id: "synthetic:plan" }, "synthetic:plan"));
-            return;
-        }
-        if (event.type === "item.completed" && event.item?.type === "error") {
-            showAgentError(event.item.message, event, !event.replayed);
-            return;
-        }
-        if (event.type === "item.completed" && event.item?.type === "agent_message" && event.item.id) {
-            const scoped = scopeEventChatItem(event, { id: event.item.id, role: "assistant", title: agentTitle(event.agent), text: stringText(event.item.text) }, event.item.id);
-            const currentMessages = useAgentStore.getState().messages;
-            const index = currentMessages.findIndex((message) => message.id === scoped.id);
-            if (index >= 0) {
-                const text = stringText(event.item.text);
-                setAgentState({ messages: currentMessages.map((message, itemIndex) => itemIndex === index ? { ...message, text: text || message.text, streamId: undefined } : message) });
-                return;
-            }
-            addMessage(scoped);
-            return;
-        }
-        if (event.type === "item.completed" && event.item?.type === "reasoning" && !activity) {
-            finishEmptyReasoningActivity(event);
-            return;
-        }
-        if (event.type === "item.completed" && !activity && event.item?.id && event.item.type === "plan") {
-            const id = scopeEventChatItem(event, { id: event.item.id, role: "tool", text: "" }, event.item.id).id;
-            setAgentState({ messages: useAgentStore.getState().messages.filter((item) => item.id !== id) });
-            return;
-        }
-        if (!event.replayed && event.type === "item.completed" && event.item?.type === "image_generation" && event.item.id && event.sourceClientId === clientIdRef.current) {
-            const generated = await importGeneratedImages(endpoint, token, event.item);
-            if (generated.length) {
-                const context = canvasContextRef.current;
-                if (context) {
-                    const right = Math.max(0, ...context.snapshot.nodes.map((node) => node.position.x + node.width)) + 80;
-                    const ops = generated.map<CanvasAgentOp>((image, index) => {
-                        const size = fitNodeSize(image.upload.width, image.upload.height);
-                        return {
-                            type: "add_node",
-                            id: `image-${createId()}`,
-                            nodeType: "image",
-                            title: image.name,
-                            position: { x: right + index * 40, y: index * 40 },
-                            ...size,
-                            metadata: imageMetadata(image.upload),
-                        };
-                    });
-                    const result = context.applyOps(ops);
-                    void postState(endpoint, token, clientIdRef.current, result);
-                }
-                addEventLog(rt("importGeneratedImages"), rt(context ? "addedToSourceCanvas" : "imageGenerated"));
-            }
-        }
-        if (activity && event.item?.id) {
-            upsertEventActivity(event, activity);
-            return;
-        }
-        if (event.type === "turn.completed") {
-            const scope = eventScope(event);
-            if (scope.turnId) {
-                finishPlanActivity(event);
-                liveTurnKeysRef.current.add(`${scope.threadId}\0${scope.turnId}`);
-            }
-            const current = useAgentStore.getState();
-            setAgentState({
-                activeTurnId: current.activeTurnId === scope.turnId ? "" : current.activeTurnId,
-                messages: current.messages.map((message) => message.threadId === scope.threadId && message.turnId === scope.turnId && message.streamId ? { ...message, streamId: undefined } : message),
-            });
-            if (event.status === "failed") showAgentError(event.error?.message, event, !event.replayed);
-        }
-        const item = formatAgentEvent(event);
-        if (item) addMessage(scopeEventChatItem(event, { ...item, id: event.item?.id || createId() }, event.item?.id || createId()));
-    };
-
-    const appendStreamText = (event: AgentEventPayload, text: string, isDelta = false) => {
-        if (!text) return;
-        const itemId = event.item?.id;
-        if (!itemId) return;
-        const scoped = scopeEventChatItem(event, { id: itemId, role: "assistant", title: agentTitle(event.agent), text, streamId: itemId }, itemId);
-        const currentMessages = useAgentStore.getState().messages;
-        const index = currentMessages.findIndex((message) => message.id === scoped.id);
-        if (index < 0) {
-            pushMessage(scoped);
-            return;
-        }
-        setAgentState({ messages: currentMessages.map((message, itemIndex) => itemIndex === index ? { ...message, text: isDelta ? `${message.text}${text}` : mergeStreamText(message.text, text) } : message) });
-    };
+    const { addMessage, addEventLog, showAgentError, handleAgentEvent } = useAgentEvents({ endpoint, clientIdRef, canvasContextRef, liveTurnKeysRef });
+    const { handleToolCall, rejectPendingTool, approvePendingTool } = useAgentToolCalls({ endpoint, clientIdRef, canvasContextRef, pendingToolRef, confirmToolsRef, navigate, addEventLog });
 
     const connectionStatus = t(connectError ? "agent.status.failed" : connected ? "agent.status.connected" : enabled ? "agent.status.connecting" : "agent.status.disconnected");
     const connectionStatusColor = connectError ? "#dc2626" : connected ? "#16a34a" : enabled ? "#d97706" : theme.node.muted;
@@ -1644,56 +1324,9 @@ function saveAgentClientId(clientId: string) {
     }
 }
 
-function eventScope(event: AgentEventPayload) {
-    return {
-        threadId: event.threadId || event.thread_id || "",
-        turnId: event.turnId || event.turn_id || "",
-    };
-}
-
-function scopeEventChatItem(event: AgentEventPayload, item: AgentChatItem, itemId: string) {
-    const scope = eventScope(event);
-    return scopeChatItem({ ...item, itemId }, scope.threadId, scope.turnId);
-}
-
 function approvalActivity(pendingApprovals: AgentPendingApproval[], waiting: boolean, fallback: string) {
     if (pendingApprovals.length) return rt("awaitingApproval");
     return waiting ? rt("codexRunning") : fallback;
-}
-
-async function attachmentNodeOps(endpoint: string, token: string, clientId: string, value: unknown): Promise<CanvasAgentOp[]> {
-    const nodes = Array.isArray(value) ? value : [];
-    if (!nodes.length) throw new Error(rt("noImageAttachments"));
-    return await Promise.all(
-        nodes.map(async (value) => {
-            const item = value as { id?: unknown; attachmentId?: unknown; title?: unknown; position?: unknown };
-            const id = String(item.id || "");
-            const attachmentId = String(item.attachmentId || "");
-            if (!id || !attachmentId) throw new Error(rt("invalidAttachmentNode"));
-            const res = await fetch(`${endpoint}/agent/attachments/${encodeURIComponent(attachmentId)}?token=${encodeURIComponent(token)}&clientId=${encodeURIComponent(clientId)}`);
-            if (!res.ok) {
-                const body = (await res.json().catch(() => null)) as { error?: string } | null;
-                throw new Error(body?.error || rt("attachmentReadFailed"));
-            }
-            const image = await uploadImage(await res.blob());
-            const size = fitNodeSize(image.width, image.height);
-            const position = item.position && typeof item.position === "object" ? (item.position as { x?: unknown; y?: unknown }) : {};
-            return {
-                type: "add_node" as const,
-                id,
-                nodeType: "image" as const,
-                title: String(item.title || rt("referenceImage")),
-                position: { x: Number(position.x) || 0, y: Number(position.y) || 0 },
-                width: size.width,
-                height: size.height,
-                metadata: imageMetadata(image),
-            };
-        }),
-    );
-}
-
-function createId() {
-    return randomId();
 }
 
 async function createMessageAttachmentMetadata(item: AgentAttachment) {
@@ -1705,42 +1338,6 @@ async function createMessageAttachmentMetadata(item: AgentAttachment) {
 
 function clamp(value: number, min: number, max: number) {
     return Math.min(max, Math.max(min, value));
-}
-
-async function importGeneratedImages(endpoint: string, token: string, item: AgentEventItem) {
-    const sources = Array.from(generatedImageSources(item));
-    return await Promise.all(
-        sources.map(async (source, index) => {
-            const response = source.startsWith("data:image/")
-                ? await fetch(source)
-                : await fetch(`${endpoint}/agent/local-image?token=${encodeURIComponent(token)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: source }) });
-            if (!response.ok) throw new Error(rt("generatedImageReadFailed"));
-            const blob = await response.blob();
-            const upload = await uploadImage(blob);
-            const dataUrl = await readDataUrl(blob);
-            const name = source.startsWith("/") ? source.split("/").at(-1) || rt("generatedImageName", { index: index + 1 }) : rt("generatedImageName", { index: index + 1 });
-            return { upload, name, attachment: { id: createId(), name, type: blob.type || upload.mimeType, size: blob.size, width: upload.width, height: upload.height, url: upload.url, dataUrl } };
-        }),
-    );
-}
-
-function generatedImageSources(value: unknown, result = new Set<string>()) {
-    if (typeof value === "string") {
-        if (value.startsWith("data:image/") || (/^\/.+\.(?:avif|gif|jpe?g|png|webp)$/i.test(value) && !value.includes("\n"))) result.add(value);
-        return result;
-    }
-    if (Array.isArray(value)) value.forEach((item) => generatedImageSources(item, result));
-    else if (value && typeof value === "object") Object.values(value).forEach((item) => generatedImageSources(item, result));
-    return result;
-}
-
-function readDataUrl(file: Blob) {
-    return new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result || ""));
-        reader.onerror = () => reject(reader.error || new Error(rt("imageReadFailed")));
-        reader.readAsDataURL(file);
-    });
 }
 
 function delay(ms: number) {
