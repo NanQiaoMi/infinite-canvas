@@ -9,6 +9,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import type { AgentEventLog } from "@/stores/use-agent-store";
 import { formatLogJson, formatLogText, type AgentLogContext } from "./agent-event-formatters";
 import { AgentScrollToBottom } from "./agent-scroll-to-bottom";
+import { useThemeStore } from "@/stores/use-theme-store";
 
 type LogFilter = "all" | "error" | "warning" | "info";
 type DisplayLog = AgentEventLog & { count: number; detail: string; displayText: string; level: Exclude<LogFilter, "all">; signature: string; success: boolean };
@@ -16,19 +17,18 @@ const SCROLL_BOTTOM_THRESHOLD = 48;
 
 export function AgentLogView({
     logs,
-    theme,
     context,
     onClear,
     onCopied,
     onCopyBlocked,
 }: {
     logs: AgentEventLog[];
-    theme: (typeof canvasThemes)[keyof typeof canvasThemes];
     context: AgentLogContext;
     onClear: () => void;
     onCopied: (text: string) => void;
     onCopyBlocked: (text: string) => void;
 }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
     const [mode, setMode] = useState<"text" | "json">("text");
     const [filter, setFilter] = useState<LogFilter>("all");
@@ -162,7 +162,7 @@ export function AgentLogView({
                         <div className="relative min-h-0 flex-1">
                             <div ref={listRef} tabIndex={0} aria-label={t("agent.logs.list")} className="thin-scrollbar h-full overflow-y-auto border-y focus-visible:outline-none" style={{ borderColor: theme.node.stroke }} onScroll={updateScrollState}>
                                 {visibleLogs.map((item, index) => (
-                                    <LogRow key={item.id} item={item} theme={theme} onToggle={index === visibleLogs.length - 1 ? handleLastLogToggle : undefined} />
+                                    <LogRow key={item.id} item={item} onToggle={index === visibleLogs.length - 1 ? handleLastLogToggle : undefined} />
                                 ))}
                                 {!visibleLogs.length ? (
                                     <div className="px-3 py-10 text-center text-sm" style={{ color: theme.node.muted }}>
@@ -172,7 +172,6 @@ export function AgentLogView({
                             </div>
                             {showScrollToBottom ? (
                                 <AgentScrollToBottom
-                                    theme={theme}
                                     title={newLogCount ? t("agent.logs.new", { count: newLogCount }) : t("agent.logs.latest")}
                                     ariaLabel={newLogCount ? t("agent.logs.newLabel", { count: newLogCount }) : t("agent.logs.latest")}
                                     className="!bottom-52"
@@ -221,7 +220,8 @@ function LogActions({ logs, lastError, context, onClear, onCopy }: { logs: Agent
     );
 }
 
-function LogRow({ item, theme, onToggle }: { item: DisplayLog; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onToggle?: (open: boolean) => void }) {
+function LogRow({ item, onToggle }: { item: DisplayLog; onToggle?: (open: boolean) => void }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
     const tone = item.level === "error" ? "text-red-600 dark:text-red-400" : item.level === "warning" ? "text-amber-600 dark:text-amber-400" : item.success ? "text-emerald-600 dark:text-emerald-400" : "";
     const Icon = item.level === "error" ? CircleAlert : item.level === "warning" ? TriangleAlert : item.success ? CheckCircle2 : CircleDot;

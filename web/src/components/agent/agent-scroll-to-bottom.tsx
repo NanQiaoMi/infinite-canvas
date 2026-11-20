@@ -2,20 +2,20 @@ import { Button, Tooltip } from "antd";
 import { ChevronDown } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
+import { useThemeStore } from "@/stores/use-theme-store";
 
 export function AgentScrollToBottom({
-    theme,
     title,
     ariaLabel = title,
     className = "",
     onClick,
 }: {
-    theme: (typeof canvasThemes)[keyof typeof canvasThemes];
     title: string;
     ariaLabel?: string;
     className?: string;
     onClick: () => void;
 }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
     return (
         <Tooltip title={title} placement="top">
             <Button

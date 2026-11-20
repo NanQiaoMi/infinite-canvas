@@ -11,6 +11,7 @@ import { useAgentStore, type AgentCanvasReference, type AgentPendingApproval, ty
 import { resolveAgentMessageAssetUrl, revealAgentLocalFile } from "@/services/api/canvas-agent";
 import { AgentCanvasReferencePreview, canvasReferenceIcon, canvasReferenceKindLabel } from "./agent-canvas-reference-preview";
 import { agentInlineTokenClass, agentInlineTokenIconClass, agentInlineTokenMediaClass, agentReferenceMarker, parseAgentInlineTokens } from "./agent-chat-inline-tokens";
+import { useThemeStore } from "@/stores/use-theme-store";
 
 const streamdownProps = () => ({
     className: "agent-streamdown",
@@ -102,7 +103,8 @@ export type AgentChatMessageItem = {
     streamId?: string;
 };
 
-export function AgentChatMessage({ item, theme, onRejectTool, onApproveTool }: { item: AgentChatMessageItem; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onRejectTool?: (id: string) => void; onApproveTool?: (id: string) => void }) {
+export function AgentChatMessage({ item, onRejectTool, onApproveTool }: { item: AgentChatMessageItem; onRejectTool?: (id: string) => void; onApproveTool?: (id: string) => void }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const isUser = item.role === "user";
     const isSystem = item.role === "system";
     const color = item.role === "error" ? "#dc2626" : item.role === "tool" ? "#2563eb" : theme.node.text;
@@ -117,8 +119,8 @@ export function AgentChatMessage({ item, theme, onRejectTool, onApproveTool }: {
         );
     }
     if (item.role === "tool") {
-        if (objectField(item.detail, "status") === "pending") return <AgentPendingToolCard summary={item.text} detail={item.detail} theme={theme} onReject={() => onRejectTool?.(item.id)} onApprove={() => onApproveTool?.(item.id)} />;
-        return <AgentToolCard title={item.title || tr("toolCall")} text={item.text} detail={item.detail} theme={theme} />;
+        if (objectField(item.detail, "status") === "pending") return <AgentPendingToolCard summary={item.text} detail={item.detail} onReject={() => onRejectTool?.(item.id)} onApprove={() => onApproveTool?.(item.id)} />;
+        return <AgentToolCard title={item.title || tr("toolCall")} text={item.text} detail={item.detail} />;
     }
     return (
         <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
@@ -127,7 +129,7 @@ export function AgentChatMessage({ item, theme, onRejectTool, onApproveTool }: {
                 style={{ color }}
             >
                 {isUser ? (
-                    <AgentUserMessageContent text={item.text} references={item.canvasReferences || []} skill={item.skill} theme={theme} />
+                    <AgentUserMessageContent text={item.text} references={item.canvasReferences || []} skill={item.skill} />
                 ) : (
                     <Streamdown {...streamdownProps()} animated={streamdownAnimation} isAnimating={!!item.streamId}>{item.text}</Streamdown>
                 )}
@@ -138,24 +140,26 @@ export function AgentChatMessage({ item, theme, onRejectTool, onApproveTool }: {
     );
 }
 
-function AgentUserMessageContent({ text, references, skill, theme }: { text: string; references: AgentCanvasReference[]; skill?: AgentSkillReference; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+function AgentUserMessageContent({ text, references, skill }: { text: string; references: AgentCanvasReference[]; skill?: AgentSkillReference }) {
     const tokens = parseAgentInlineTokens(text, references, skill);
     return (
         <div className="whitespace-pre-wrap break-words">
             {tokens.map((token, index) => token.type === "text"
                 ? token.value
                 : token.type === "skill"
-                    ? <AgentSkillMention key={`skill:${index}`} skill={token.skill} theme={theme} />
-                    : <AgentCanvasMention key={`${token.reference.nodeId}:${index}`} reference={token.reference} theme={theme} />)}
+                    ? <AgentSkillMention key={`skill:${index}`} skill={token.skill} />
+                    : <AgentCanvasMention key={`${token.reference.nodeId}:${index}`} reference={token.reference} />)}
         </div>
     );
 }
 
-function AgentSkillMention({ skill, theme }: { skill: AgentSkillReference; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+function AgentSkillMention({ skill }: { skill: AgentSkillReference }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
     return <span className={agentInlineTokenClass} style={{ background: theme.toolbar.panel, borderColor: theme.node.stroke, color: theme.node.text }} title={skill.path}>/{skill.displayName || skill.name}</span>;
 }
 
-function AgentCanvasMention({ reference, theme }: { reference: AgentCanvasReference; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+function AgentCanvasMention({ reference }: { reference: AgentCanvasReference }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const node = useAgentStore((state) => state.canvasContext?.snapshot.nodes.find((item) => item.id === reference.nodeId));
     const endpoint = useAgentStore((state) => state.url);
     const token = useAgentStore((state) => state.token);
@@ -167,7 +171,7 @@ function AgentCanvasMention({ reference, theme }: { reference: AgentCanvasRefere
             trigger={["hover", "focus"]}
             placement="top"
             mouseEnterDelay={0.15}
-            content={<AgentCanvasReferencePreview reference={reference} previewUrl={previewUrl} previewText={previewText} theme={theme} />}
+            content={<AgentCanvasReferencePreview reference={reference} previewUrl={previewUrl} previewText={previewText} />}
         >
             <span
                 tabIndex={0}
@@ -184,7 +188,8 @@ function AgentCanvasMention({ reference, theme }: { reference: AgentCanvasRefere
     );
 }
 
-export function AgentPendingToolCard({ summary, detail, theme, onReject, onApprove }: { summary: string; detail?: unknown; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onReject?: () => void; onApprove?: () => void }) {
+export function AgentPendingToolCard({ summary, detail, onReject, onApprove }: { summary: string; detail?: unknown; onReject?: () => void; onApprove?: () => void }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
     const view = userDetail(detail);
     return (
@@ -198,7 +203,7 @@ export function AgentPendingToolCard({ summary, detail, theme, onReject, onAppro
                     </div>
                     <div className="mt-1 pl-6 text-sm leading-5" style={{ color: theme.node.muted }}>{summary}</div>
                 </summary>
-                {view ? <div className="ml-6"><AgentDetailBlock detail={view} theme={theme} /></div> : null}
+                {view ? <div className="ml-6"><AgentDetailBlock detail={view} /></div> : null}
             </details>
             {onReject || onApprove ? (
                 <div className="mt-3 flex justify-end gap-2 border-t pt-3" style={{ borderColor: theme.node.stroke }}>
@@ -214,7 +219,8 @@ export function AgentPendingToolCard({ summary, detail, theme, onReject, onAppro
     );
 }
 
-export function AgentApprovalCard({ approval, theme, onDecision }: { approval: AgentPendingApproval; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onDecision: (decision: "accept" | "acceptForSession" | "decline") => void }) {
+export function AgentApprovalCard({ approval, onDecision }: { approval: AgentPendingApproval; onDecision: (decision: "accept" | "acceptForSession" | "decline") => void }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
     const isFile = approval.method === "item/fileChange/requestApproval";
     const isNetwork = Boolean(approval.networkApprovalContext);
@@ -239,12 +245,13 @@ export function AgentApprovalCard({ approval, theme, onDecision }: { approval: A
     );
 }
 
-export function AgentToolCard({ title, text, detail, theme }: { title: string; text: string; detail?: unknown; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+export function AgentToolCard({ title, text, detail }: { title: string; text: string; detail?: unknown }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const plan = planDetail(detail);
-    if (plan) return <AgentPlanCard title={title} plan={plan} theme={theme} />;
+    if (plan) return <AgentPlanCard title={title} plan={plan} />;
     const kind = String(objectField(detail, "kind") || "");
-    if (kind === "reasoning") return <AgentReasoningSummary text={text} detail={detail} theme={theme} />;
-    if (kind === "command") return <AgentCommandGroup items={[{ id: title, text, detail }]} theme={theme} />;
+    if (kind === "reasoning") return <AgentReasoningSummary text={text} detail={detail} />;
+    if (kind === "command") return <AgentCommandGroup items={[{ id: title, text, detail }]} />;
     const state = toolCardState(title, text, detail);
     const view = userDetail(detail);
     const showText = title !== "读取画布" || text !== "已读取当前画布内容";
@@ -269,12 +276,13 @@ export function AgentToolCard({ title, text, detail, theme }: { title: string; t
     return (
         <details className={className} style={style}>
             <summary className="list-none cursor-pointer">{content}</summary>
-            <div className="ml-6"><AgentDetailBlock detail={view} theme={theme} /></div>
+            <div className="ml-6"><AgentDetailBlock detail={view} /></div>
         </details>
     );
 }
 
-function AgentReasoningSummary({ text, detail, theme }: { text: string; detail?: unknown; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+function AgentReasoningSummary({ text, detail }: { text: string; detail?: unknown }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
     const running = RUNNING_STATUSES.has(detailStatus(detail));
     return (
@@ -295,7 +303,8 @@ function AgentReasoningSummary({ text, detail, theme }: { text: string; detail?:
 
 type AgentCommandItem = Pick<AgentChatMessageItem, "id" | "text" | "detail">;
 
-export function AgentCommandGroup({ items, theme }: { items: AgentCommandItem[]; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+export function AgentCommandGroup({ items }: { items: AgentCommandItem[] }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
     const states = items.map((item) => commandViewState(item.detail));
     const running = states.some((state) => state.running);
@@ -315,24 +324,26 @@ export function AgentCommandGroup({ items, theme }: { items: AgentCommandItem[];
         <details className="group min-w-0 text-left">
             <summary className="cursor-pointer list-none py-1">{header}</summary>
             {items.length === 1
-                ? <AgentSingleCommand item={items[0]} theme={theme} />
-                : <div className="ml-6 mt-1">{items.map((item, index) => <AgentCommandEntry key={item.id} item={item} index={index} theme={theme} />)}</div>
+                ? <AgentSingleCommand item={items[0]} />
+                : <div className="ml-6 mt-1">{items.map((item, index) => <AgentCommandEntry key={item.id} item={item} index={index} />)}</div>
             }
         </details>
     );
 }
 
-function AgentSingleCommand({ item, theme }: { item: AgentCommandItem; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+function AgentSingleCommand({ item }: { item: AgentCommandItem }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const view = userDetail(item.detail);
     return (
         <div className="ml-6 pb-1">
             {item.text ? <div className="mt-1.5 whitespace-pre-wrap break-all font-mono text-[11px] leading-5" style={{ color: theme.node.text }}>{item.text}</div> : null}
-            {view ? <AgentDetailBlock detail={view} theme={theme} /> : null}
+            {view ? <AgentDetailBlock detail={view} /> : null}
         </div>
     );
 }
 
-function AgentCommandEntry({ item, index, theme }: { item: AgentCommandItem; index: number; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+function AgentCommandEntry({ item, index }: { item: AgentCommandItem; index: number }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
     const [open, setOpen] = useState(false);
     const detailId = useId();
@@ -355,7 +366,7 @@ function AgentCommandEntry({ item, index, theme }: { item: AgentCommandItem; ind
             {view
                 ? <button type="button" className="flex w-full min-w-0 items-center gap-2 py-2 text-left" aria-expanded={open} aria-controls={detailId} onClick={() => setOpen((value) => !value)}>{content}</button>
                 : <div className="flex min-w-0 items-center gap-2 py-2 text-left">{content}</div>}
-            {view && open ? <div id={detailId} className="pb-2 pl-6"><AgentDetailBlock detail={view} theme={theme} /></div> : null}
+            {view && open ? <div id={detailId} className="pb-2 pl-6"><AgentDetailBlock detail={view} /></div> : null}
         </div>
     );
 }
@@ -368,7 +379,8 @@ function commandViewState(detail: unknown) {
     };
 }
 
-function AgentPlanCard({ title, plan, theme }: { title: string; plan: PlanDetail; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+function AgentPlanCard({ title, plan }: { title: string; plan: PlanDetail }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const [open, setOpen] = useState(true);
     const completed = plan.tasks.filter((item) => item.status === "completed").length;
     const state = planCardState(plan, completed);
@@ -398,7 +410,8 @@ function AgentPlanCard({ title, plan, theme }: { title: string; plan: PlanDetail
     );
 }
 
-export function AgentWorkingMessage({ text, detail, status = "running", mcpStatuses = [], activityKey, theme }: { text: string; detail?: string; status?: "running" | "ready" | "error"; mcpStatuses?: Array<{ name: string; status: "running" | "ready" | "error"; detail: string }>; activityKey: string; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+export function AgentWorkingMessage({ text, detail, status = "running", mcpStatuses = [], activityKey }: { text: string; detail?: string; status?: "running" | "ready" | "error"; mcpStatuses?: Array<{ name: string; status: "running" | "ready" | "error"; detail: string }>; activityKey: string }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
     const [elapsed, setElapsed] = useState(0);
     useEffect(() => {
@@ -455,7 +468,8 @@ type PlanTask = { step: string; status: string };
 type PlanDetail = { status: string; tasks: PlanTask[]; explanation?: string };
 type UserDetail = { kind?: string; status?: string; rows?: Array<{ label: string; value: string }>; output?: string; files?: Array<{ path: string; action?: string }> };
 
-function AgentDetailBlock({ detail, theme }: { detail: UserDetail; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+function AgentDetailBlock({ detail }: { detail: UserDetail }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
     return (
         <div className="mt-3 space-y-2.5 border-t pt-3 text-xs" style={{ borderColor: theme.node.stroke, color: theme.node.muted }}>

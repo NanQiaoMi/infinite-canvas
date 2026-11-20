@@ -5,9 +5,9 @@ import { useTranslation } from "react-i18next";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import type { AgentThreadSummary } from "@/stores/use-agent-store";
+import { useThemeStore } from "@/stores/use-theme-store";
 
 export function AgentHistoryView({
-    theme,
     threads,
     hasMore,
     search,
@@ -23,7 +23,6 @@ export function AgentHistoryView({
     onResumeThread,
     onDeleteThreads,
 }: {
-    theme: (typeof canvasThemes)[keyof typeof canvasThemes];
     threads: AgentThreadSummary[];
     hasMore: boolean;
     search: string;
@@ -39,6 +38,7 @@ export function AgentHistoryView({
     onResumeThread: (threadId: string) => void;
     onDeleteThreads: (threadIds: string[]) => void;
 }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { i18n, t } = useTranslation();
     const [draft, setDraft] = useState(search);
     const [selectedIds, setSelectedIds] = useState(() => new Set<string>());

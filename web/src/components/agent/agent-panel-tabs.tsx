@@ -3,8 +3,10 @@ import { Tooltip } from "antd";
 import { useTranslation } from "react-i18next";
 
 import { canvasThemes } from "@/lib/canvas-theme";
+import { useThemeStore } from "@/stores/use-theme-store";
 
-export function AgentPanelTabs<T extends string>({ value, items, theme, leading, right, onChange }: { value: T; items: { value: T; label: string; icon?: ReactNode; count?: number }[]; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; leading?: ReactNode; right?: ReactNode; onChange: (value: T) => void }) {
+export function AgentPanelTabs<T extends string>({ value, items, leading, right, onChange }: { value: T; items: { value: T; label: string; icon?: ReactNode; count?: number }[]; leading?: ReactNode; right?: ReactNode; onChange: (value: T) => void }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
     return (
         <div className="@container border-b px-2" style={{ borderColor: theme.node.stroke }}>

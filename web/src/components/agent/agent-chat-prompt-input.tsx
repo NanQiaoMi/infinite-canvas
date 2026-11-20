@@ -11,20 +11,21 @@ import { useAgentSkillStore } from "@/stores/use-agent-skill-store";
 import { useAgentStore, type AgentCanvasReference, type AgentSkillReference } from "@/stores/use-agent-store";
 import { AgentCanvasReferencePreview, canvasReferenceIcon, canvasReferenceKindLabel } from "./agent-canvas-reference-preview";
 import { agentInlineTokenClass, agentInlineTokenMediaClass, agentReferenceMarker, agentSkillMarker, parseAgentInlineTokens } from "./agent-chat-inline-tokens";
+import { useThemeStore } from "@/stores/use-theme-store";
 
 type ComposerCommand = { type: "skill" | "resource"; query: string; length: number };
 type ComposerCandidate = { type: "skill"; skill: AgentSkillSummary } | { type: "resource"; reference: CanvasResourceReference };
 type ReferenceHover = { reference: AgentCanvasReference; left: number; top: number; width: number; height: number };
 
-export function AgentChatPromptInput({ value, disabled, placeholder, theme, onChange, onSubmit, onAddFiles }: {
+export function AgentChatPromptInput({ value, disabled, placeholder, onChange, onSubmit, onAddFiles }: {
     value: string;
     disabled?: boolean;
     placeholder: string;
-    theme: (typeof canvasThemes)[keyof typeof canvasThemes];
     onChange: (value: string) => void;
     onSubmit: () => void;
     onAddFiles?: (files: FileList | File[] | null) => void | Promise<void>;
 }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const containerRef = useRef<HTMLDivElement>(null);
     const editorRef = useRef<HTMLDivElement>(null);
     const composingRef = useRef(false);
@@ -228,7 +229,7 @@ export function AgentChatPromptInput({ value, disabled, placeholder, theme, onCh
                 <Popover
                     open
                     placement="top"
-                    content={<AgentCanvasReferencePreview reference={referenceHover.reference} previewUrl={referenceHover.reference.previewUrl} previewText={referenceHover.reference.text} theme={theme} />}
+                    content={<AgentCanvasReferencePreview reference={referenceHover.reference} previewUrl={referenceHover.reference.previewUrl} previewText={referenceHover.reference.text} />}
                 >
                     <span
                         aria-hidden
@@ -237,11 +238,12 @@ export function AgentChatPromptInput({ value, disabled, placeholder, theme, onCh
                     />
                 </Popover>
             ) : null}
-            {command ? <AgentCommandMenu command={command} candidates={candidates} activeIndex={Math.min(activeIndex, Math.max(candidates.length - 1, 0))} loading={command.type === "skill" && skillsLoading} theme={theme} onSelect={insertCandidate} /> : null}
+            {command ? <AgentCommandMenu command={command} candidates={candidates} activeIndex={Math.min(activeIndex, Math.max(candidates.length - 1, 0))} loading={command.type === "skill" && skillsLoading} onSelect={insertCandidate} /> : null}
         </div>
     );
 }
-function AgentCommandMenu({ command, candidates, activeIndex, loading, theme, onSelect }: { command: ComposerCommand; candidates: ComposerCandidate[]; activeIndex: number; loading: boolean; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onSelect: (candidate: ComposerCandidate) => void }) {
+function AgentCommandMenu({ command, candidates, activeIndex, loading, onSelect }: { command: ComposerCommand; candidates: ComposerCandidate[]; activeIndex: number; loading: boolean; onSelect: (candidate: ComposerCandidate) => void }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
     const activeItemRef = useRef<HTMLButtonElement | null>(null);
     useEffect(() => { activeItemRef.current?.scrollIntoView({ block: "nearest" }); }, [activeIndex]);

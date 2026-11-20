@@ -8,6 +8,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { useAgentStore, type AgentModel, type AgentPermissionMode, type AgentReasoningEffort } from "@/stores/use-agent-store";
 import type { AgentChatAttachment } from "./agent-chat-message";
 import { AgentChatPromptInput } from "./agent-chat-prompt-input";
+import { useThemeStore } from "@/stores/use-theme-store";
 
 export function AgentChatComposer({
     prompt,
@@ -15,7 +16,6 @@ export function AgentChatComposer({
     disabled,
     sending,
     placeholder,
-    theme,
     onPromptChange,
     onSubmit,
     onStop,
@@ -37,7 +37,6 @@ export function AgentChatComposer({
     disabled?: boolean;
     sending?: boolean;
     placeholder: string;
-    theme: (typeof canvasThemes)[keyof typeof canvasThemes];
     onPromptChange: (value: string) => void;
     onSubmit: () => void;
     onStop?: () => void;
@@ -54,6 +53,7 @@ export function AgentChatComposer({
     onReasoningEffortChange?: (effort: AgentReasoningEffort) => void;
     left?: ReactNode;
 }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const canvasReferences = useAgentStore((state) => state.canvasReferences);
@@ -75,7 +75,7 @@ export function AgentChatComposer({
                         ))}
                     </div>
                 ) : null}
-                <AgentChatPromptInput value={prompt} disabled={disabled || sending} placeholder={placeholder} theme={theme} onChange={onPromptChange} onSubmit={() => { if (canSubmit) void onSubmit(); }} onAddFiles={onAddFiles} />
+                <AgentChatPromptInput value={prompt} disabled={disabled || sending} placeholder={placeholder} onChange={onPromptChange} onSubmit={() => { if (canSubmit) void onSubmit(); }} onAddFiles={onAddFiles} />
                 <div className="@container mt-2 flex items-center justify-between gap-2">
                     <div className="flex min-w-0 items-center gap-1">
                         {onAddFiles ? (
@@ -89,8 +89,8 @@ export function AgentChatComposer({
                                 </Tooltip>
                             </>
                         ) : null}
-                        {onConfirmToolsChange ? <ToolConfirmationMenu confirmTools={Boolean(confirmTools)} theme={theme} onChange={onConfirmToolsChange} /> : null}
-                        {permissionMode && onPermissionModeChange ? <PermissionModeMenu permissionMode={permissionMode} theme={theme} onChange={onPermissionModeChange} /> : null}
+                        {onConfirmToolsChange ? <ToolConfirmationMenu confirmTools={Boolean(confirmTools)} onChange={onConfirmToolsChange} /> : null}
+                        {permissionMode && onPermissionModeChange ? <PermissionModeMenu permissionMode={permissionMode} onChange={onPermissionModeChange} /> : null}
                         {models?.length && model && onModelChange && onReasoningEffortChange ? <AgentModelControls models={models} model={model} reasoningEffort={reasoningEffort || ""} onModelChange={onModelChange} onReasoningEffortChange={onReasoningEffortChange} /> : null}
                         {left}
                     </div>
@@ -147,7 +147,8 @@ function AgentModelControls({ models, model, reasoningEffort, onModelChange, onR
     );
 }
 
-function PermissionModeMenu({ permissionMode, theme, onChange }: { permissionMode: AgentPermissionMode; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onChange: (permissionMode: AgentPermissionMode) => void }) {
+function PermissionModeMenu({ permissionMode, onChange }: { permissionMode: AgentPermissionMode; onChange: (permissionMode: AgentPermissionMode) => void }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
     const permissionOptions: Array<{ key: AgentPermissionMode; title: string; shortTitle: string; description: string; icon: ReactNode }> = [
         { key: "request", title: t("agent.composer.permission.request"), shortTitle: t("agent.composer.permission.request"), description: t("agent.composer.permission.requestDescription"), icon: <ShieldAlert className="size-3.5" /> },
@@ -183,7 +184,8 @@ function PermissionModeMenu({ permissionMode, theme, onChange }: { permissionMod
     );
 }
 
-function ToolConfirmationMenu({ confirmTools, theme, onChange }: { confirmTools: boolean; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onChange: (confirmTools: boolean) => void }) {
+function ToolConfirmationMenu({ confirmTools, onChange }: { confirmTools: boolean; onChange: (confirmTools: boolean) => void }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
     const [open, setOpen] = useState(false);
     const mode = t(confirmTools ? "agent.composer.tools.manual" : "agent.composer.tools.automatic");

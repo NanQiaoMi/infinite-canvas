@@ -8,12 +8,12 @@ import { useAgentStore, type AgentChatItem, type AgentPendingApproval, type Agen
 import { AgentApprovalCard, AgentChatMessage, AgentCommandGroup, AgentPendingToolCard, AgentToolCard, AgentWorkingMessage } from "./agent-chat-message";
 import { agentMessageToChatMessage, currentPlanMessage, isPlanMessage, latestPlanMessage, toolCallDetail, toolName, workingActivity } from "./agent-event-formatters";
 import { AgentScrollToBottom } from "./agent-scroll-to-bottom";
+import { useThemeStore } from "@/stores/use-theme-store";
 
 const SCROLL_BOTTOM_THRESHOLD = 48;
 const historyMessageStyle = { contentVisibility: "auto", containIntrinsicSize: "0 80px" } as const;
 
 export function AgentChatTimeline({
-    theme,
     pendingTool,
     pendingApprovals,
     sending,
@@ -22,7 +22,6 @@ export function AgentChatTimeline({
     onApproveTool,
     onApprovalDecision,
 }: {
-    theme: (typeof canvasThemes)[keyof typeof canvasThemes];
     pendingTool: AgentPendingToolCall | null;
     pendingApprovals: AgentPendingApproval[];
     sending: boolean;
@@ -80,53 +79,52 @@ export function AgentChatTimeline({
             <div ref={listRef} className="thin-scrollbar h-full select-text overflow-y-auto" onScroll={updateScrollState}>
                 <div ref={contentRef} className="space-y-4 px-4 pt-4">
                     {timeline.map((entry) => entry.type === "commands"
-                        ? <AgentCommandGroupRow key={entry.id} items={entry.items} theme={theme} />
-                        : <AgentChatMessageRow key={entry.item.id} item={entry.item} theme={theme} />)}
+                        ? <AgentCommandGroupRow key={entry.id} items={entry.items} />
+                        : <AgentChatMessageRow key={entry.item.id} item={entry.item} />)}
                     {pendingTool ? (
                         <AgentPendingToolCard
                             summary={summarizeCanvasAgentOps(pendingTool.input?.ops || []) || toolName(pendingTool.name)}
                             detail={toolCallDetail(pendingTool.name, pendingTool.input, "pending")}
-                            theme={theme}
                             onReject={onRejectTool}
                             onApprove={onApproveTool}
                         />
                     ) : null}
-                    {pendingApprovals.map((approval) => <AgentApprovalCard key={approval.requestId} approval={approval} theme={theme} onDecision={(decision) => onApprovalDecision(approval, decision)} />)}
-                    {(sending || waiting || showBootstrap) && !streaming && !pendingTool && !pendingApprovals.length ? <AgentWorkingMessage text={working.text} detail={"detail" in working && typeof working.detail === "string" ? working.detail : undefined} status={showBootstrap ? bootstrapStatus?.status : undefined} mcpStatuses={showBootstrap ? Object.entries(mcpStartupStatuses).map(([name, item]) => ({ name, ...item })) : []} activityKey={working.key} theme={theme} /> : null}
+                    {pendingApprovals.map((approval) => <AgentApprovalCard key={approval.requestId} approval={approval} onDecision={(decision) => onApprovalDecision(approval, decision)} />)}
+                    {(sending || waiting || showBootstrap) && !streaming && !pendingTool && !pendingApprovals.length ? <AgentWorkingMessage text={working.text} detail={"detail" in working && typeof working.detail === "string" ? working.detail : undefined} status={showBootstrap ? bootstrapStatus?.status : undefined} mcpStatuses={showBootstrap ? Object.entries(mcpStartupStatuses).map(([name, item]) => ({ name, ...item })) : []} activityKey={working.key} /> : null}
                 </div>
             </div>
             {showScrollToBottom ? (
-                <AgentScrollToBottom theme={theme} title={t("agent.chat.latestMessages")} onClick={() => scrollToBottom()} />
+                <AgentScrollToBottom title={t("agent.chat.latestMessages")} onClick={() => scrollToBottom()} />
             ) : null}
         </div>
     );
 }
 
-export function AgentTaskProgress({ theme, busy }: { theme: (typeof canvasThemes)[keyof typeof canvasThemes]; busy: boolean }) {
+export function AgentTaskProgress({ busy }: { busy: boolean }) {
     const { t } = useTranslation();
     const plan = useAgentStore((state) => busy ? currentPlanMessage(state.messages) : latestPlanMessage(state.messages));
     if (!plan) return null;
     return (
         <div className="shrink-0 px-4 pt-2">
-            <AgentToolCard key={plan.id} title={plan.title || t("agent.events.progress")} text={plan.text} detail={plan.detail} theme={theme} />
+            <AgentToolCard key={plan.id} title={plan.title || t("agent.events.progress")} text={plan.text} detail={plan.detail} />
         </div>
     );
 }
 
-const AgentChatMessageRow = memo(function AgentChatMessageRow({ item, theme }: { item: AgentChatItem; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+const AgentChatMessageRow = memo(function AgentChatMessageRow({ item }: { item: AgentChatItem }) {
     const endpoint = useAgentStore((state) => state.url);
     const token = useAgentStore((state) => state.token);
     return (
         <div style={item.streamId ? undefined : historyMessageStyle}>
-            <AgentChatMessage item={agentMessageToChatMessage(item, endpoint, token)} theme={theme} />
+            <AgentChatMessage item={agentMessageToChatMessage(item, endpoint, token)} />
         </div>
     );
 });
 
-const AgentCommandGroupRow = memo(function AgentCommandGroupRow({ items, theme }: { items: AgentChatItem[]; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+const AgentCommandGroupRow = memo(function AgentCommandGroupRow({ items }: { items: AgentChatItem[] }) {
     return (
         <div style={items.some((item) => item.streamId) ? undefined : historyMessageStyle}>
-            <AgentCommandGroup items={items} theme={theme} />
+            <AgentCommandGroup items={items} />
         </div>
     );
 });
@@ -163,7 +161,8 @@ function isCommandMessage(item: AgentChatItem) {
     return item.role === "tool" && item.detail && typeof item.detail === "object" && (item.detail as { kind?: unknown }).kind === "command";
 }
 
-export function AgentUsageBar({ usage, theme }: { usage: AgentTokenUsage; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+export function AgentUsageBar({ usage }: { usage: AgentTokenUsage }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
     return (
         <div className="flex items-center justify-center gap-4 px-4 pt-1 text-[11px] tabular-nums" style={{ color: theme.node.muted }}>

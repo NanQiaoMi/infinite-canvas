@@ -6,12 +6,12 @@ import { useTranslation } from "react-i18next";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { connectionColor } from "./agent-panel-utils";
+import { useThemeStore } from "@/stores/use-theme-store";
 
 const AGENT_PLUGIN_REMOVE_COMMAND = "codex plugin remove infinite-canvas";
 const AGENT_MCP_REMOVE_COMMAND = "codex mcp remove infinite-canvas";
 
 export function AgentConnectView({
-    theme,
     url,
     token,
     enabled,
@@ -22,7 +22,6 @@ export function AgentConnectView({
     onTokenChange,
     onToggleEnabled,
 }: {
-    theme: (typeof canvasThemes)[keyof typeof canvasThemes];
     url: string;
     token: string;
     enabled: boolean;
@@ -33,6 +32,7 @@ export function AgentConnectView({
     onTokenChange: (value: string) => void;
     onToggleEnabled: () => void;
 }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
     const { message } = App.useApp();
     const steps = [{ title: t("agent.connect.pluginTitle"), text: t("agent.connect.pluginText") }, { title: t("agent.connect.directTitle"), text: t("agent.connect.directText"), command: "npx -y @basketikun/canvas-agent@latest" }];

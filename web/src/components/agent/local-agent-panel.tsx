@@ -801,7 +801,6 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
         <>
             <AgentPanelTabs
                 value={activeTab}
-                theme={theme}
                 leading={
                     <div className="flex items-center gap-1">
                         <span className="grid size-8 place-items-center">
@@ -849,7 +848,6 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
 
             {activeTab === "setup" ? (
                 <AgentConnectView
-                    theme={theme}
                     url={url}
                     token={token}
                     enabled={enabled}
@@ -864,7 +862,6 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
                 <AgentSkillsView clientId={clientIdRef.current} />
             ) : activeTab === "history" ? (
                 <AgentHistoryView
-                    theme={theme}
                     threads={threads}
                     hasMore={Boolean(threadsNextCursor)}
                     search={threadSearch}
@@ -883,7 +880,6 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
             ) : activeTab === "log" ? (
                 <AgentLogView
                     logs={eventLogs}
-                    theme={theme}
                     context={{ endpoint, connected, enabled, activity, waiting, sending, messages: messageCount, pendingTool: pendingTool?.name }}
                     onClear={clearEventLogs}
                     onCopied={(text) => message.success(text)}
@@ -897,9 +893,9 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
                             <button type="button" className="shrink-0 rounded px-1.5 py-0.5 hover:bg-black/5 dark:hover:bg-white/10" style={{ color: theme.node.muted }} onClick={reconnectNow}>{rt("reconnectNow")}</button>
                         </div>
                     ) : null}
-                    <AgentChatTimeline theme={theme} pendingTool={pendingTool} pendingApprovals={pendingApprovals} sending={sending} waiting={waiting} onRejectTool={rejectPendingTool} onApproveTool={approvePendingTool} onApprovalDecision={decideApproval} />
-                    <AgentTaskProgress theme={theme} busy={sending || waiting} />
-                    {tokenUsage ? <AgentUsageBar usage={tokenUsage} theme={theme} /> : null}
+                    <AgentChatTimeline pendingTool={pendingTool} pendingApprovals={pendingApprovals} sending={sending} waiting={waiting} onRejectTool={rejectPendingTool} onApproveTool={approvePendingTool} onApprovalDecision={decideApproval} />
+                    <AgentTaskProgress busy={sending || waiting} />
+                    {tokenUsage ? <AgentUsageBar usage={tokenUsage} /> : null}
                     <AgentChatComposer
                         prompt={prompt}
                         attachments={attachments.map((attachment) => agentAttachmentToChatAttachment(attachment, endpoint, token))}
@@ -910,7 +906,6 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
                             : conversation.status === "failed"
                                 ? t("agent.panel.initFailed")
                                 : t("agent.panel.placeholder")}
-                        theme={theme}
                         onPromptChange={(prompt) => setAgentState({ prompt })}
                         onSubmit={sendPrompt}
                         onStop={stopTurn}

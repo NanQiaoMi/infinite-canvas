@@ -4,8 +4,10 @@ import { useTranslation } from "react-i18next";
 import i18n from "@/i18n";
 import { canvasThemes } from "@/lib/canvas-theme";
 import type { AgentCanvasReference } from "@/stores/use-agent-store";
+import { useThemeStore } from "@/stores/use-theme-store";
 
-export function AgentCanvasReferencePreview({ reference, previewUrl, previewText, theme }: { reference: AgentCanvasReference; previewUrl?: string; previewText?: string; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+export function AgentCanvasReferencePreview({ reference, previewUrl, previewText }: { reference: AgentCanvasReference; previewUrl?: string; previewText?: string }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
     const Icon = canvasReferenceIcon(reference.kind);
     return (
