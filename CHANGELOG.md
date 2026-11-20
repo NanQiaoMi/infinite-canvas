@@ -2,6 +2,7 @@
 
 ## Unreleased
 
++ [优化] 本地 Agent：Claude 对话准备阶段真实检测画布 MCP 是否启动成功；模型与推理强度按 Codex / Claude 分别记忆，不支持推理强度的模型也可选择；Claude 只加载技能页启用的 Skill；前端改用错误码判断忙碌与审批失效。
 + [新增] Canvas Agent 新增 `install-mcp` 命令，一键为 Claude Code、Codex、Antigravity 注册 Infinite Canvas MCP（固定 node 绝对路径启动），并自动自检工具列表。
 + [新增] 本地 Agent 支持在 Codex 与 Claude 之间切换：Claude 通过 Claude Agent SDK 接入，与 Codex 同样支持流式对话、会话历史与恢复、模型与推理强度选择、Skill 管理与提炼、工具权限审批和中断。
 + [新增] 服务端新增上游接口兼容层，让只支持 `/api/image-tasks` 异步协议的上游也能直接用于画布生图：自动把 `/v1/images/generations`、`/v1/images/edits` 适配为上游异步任务，补齐 `/v1/tasks/{id}`、`/v1/images/tasks/{id}`、`/api/tasks/{id}` 任务查询与 `DELETE` 取消，`/v1/queue/status`、`/api/queue/status` 队列水位，`/health`、`/api/model-catalog`（含 `/refresh`）健康检查与模型目录，以及 `/v1/models` 合并渠道已配置模型的完整清单；任务回显提示词与模型，图片结果地址统一改写为经 `/api/relay` 取回，管理员「探索模型」不再因上游按套餐裁剪而丢失已配置模型。

@@ -86,7 +86,12 @@ function syncRuntime(next: AgentRuntimeName) {
     try {
         localStorage.setItem("canvas-agent-runtime", next);
     } catch {}
-    useAgentStore.getState().setAgentState({ runtime: next });
+    useAgentStore.getState().setAgentState({
+        runtime: next,
+        models: [],
+        model: localStorage.getItem(`canvas-agent-model:${next}`) || "",
+        reasoningEffort: (localStorage.getItem(`canvas-agent-reasoning-effort:${next}`) as AgentReasoningEffort | null) || "",
+    });
 }
 
 type AgentWorkspace = { workspacePath: string; activeThreadId?: string };
@@ -618,19 +623,19 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
             const models = data.flatMap((item) => {
                 const name = item.displayName || item.model;
                 const efforts = item.supportedReasoningEfforts.filter(({ reasoningEffort }) => AGENT_REASONING_EFFORTS.has(reasoningEffort));
-                if (item.model === "codex-auto-review" || names.has(name) || !efforts.length) return [];
+                if (item.model === "codex-auto-review" || names.has(name)) return [];
                 names.add(name);
-                const defaultReasoningEffort = efforts.some((effort) => effort.reasoningEffort === item.defaultReasoningEffort) ? item.defaultReasoningEffort : efforts[0].reasoningEffort;
+                const defaultReasoningEffort = !efforts.length ? "" : efforts.some((effort) => effort.reasoningEffort === item.defaultReasoningEffort) ? item.defaultReasoningEffort : efforts[0].reasoningEffort;
                 return [{ ...item, supportedReasoningEfforts: efforts, defaultReasoningEffort }];
             });
             if (!models.length) return;
-            const savedModel = useAgentStore.getState().model;
+            const savedModel = localStorage.getItem(`canvas-agent-model:${runtime}`) || "";
             const current = models.find((item) => item.model === savedModel) || models.find((item) => item.isDefault) || models[0];
-            const savedEffort = useAgentStore.getState().reasoningEffort;
+            const savedEffort = localStorage.getItem(`canvas-agent-reasoning-effort:${runtime}`) || "";
             const efforts = current.supportedReasoningEfforts.map((item) => item.reasoningEffort);
-            const nextEffort = efforts.includes(savedEffort as AgentReasoningEffort) ? savedEffort as AgentReasoningEffort : current.defaultReasoningEffort || efforts[0];
-            localStorage.setItem("canvas-agent-model", current.model);
-            localStorage.setItem("canvas-agent-reasoning-effort", nextEffort);
+            const nextEffort: AgentReasoningEffort | "" = efforts.includes(savedEffort as AgentReasoningEffort) ? savedEffort as AgentReasoningEffort : current.defaultReasoningEffort || efforts[0] || "";
+            localStorage.setItem(`canvas-agent-model:${runtime}`, current.model);
+            localStorage.setItem(`canvas-agent-reasoning-effort:${runtime}`, nextEffort);
             setAgentState({ models, model: current.model, reasoningEffort: nextEffort });
         }).catch((error) => addEventLog(rt("modelListFailed"), error));
     }, [connected, endpoint, runtime, setAgentState, token]);
@@ -721,7 +726,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
                     expectedRevision: currentBeforeSend.conversation.revision,
                     permissionMode,
                     model,
-                    effort: reasoningEffort,
+                    ...(reasoningEffort ? { effort: reasoningEffort } : {}),
                     skill: selectedSkill ? { name: selectedSkill.name, path: selectedSkill.path } : undefined,
                     attachments: requestFiles.map(({ id, name, type, size, width, height, dataUrl }) => ({ id, name, type, size, width, height, dataUrl })),
                     messageMetadata,
@@ -739,7 +744,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
             const response = error instanceof AgentApiError ? error.response as { code?: string; state?: AgentConversationState } : undefined;
             if (response?.state) applyConversationState(response.state);
             const stale = response?.code === "CONVERSATION_STALE";
-            const busy = response?.code === "CONVERSATION_BUSY" || text.includes("Codex 正在运行");
+            const busy = response?.code === "CONVERSATION_BUSY";
             const state = useAgentStore.getState();
             const removeFailedPending = (messages: AgentChatItem[]) => messages.filter((item) => item.clientMessageId !== messageId || Boolean(item.turnId));
             threadMessagesRef.current.forEach((messages, cachedThreadId) => {
@@ -899,7 +904,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
             if (latest.pendingApprovals.some((item) => item.requestId === approval.requestId)) setAgentState({ activity: rt("waitingCodexApproval") });
         } catch (error) {
             const latest = useAgentStore.getState();
-            const expired = error instanceof Error && error.message.includes("审批请求已失效");
+            const expired = error instanceof AgentApiError && error.response.code === "APPROVAL_EXPIRED";
             const resolved = expired || !latest.pendingApprovals.some((item) => item.requestId === approval.requestId);
             const pendingApprovals = resolved
                 ? latest.pendingApprovals.filter((item) => item.requestId !== approval.requestId)
@@ -1472,13 +1477,14 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
                         onModelChange={(model) => {
                             const selected = models.find((item) => item.model === model);
                             if (!selected) return;
-                            const effort = selected.defaultReasoningEffort || selected.supportedReasoningEfforts[0]?.reasoningEffort;
-                            localStorage.setItem("canvas-agent-model", model);
-                            if (effort) localStorage.setItem("canvas-agent-reasoning-effort", effort);
-                            setAgentState({ model, ...(effort ? { reasoningEffort: effort } : {}) });
+                            const effort = selected.defaultReasoningEffort || selected.supportedReasoningEfforts[0]?.reasoningEffort || "";
+                            const runtime = useAgentStore.getState().runtime;
+                            localStorage.setItem(`canvas-agent-model:${runtime}`, model);
+                            localStorage.setItem(`canvas-agent-reasoning-effort:${runtime}`, effort);
+                            setAgentState({ model, reasoningEffort: effort });
                         }}
                         onReasoningEffortChange={(reasoningEffort) => {
-                            localStorage.setItem("canvas-agent-reasoning-effort", reasoningEffort);
+                            localStorage.setItem(`canvas-agent-reasoning-effort:${useAgentStore.getState().runtime}`, reasoningEffort);
                             setAgentState({ reasoningEffort });
                         }}
                         left={

@@ -28,6 +28,8 @@ const HISTORY_DIR = path.join(CONFIG_DIR, "claude-history");
 const SKILL_STATE_FILE = path.join(CONFIG_DIR, "claude-skills.json");
 const SKILL_DRAFT_INSTRUCTIONS = "你只负责根据已提供的对话或画布快照生成可编辑的 Claude Skill 草稿。不要调用任何工具，不要执行命令，不要读取文件，不要访问网络，不要修改任何状态。严格按输出结构返回结果，并排除凭证、密钥、Token、本地路径、临时错误、调试日志和一次性结果。";
 const FILE_TOOLS = new Set(["Edit", "MultiEdit", "Write", "NotebookEdit"]);
+/** 画布 MCP 启动等待上限，与 Codex 侧 infinite-canvas 的 startup_timeout_sec 保持一致。 */
+const MCP_STARTUP_TIMEOUT_MS = 20_000;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 let claudeQueue: Promise<unknown> = Promise.resolve();
@@ -73,7 +75,7 @@ export async function startClaudeThread(emit: AgentEmit, cwd = "", _permissionMo
     const createdAt = Math.floor(Date.now() / 1000);
     draftThreads.set(id, { cwd, createdAt });
     if (cwd) await ensureClaudeWorkspace(cwd);
-    if (preheat) emitMcpReady(emit, id);
+    if (preheat) await preheatMcp(emit, id, cwd);
     return { id, cwd, preview: "", createdAt, updatedAt: createdAt, status: "idle" };
 }
 
@@ -81,7 +83,7 @@ export async function startClaudeThread(emit: AgentEmit, cwd = "", _permissionMo
 export async function resumeClaudeThread(emit: AgentEmit, threadId: string, cwd = "", _permissionMode: AgentPermissionMode = "request", preheat = false) {
     const history = await readClaudeThread(emit, threadId, cwd);
     if (cwd) await ensureClaudeWorkspace(cwd);
-    if (preheat) emitMcpReady(emit, threadId);
+    if (preheat) await preheatMcp(emit, threadId, cwd);
     return history;
 }
 
@@ -244,7 +246,7 @@ async function runClaudeTurnNow(prompt: string, lifecycleEmit: AgentEmit, attach
                 permissionMode: claudePermissionMode(permission),
                 ...(permission === "full" ? { allowDangerouslySkipPermissions: true } : {}),
                 canUseTool: approvalHandler(options.appEmit || lifecycleEmit, { threadId, turnId }, cwd),
-                mcpServers: { [CANVAS_MCP]: { type: "stdio", command: canvasAgentMcp.command, args: canvasAgentMcp.args } },
+                mcpServers: canvasMcpServers(),
                 mcpServersDelivery: "initialize",
                 systemPrompt: { type: "preset", preset: "claude_code", append: AGENT_PROMPT },
                 settingSources: ["user", "project"],
@@ -526,9 +528,8 @@ async function ensureClaudeWorkspace(cwd: string) {
     await fs.symlink(process.platform === "win32" ? skillsDir : path.join("..", ".agents", "skills"), linkPath, process.platform === "win32" ? "junction" : "dir");
 }
 
+/** Claude 只加载技能页列出且已启用的 Skill，与界面展示保持一致。 */
 async function enabledSkillNames(cwd: string) {
-    const disabled = await readDisabledSkills();
-    if (!disabled.length) return undefined;
     const { skills } = await listClaudeSkills(() => undefined, cwd);
     return skills.filter((skill) => skill.enabled).map((skill) => skill.name);
 }
@@ -542,9 +543,33 @@ async function readDisabledSkills(): Promise<string[]> {
     }
 }
 
-function emitMcpReady(emit: AgentEmit, threadId: string) {
-    emit("agent_bootstrap", { type: "mcp.startup", phase: "preheat", threadId, name: CANVAS_MCP, status: "ready" });
-    emit("agent_bootstrap", { type: "mcp.complete", phase: "preheat", threadId, services: [{ name: CANVAS_MCP }] });
+function canvasMcpServers(): Options["mcpServers"] {
+    return { [CANVAS_MCP]: { type: "stdio", command: canvasAgentMcp.command, args: canvasAgentMcp.args } };
+}
+
+/** 真实启动一次画布 MCP 并读取状态，作为对话准备阶段的就绪依据。 */
+async function preheatMcp(emit: AgentEmit, threadId: string, cwd: string) {
+    const startup = (status: string, error?: string) => emit("agent_bootstrap", { type: "mcp.startup", phase: "preheat", threadId, name: CANVAS_MCP, status, error: error || null });
+    startup("starting");
+    let release = () => {};
+    const idle = new Promise<void>((resolve) => (release = resolve));
+    const probe = query({ prompt: (async function* () { await idle; })(), options: { cwd: cwd || os.tmpdir(), persistSession: false, settingSources: [], mcpServers: canvasMcpServers(), mcpServersDelivery: "initialize" } });
+    try {
+        const deadline = Date.now() + MCP_STARTUP_TIMEOUT_MS;
+        let server = (await probe.mcpServerStatus()).find((item) => item.name === CANVAS_MCP);
+        while ((!server || server.status === "pending") && Date.now() < deadline) {
+            await new Promise((resolve) => setTimeout(resolve, 300));
+            server = (await probe.mcpServerStatus()).find((item) => item.name === CANVAS_MCP);
+        }
+        if (server?.status === "connected") startup("ready");
+        else startup("failed", server?.error || (server ? `MCP 状态：${server.status}` : "MCP 未加载"));
+    } catch (error) {
+        startup("failed", errorMessage(error));
+    } finally {
+        release();
+        probe.close();
+        emit("agent_bootstrap", { type: "mcp.complete", phase: "preheat", threadId, services: [{ name: CANVAS_MCP }] });
+    }
 }
 
 async function sessionInfo(threadId: string, cwd: string) {

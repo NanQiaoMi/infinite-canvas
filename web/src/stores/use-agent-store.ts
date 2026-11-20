@@ -19,7 +19,7 @@ export type AgentModel = {
     id: string;
     model: string;
     displayName: string;
-    defaultReasoningEffort: AgentReasoningEffort;
+    defaultReasoningEffort: AgentReasoningEffort | "";
     supportedReasoningEfforts: Array<{ reasoningEffort: AgentReasoningEffort; description?: string }>;
     isDefault?: boolean;
 };
@@ -97,6 +97,8 @@ type AgentStore = {
 
 export const CANVAS_AGENT_PANEL_MOTION_MS = 500;
 
+const initialRuntime: AgentRuntimeName = typeof window !== "undefined" && localStorage.getItem("canvas-agent-runtime") === "claude" ? "claude" : "codex";
+
 export const useAgentStore = create<AgentStore>((set, get) => ({
     width: typeof window === "undefined" ? 440 : Number(localStorage.getItem("canvas-agent-panel-width")) || 440,
     panelOpen: false,
@@ -124,11 +126,11 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     loadingThreads: false,
     activeTab: "setup",
     confirmTools: false,
-    runtime: typeof window !== "undefined" && localStorage.getItem("canvas-agent-runtime") === "claude" ? "claude" : "codex",
+    runtime: initialRuntime,
     permissionMode: typeof window === "undefined" ? "request" : (localStorage.getItem("canvas-agent-permission-mode") as AgentPermissionMode) || "request",
     models: [],
-    model: typeof window === "undefined" ? "" : localStorage.getItem("canvas-agent-model") || "",
-    reasoningEffort: typeof window === "undefined" ? "" : (localStorage.getItem("canvas-agent-reasoning-effort") as AgentReasoningEffort) || "",
+    model: typeof window === "undefined" ? "" : localStorage.getItem(`canvas-agent-model:${initialRuntime}`) || "",
+    reasoningEffort: typeof window === "undefined" ? "" : (localStorage.getItem(`canvas-agent-reasoning-effort:${initialRuntime}`) as AgentReasoningEffort) || "",
     activity: i18n.t("agent.state.ready"),
     conversation: { revision: 0, conversationId: "", threadId: "", status: "idle", mcpStatuses: {} },
     bootstrapStatus: null,

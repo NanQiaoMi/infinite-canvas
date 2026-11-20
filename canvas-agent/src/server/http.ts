@@ -426,11 +426,11 @@ export function startHttpServer() {
         const decision = String(req.body?.decision || "");
         if (!["accept", "acceptForSession", "decline", "cancel"].includes(decision)) return res.status(400).json({ ok: false, error: "无效的审批决定" });
         const ok = await runtimeOf(req).resolveApproval(String(req.body?.requestId || ""), decision);
-        res.status(ok ? 200 : 409).json({ ok, ...(ok ? {} : { error: "审批请求已失效" }) });
+        res.status(ok ? 200 : 409).json({ ok, ...(ok ? {} : { code: "APPROVAL_EXPIRED", error: "审批请求已失效" }) });
     }));
     app.post("/agent/:runtime/interrupt", route(async (req, res) => {
         const ok = await runtimeOf(req).interrupt(skillDraftRunning ? undefined : String(req.body?.threadId || ""));
-        res.status(ok ? 200 : 409).json({ ok, ...(ok ? {} : { error: "当前没有可停止的任务" }) });
+        res.status(ok ? 200 : 409).json({ ok, ...(ok ? {} : { code: "NO_ACTIVE_TURN", error: "当前没有可停止的任务" }) });
     }));
     app.use((_req, res) => res.status(404).json({ ok: false, error: "not found" }));
     app.use((error: Error, req: Request, res: Response, _next: NextFunction) => {
