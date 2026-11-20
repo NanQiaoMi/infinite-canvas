@@ -275,7 +275,7 @@ async function runClaudeTurnNow(prompt: string, lifecycleEmit: AgentEmit, attach
 }
 
 /** 将单次 turn 的 Claude SDK 消息转换为 Codex 兼容的 item / turn 事件并记录历史。 */
-class ClaudeTurnTranslator {
+export class ClaudeTurnTranslator {
     private sequence = 0;
     private sequences = new Map<string, number>();
     private streamOrdinals = new Map<string, number>();
@@ -285,7 +285,7 @@ class ClaudeTurnTranslator {
     private plan: CodexPlanStep[] = [];
     private currentMessageId = "";
 
-    constructor(private threadId: string, private turnId: string, private cwd: string, private emit: AgentEmit) {}
+    constructor(private threadId: string, private turnId: string, private cwd: string, private emit: AgentEmit, private history: Pick<CodexEventHistory, "record" | "recordTurn"> = historyFor(threadId)) {}
 
     started() {
         this.event({ type: "turn.started" });
@@ -314,7 +314,7 @@ class ClaudeTurnTranslator {
         const normalizedUsage = usage ? { input_tokens: Number(field(usage, "input_tokens") || 0), cached_input_tokens: Number(field(usage, "cache_read_input_tokens") || 0), output_tokens: Number(field(usage, "output_tokens") || 0), reasoning_output_tokens: 0 } : null;
         if (normalizedUsage) this.event({ type: "usage.updated", usage: normalizedUsage });
         const turn = { id: this.turnId, status, ...(error ? { error: { message: error } } : {}), input: prompt, ...(messageText ? { messageText } : {}), ...(this.plan.length ? { plan: this.plan } : {}) };
-        await historyFor(this.threadId).recordTurn({ threadId: this.threadId, turnId: this.turnId, turn }).catch((historyError) => logger.warn("Failed to persist Claude turn history", { threadId: this.threadId, turnId: this.turnId, error: historyError }));
+        await this.history.recordTurn({ threadId: this.threadId, turnId: this.turnId, turn }).catch((historyError) => logger.warn("Failed to persist Claude turn history", { threadId: this.threadId, turnId: this.turnId, error: historyError }));
         this.event({ type: "turn.completed", status, error: error ? { message: error } : null, usage: normalizedUsage, turn });
         this.emit("agent_done", { agent: "claude", status, usage: normalizedUsage, thread_id: this.threadId, turn_id: this.turnId, threadId: this.threadId, turnId: this.turnId });
     }
@@ -391,7 +391,7 @@ class ClaudeTurnTranslator {
             this.sequences.set(id, sequence);
         }
         this.event({ type, item });
-        if (record && type === "item.completed") void historyFor(this.threadId).record({ threadId: this.threadId, turnId: this.turnId, itemId: id, sequence, item }).catch((error) => logger.warn("Failed to persist Claude event history", { threadId: this.threadId, turnId: this.turnId, itemId: id, error }));
+        if (record && type === "item.completed") void this.history.record({ threadId: this.threadId, turnId: this.turnId, itemId: id, sequence, item }).catch((error) => logger.warn("Failed to persist Claude event history", { threadId: this.threadId, turnId: this.turnId, itemId: id, error }));
     }
 
     private event(payload: JsonRecord) {
