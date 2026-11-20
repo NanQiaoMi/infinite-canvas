@@ -34,9 +34,14 @@ description: Major features available in the current project
 
 ## Canvas Agent
 
-- Connect local Codex through Canvas Agent and MCP without giving a web server direct access to browser state.
+- Connect local Codex or Claude through Canvas Agent and MCP without giving a web server direct access to browser state.
 - Read the active canvas, selection, nodes, edges, generation status, and apply structured operations.
-- Use Codex from the browser side panel with streaming responses, history, approvals, permissions, diagnostics, and local Skills.
+- Switch the side panel between Codex and Claude (Claude runs on the Claude Agent SDK); both support streaming responses, history, approvals, permissions, interruption, models and reasoning effort, and local Skills. Model choices are remembered per runtime.
+- Before a conversation starts, the infinite-canvas MCP is actually launched and its real status is shown.
+- Connect by pasting the Agent's two startup lines (Local URL / Connect token); a lost connection reconnects automatically (1/2/4/8/16 s, then every 30 s) with a "Reconnect now" action.
+- Chat conveniences: copy messages, regenerate or edit the last turn, a welcome state with suggestions, colored diffs for file changes, collapsible approval cards listing affected files, and per-conversation usage totals (with approximate cost for Claude).
+- History supports server-side search, paging (40 per page), rename, and pinning.
+- Claude Code, Codex, and Antigravity can operate the canvas through the `infinite-canvas` MCP; `canvas-agent install-mcp` registers it for all three in one step.
 - Isolate active canvases and turns across multiple browser tabs.
 
 See [Codex App Plugin](/docs/overview/codex-app-plugin) for installation and usage.

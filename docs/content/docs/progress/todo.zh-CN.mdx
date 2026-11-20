@@ -8,7 +8,6 @@ description: 当前项目后续值得处理的事项
 本文档用来记录当前项目后续比较值得处理的事项。
 
 - 发布 canvas-agent 0.7.0（协议 7、Claude 运行时、`install-mcp`）并更新 `~/.infinite-canvas/runtime`；发布前通过 npx 使用的仍是 0.6.0，新版网页会提示版本过旧。发布后在 Agent 连接页加入 `install-mcp` 入口说明。
-- 用真实 Codex/Claude 对话验证：复制/重新生成/编辑、文件 diff、审批卡、累计用量与费用、重命名/置顶，以及 40 条以上历史的分页。
 - Claude 运行时暂不加载插件自带 Skill（SDK 只支持白名单）；评估是否在技能页列出并允许启用插件 Skill。
 - Agent Skill 后续：补充网络检索安装、Skill 资源文件管理和可控的本地记忆沉淀。
 - 排查 chatgpt2api 在客户端批量恢复时的突发行为：批次中途刷新后补提交剩余槽位可能触发 `429 Too Many Requests`，且曾出现恢复轮询 `GET /tasks/{id}` 返回「Task ... not found or expired」。需要在服务端增加准入等待/Retry-After 处理，并确认任务 TTL 与高负载下的淘汰语义。
