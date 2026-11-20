@@ -1,6 +1,6 @@
 import type { AgentRuntimeName } from "../config.js";
-import { archiveClaudeThread, configureClaudeSkill, generateClaudeSkillDraft, interruptClaudeTurn, isRecoverableClaudeThreadError, listClaudeModels, listClaudeSkills, listClaudeThreads, readClaudeThread, resolveClaudeApproval, resolveClaudeSkill, resumeClaudeThread, runClaudeTurn, startClaudeThread } from "./claude.js";
-import { archiveCodexThread, configureCodexSkill, generateCodexSkillDraft, interruptCodexTurn, isRecoverableThreadError, listCodexModels, listCodexSkills, listCodexThreads, readCodexThread, resolveCodexApproval, resolveCodexSkill, resumeCodexThread, runCodexTurn, startCodexThread } from "./codex.js";
+import { archiveClaudeThread, renameClaudeThread, configureClaudeSkill, generateClaudeSkillDraft, interruptClaudeTurn, isRecoverableClaudeThreadError, listClaudeModels, listClaudeSkills, listClaudeThreads, readClaudeThread, resolveClaudeApproval, resolveClaudeSkill, resumeClaudeThread, runClaudeTurn, startClaudeThread } from "./claude.js";
+import { archiveCodexThread, renameCodexThread, configureCodexSkill, generateCodexSkillDraft, interruptCodexTurn, isRecoverableThreadError, listCodexModels, listCodexSkills, listCodexThreads, readCodexThread, resolveCodexApproval, resolveCodexSkill, resumeCodexThread, runCodexTurn, startCodexThread } from "./codex.js";
 
 /** 网页 Agent 面板可切换的本地运行时；两者对外暴露相同的会话、历史、Skill 与审批能力。 */
 export const agentRuntimes = {
@@ -11,6 +11,7 @@ export const agentRuntimes = {
         readThread: readCodexThread,
         listThreads: listCodexThreads,
         archiveThread: archiveCodexThread,
+        renameThread: renameCodexThread,
         listModels: listCodexModels,
         listSkills: listCodexSkills,
         resolveSkill: resolveCodexSkill,
@@ -28,6 +29,7 @@ export const agentRuntimes = {
         readThread: readClaudeThread,
         listThreads: listClaudeThreads,
         archiveThread: archiveClaudeThread,
+        renameThread: renameClaudeThread,
         listModels: listClaudeModels,
         listSkills: listClaudeSkills,
         resolveSkill: resolveClaudeSkill,

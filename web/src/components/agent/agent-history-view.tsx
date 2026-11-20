@@ -1,6 +1,6 @@
 import { useEffect, useState, type UIEvent } from "react";
-import { Button, Checkbox, Input } from "antd";
-import { FolderOpen, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
+import { Button, Checkbox, Input, Modal, Tooltip } from "antd";
+import { FolderOpen, Pencil, Pin, PinOff, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -22,6 +22,9 @@ export function AgentHistoryView({
     onNewThread,
     onResumeThread,
     onDeleteThreads,
+    pinnedThreadIds,
+    onRenameThread,
+    onTogglePinThread,
 }: {
     threads: AgentThreadSummary[];
     hasMore: boolean;
@@ -37,11 +40,16 @@ export function AgentHistoryView({
     onNewThread: () => void;
     onResumeThread: (threadId: string) => void;
     onDeleteThreads: (threadIds: string[]) => void;
+    pinnedThreadIds: string[];
+    onRenameThread: (threadId: string, name: string) => Promise<boolean>;
+    onTogglePinThread: (threadId: string, pinned: boolean) => void;
 }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { i18n, t } = useTranslation();
     const [draft, setDraft] = useState(search);
     const [selectedIds, setSelectedIds] = useState(() => new Set<string>());
+    const [renaming, setRenaming] = useState<AgentThreadSummary | null>(null);
+    const [renameDraft, setRenameDraft] = useState("");
     useEffect(() => setDraft(search), [search]);
     const onScroll = (event: UIEvent<HTMLDivElement>) => {
         const element = event.currentTarget;
@@ -50,6 +58,12 @@ export function AgentHistoryView({
     const selectedThreads = threads.filter((thread) => selectedIds.has(thread.id));
     const allSelected = Boolean(threads.length) && selectedThreads.length === threads.length;
     const canResume = connected && !loading && !busy;
+    const pinnedSet = new Set(pinnedThreadIds);
+    const orderedThreads = [...threads.filter((thread) => pinnedSet.has(thread.id)), ...threads.filter((thread) => !pinnedSet.has(thread.id))];
+    const submitRename = async () => {
+        const name = renameDraft.trim();
+        if (renaming && name && (await onRenameThread(renaming.id, name))) setRenaming(null);
+    };
     const toggleThread = (threadId: string) => {
         setSelectedIds((current) => {
             const next = new Set(current);
@@ -100,15 +114,16 @@ export function AgentHistoryView({
                     </div>
                 </div>
                 <div className="space-y-2">
-                    {threads.map((thread) => {
+                    {orderedThreads.map((thread) => {
                         const active = thread.id === activeThreadId;
+                        const pinned = pinnedSet.has(thread.id);
                         return (
                             <div
                                 key={thread.id}
                                 role="button"
                                 tabIndex={canResume ? 0 : -1}
                                 aria-disabled={!canResume}
-                                className={`${canResume ? "cursor-pointer hover:bg-black/5 dark:hover:bg-white/10" : "cursor-default opacity-60"} rounded-lg border px-2.5 py-2 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current/20`}
+                                className={`group ${canResume ? "cursor-pointer hover:bg-black/5 dark:hover:bg-white/10" : "cursor-default opacity-60"} rounded-lg border px-2.5 py-2 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current/20`}
                                 style={{ borderColor: active ? theme.node.text : theme.node.stroke, background: "transparent", color: theme.node.text }}
                                 onClick={() => {
                                     if (canResume) onResumeThread(thread.id);
@@ -135,11 +150,35 @@ export function AgentHistoryView({
                                                     {t("agent.history.current")}
                                                 </span>
                                             ) : null}
+                                            {pinned ? <Pin className="size-3 shrink-0" style={{ color: theme.node.muted }} /> : null}
                                             <div className="truncate text-sm font-medium leading-5">{thread.name || thread.preview || t("agent.history.untitled")}</div>
                                         </div>
                                         <div className="truncate text-[11px] leading-4 opacity-65">{thread.preview || thread.id}</div>
                                     </div>
                                     <span className="shrink-0 text-[10px] opacity-55">{formatThreadTime(thread.updatedAt || thread.createdAt, i18n.language)}</span>
+                                    <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition group-focus-within:opacity-100 group-hover:opacity-100">
+                                        {[
+                                            { key: "pin", label: pinned ? t("agent.history.unpin") : t("agent.history.pin"), icon: pinned ? <PinOff className="size-3.5" /> : <Pin className="size-3.5" />, onClick: () => onTogglePinThread(thread.id, !pinned) },
+                                            { key: "rename", label: t("agent.history.rename"), icon: <Pencil className="size-3.5" />, onClick: () => { setRenameDraft(thread.name || thread.preview || ""); setRenaming(thread); } },
+                                        ].map((action) => (
+                                            <Tooltip key={action.key} title={action.label}>
+                                                <button
+                                                    type="button"
+                                                    aria-label={action.label}
+                                                    disabled={!canResume}
+                                                    className="grid size-6 place-items-center rounded-md transition hover:bg-black/5 focus-visible:outline-none disabled:opacity-40 dark:hover:bg-white/10"
+                                                    style={{ color: theme.node.muted }}
+                                                    onClick={(event) => {
+                                                        event.stopPropagation();
+                                                        action.onClick();
+                                                    }}
+                                                    onKeyDown={(event) => event.stopPropagation()}
+                                                >
+                                                    {action.icon}
+                                                </button>
+                                            </Tooltip>
+                                        ))}
+                                    </div>
                                 </div>
                             </div>
                         );
@@ -155,6 +194,19 @@ export function AgentHistoryView({
                         </div>
                     ) : null}
                 </div>
+                <Modal
+                    open={Boolean(renaming)}
+                    title={t("agent.history.renameTitle")}
+                    okText={t("common.save")}
+                    cancelText={t("common.cancel")}
+                    okButtonProps={{ disabled: !renameDraft.trim() }}
+                    onOk={submitRename}
+                    onCancel={() => setRenaming(null)}
+                    centered
+                    width={420}
+                >
+                    <Input autoFocus maxLength={120} value={renameDraft} onChange={(event) => setRenameDraft(event.target.value)} onPressEnter={submitRename} />
+                </Modal>
             </div>
         </div>
     );

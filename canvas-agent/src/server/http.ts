@@ -299,6 +299,20 @@ export function startHttpServer() {
         const nextWorkspace = setActiveThread(activeThreadId, { sourceClientId: String(req.body?.clientId || "") });
         res.json({ ok: true, workspace: nextWorkspace, conversation: session.conversationStateSnapshot });
     }));
+    app.post("/agent/:runtime/threads/:threadId/rename", codexMutation(async (req, res) => {
+        const name = String(req.body?.name || "").trim().slice(0, 120);
+        if (!name) return res.status(400).json({ ok: false, error: "请输入对话名称" });
+        await runtimeOf(req).renameThread(emit, routeParam(req.params.threadId), name, ensureSiteWorkspace(config).workspacePath);
+        res.json({ ok: true });
+    }));
+    app.post("/agent/:runtime/threads/:threadId/pin", (req, res) => {
+        runtimeOf(req);
+        const threadId = routeParam(req.params.threadId);
+        const pinned = new Set(ensureSiteWorkspace(config).pinnedThreadIds || []);
+        if (req.body?.pinned) pinned.add(threadId);
+        else pinned.delete(threadId);
+        res.json({ ok: true, workspace: updateSiteWorkspace(config, { pinnedThreadIds: [...pinned] }) });
+    });
     app.post("/agent/:runtime/turn", codexMutation(async (req, res) => {
         const runtimeKey = runtimeName(req);
         const runtime = agentRuntimes[runtimeKey];

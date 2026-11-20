@@ -173,6 +173,11 @@ export async function archiveCodexThread(emit: AgentEmit, threadId: string, cwd?
     if (loadedThreadId === threadId) loadedThreadId = "";
 }
 
+/** 重命名指定 Codex 线程。 */
+export async function renameCodexThread(emit: AgentEmit, threadId: string, name: string, _cwd?: string) {
+    await (await getCodexApp(emit)).setThreadName(threadId, name);
+}
+
 async function mergeMessageMetadata<T extends { role: string; threadId: string; turnId: string }>(threadId: string, messages: T[]) {
     try {
         return await messageMetadataStore.mergeThread(threadId, messages);

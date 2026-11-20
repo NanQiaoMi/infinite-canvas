@@ -4,7 +4,7 @@ import { summarizeCanvasAgentOps, type CanvasAgentOp } from "@/lib/canvas/canvas
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { randomId } from "@/lib/utils";
 import { resolveAgentMessageAssetUrl } from "@/services/api/canvas-agent";
-import { useAgentStore, type AgentAttachment, type AgentChatItem, type AgentEventLog, type AgentMessageAttachment, type AgentTokenUsage } from "@/stores/use-agent-store";
+import { useAgentStore, type AgentAttachment, type AgentChatItem, type AgentEventLog, type AgentMessageAttachment, type AgentTokenUsage, type AgentTokenUsageTotal } from "@/stores/use-agent-store";
 import type { AgentChatAttachment } from "./agent-chat-message";
 export const REASONING_PLACEHOLDER = i18n.t("agent.events.analyzing");
 
@@ -53,7 +53,7 @@ export type AgentEventItem = {
     savedPath?: unknown;
     revisedPrompt?: unknown;
 };
-export type AgentUserDetail = { kind: string; status: string; rows?: Array<{ label: string; value: string }>; output?: string; files?: Array<{ path: string; action?: string }>; tasks?: Array<{ step: string; status: string }>; explanation?: string };
+export type AgentUserDetail = { kind: string; status: string; rows?: Array<{ label: string; value: string }>; output?: string; files?: Array<{ path: string; action?: string; diff?: string }>; tasks?: Array<{ step: string; status: string }>; explanation?: string };
 
 export type AgentLogContext = { endpoint: string; connected: boolean; enabled: boolean; activity: string; waiting: boolean; sending: boolean; messages: number; pendingTool?: string };
 
@@ -186,7 +186,7 @@ function commandActivityDetail(item: AgentEventItem, status: string): AgentUserD
 function activityFiles(value: unknown) {
     return (Array.isArray(value) ? value : []).flatMap((change) => {
         const path = stringText(objectField(change, "path"));
-        return path ? [{ path, action: changeAction(objectField(change, "kind")) }] : [];
+        return path ? [{ path, action: changeAction(objectField(change, "kind")), diff: stringText(objectField(change, "diff")) || undefined }] : [];
     });
 }
 
@@ -305,6 +305,15 @@ export function eventUsage(event: AgentEventPayload): AgentTokenUsage {
         input: numberField(event.usage, "input_tokens"),
         cached: numberField(event.usage, "cached_input_tokens"),
         output: numberField(event.usage, "output_tokens"),
+    };
+}
+
+export function eventUsageTotal(prev: AgentTokenUsageTotal | null, usage: Record<string, unknown> = {}): AgentTokenUsageTotal {
+    return {
+        input_tokens: (prev?.input_tokens ?? 0) + numberField(usage, "input_tokens"),
+        cached_input_tokens: (prev?.cached_input_tokens ?? 0) + numberField(usage, "cached_input_tokens"),
+        output_tokens: (prev?.output_tokens ?? 0) + numberField(usage, "output_tokens"),
+        cost_usd: (prev?.cost_usd ?? 0) + numberField(usage, "cost_usd"),
     };
 }
 

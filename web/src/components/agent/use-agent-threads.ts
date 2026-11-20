@@ -26,7 +26,7 @@ export function syncRuntime(next: AgentRuntimeName) {
         reasoningEffort: (localStorage.getItem(`canvas-agent-reasoning-effort:${next}`) as AgentReasoningEffort | null) || "",
     });
 }
-type AgentWorkspace = { workspacePath: string; activeThreadId?: string };
+type AgentWorkspace = { workspacePath: string; activeThreadId?: string; pinnedThreadIds?: string[] };
 type AgentThreadsResponse = { ok?: boolean; workspace?: AgentWorkspace; conversation?: AgentConversationState; data?: AgentThreadSummary[]; nextCursor?: string | null };
 /** 历史列表请求路径，带上当前搜索词与分页游标（空值不拼入）。 */
 function threadsPath(cursor = "") {
@@ -159,6 +159,7 @@ export function useAgentThreads({ endpoint, clientIdRef, connectedRef, pendingTo
             activeTurnId: threadChanged || emptyThread ? "" : current.activeTurnId,
             messages,
             tokenUsage: threadChanged || emptyThread ? null : current.tokenUsage,
+            tokenUsageTotal: threadChanged || emptyThread ? null : current.tokenUsageTotal,
             pendingTool: null,
             pendingApprovals: threadChanged || emptyThread ? [] : current.pendingApprovals,
         });
@@ -194,7 +195,7 @@ export function useAgentThreads({ endpoint, clientIdRef, connectedRef, pendingTo
             const currentThreadId = current.activeThreadId || data.workspace?.activeThreadId || "";
             if (!data.conversation && currentThreadId !== current.activeThreadId) sequence = applyWorkspaceChange({ activeThreadId: currentThreadId });
             if (sequence !== loadThreadsSequenceRef.current || useAgentStore.getState().activeThreadId !== currentThreadId) return;
-            setAgentState({ threads: data.data || [], threadsNextCursor: data.nextCursor || "", workspacePath: data.workspace?.workspacePath || "" });
+            setAgentState({ threads: data.data || [], threadsNextCursor: data.nextCursor || "", workspacePath: data.workspace?.workspacePath || "", pinnedThreadIds: data.workspace?.pinnedThreadIds || [] });
             if (currentThreadId && !skipHistory) {
                 await loadThreadSnapshot(currentThreadId, sequence, undefined, expectedTurnId);
             } else {
@@ -217,7 +218,7 @@ export function useAgentThreads({ endpoint, clientIdRef, connectedRef, pendingTo
             if (sequence !== loadThreadsSequenceRef.current || useAgentStore.getState().threadSearch !== current.threadSearch) return;
             const latest = useAgentStore.getState();
             const ids = new Set(latest.threads.map((thread) => thread.id));
-            setAgentState({ threads: [...latest.threads, ...(data.data || []).filter((thread) => !ids.has(thread.id))], threadsNextCursor: data.nextCursor || "" });
+            setAgentState({ threads: [...latest.threads, ...(data.data || []).filter((thread) => !ids.has(thread.id))], threadsNextCursor: data.nextCursor || "", pinnedThreadIds: data.workspace?.pinnedThreadIds || [] });
         } catch (error) {
             addEventLog(rt("historyReadFailed"), error);
         } finally {
@@ -231,7 +232,7 @@ export function useAgentThreads({ endpoint, clientIdRef, connectedRef, pendingTo
         try {
             const data = await fetchAgentJson<AgentThreadsResponse>(endpoint, token, threadsPath());
             if (useAgentStore.getState().threadSearch !== threadSearch) return;
-            setAgentState({ threads: data.data || [], threadsNextCursor: data.nextCursor || "" });
+            setAgentState({ threads: data.data || [], threadsNextCursor: data.nextCursor || "", pinnedThreadIds: data.workspace?.pinnedThreadIds || [] });
         } catch (error) {
             addEventLog(rt("historyReadFailed"), error);
         } finally {
@@ -258,7 +259,7 @@ export function useAgentThreads({ endpoint, clientIdRef, connectedRef, pendingTo
             return;
         }
         syncRuntime(next);
-        setAgentState({ messages: [], threads: [], activeThreadId: "", activeTurnId: "", tokenUsage: null });
+        setAgentState({ messages: [], threads: [], activeThreadId: "", activeTurnId: "", tokenUsage: null, tokenUsageTotal: null });
         if (current.connected) {
             await startNewThread();
             await loadThreads(true);
@@ -328,6 +329,28 @@ export function useAgentThreads({ endpoint, clientIdRef, connectedRef, pendingTo
         }
     };
 
+    /** 重命名后刷新列表，沿用当前搜索词，不重载打开中的对话。 */
+    const renameThread = async (threadId: string, name: string) => {
+        if (!connected) return false;
+        try {
+            await fetchAgentJson(endpoint, token, agentPath(`/threads/${encodeURIComponent(threadId)}/rename`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name }) });
+            message.success(t("agent.history.renamed"));
+            await loadThreads(true);
+            return true;
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : t("agent.state.requestFailed"));
+            return false;
+        }
+    };
+    const togglePinThread = async (threadId: string, pinned: boolean) => {
+        if (!connected) return;
+        try {
+            const data = await fetchAgentJson<{ ok?: boolean; workspace?: AgentWorkspace }>(endpoint, token, agentPath(`/threads/${encodeURIComponent(threadId)}/pin`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pinned }) });
+            setAgentState({ pinnedThreadIds: data.workspace?.pinnedThreadIds || [] });
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : t("agent.state.requestFailed"));
+        }
+    };
     const confirmDeleteThreads = (threadIds: string[]) => {
         modal.confirm({
             title: rt("deleteConversations", { count: threadIds.length }),
@@ -338,5 +361,5 @@ export function useAgentThreads({ endpoint, clientIdRef, connectedRef, pendingTo
             onOk: () => deleteThreads(threadIds),
         });
     };
-    return { loadThreadSnapshot, applyWorkspaceChange, applyConversationState, loadThreads, loadMoreThreads, searchThreads, beginThreadOperation, finishThreadOperation, switchRuntime, startNewThread, resumeThread, deleteThreads, confirmDeleteThreads, loadThreadsSequenceRef, threadMessagesRef, authoritativeHistoryTurnsRef, threadOperationRef };
+    return { loadThreadSnapshot, applyWorkspaceChange, applyConversationState, loadThreads, loadMoreThreads, searchThreads, beginThreadOperation, finishThreadOperation, switchRuntime, startNewThread, resumeThread, deleteThreads, confirmDeleteThreads, renameThread, togglePinThread, loadThreadsSequenceRef, threadMessagesRef, authoritativeHistoryTurnsRef, threadOperationRef };
 }

@@ -97,6 +97,10 @@ type CodexRequestSpec = {
         params: { threadId: string };
         result: Record<string, never>;
     };
+    "thread/name/set": {
+        params: { threadId: string; name: string };
+        result: Record<string, never>;
+    };
     "thread/unsubscribe": {
         params: { threadId: string };
         result: { status: "notLoaded" | "notSubscribed" | "unsubscribed" };

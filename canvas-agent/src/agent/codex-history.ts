@@ -105,7 +105,7 @@ export function threadMessages(thread: unknown, planUpdates: CodexPlanUpdate[] =
             if (type === "fileChange") {
                 const changes = arrayValue(field(item, "changes"));
                 const error = itemErrorMessage(item);
-                push({ id, role: "tool", title: "修改文件", text: error || fileChangeSummary(changes), detail: { kind: "file", status: itemStatus(item, error), files: changes.map((change) => ({ path: String(field(change, "path") || "未知文件"), action: changeKind(field(change, "kind")) })), ...(error ? { output: error } : {}) } });
+                push({ id, role: "tool", title: "修改文件", text: error || fileChangeSummary(changes), detail: { kind: "file", status: itemStatus(item, error), files: changes.map((change) => ({ path: String(field(change, "path") || "未知文件"), action: changeKind(field(change, "kind")), ...(field(change, "diff") ? { diff: String(field(change, "diff")) } : {}) })), ...(error ? { output: error } : {}) } });
             }
             if (type === "reasoning" && reasoningText && !reasoningAdded) {
                 const sourceItemIds = reasoningItems.map((item) => item.id);

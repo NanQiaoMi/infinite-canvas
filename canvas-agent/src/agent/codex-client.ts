@@ -169,6 +169,11 @@ export class CodexAppClient {
         return this.request("thread/archive", { threadId });
     }
 
+    /** 设置线程在列表中显示的名称。 */
+    setThreadName(threadId: string, name: string) {
+        return this.request("thread/name/set", { threadId, name });
+    }
+
     /** 释放临时草稿线程的 App Server 订阅和进程内缓存。 */
     async closeSkillDraftThread(threadId: string) {
         try {

@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { archiveSession, getSessionInfo, listSessions, query, type CanUseTool, type EffortLevel, type Options, type PermissionMode, type PermissionResult, type PermissionUpdate, type Query, type SDKMessage, type SDKSessionInfo, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import { archiveSession, getSessionInfo, listSessions, query, renameSession, type CanUseTool, type EffortLevel, type Options, type PermissionMode, type PermissionResult, type PermissionUpdate, type Query, type SDKMessage, type SDKSessionInfo, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import matter from "gray-matter";
 
 import { AGENT_PROMPT, CONFIG_DIR } from "../config.js";
@@ -115,6 +115,13 @@ export async function listClaudeThreads(_emit: AgentEmit, options: { cwd: string
     const page = term ? data.slice(offset, offset + limit) : data.slice(0, limit);
     const hasMore = term ? data.length > offset + limit : sessions.length > limit;
     return { data: page, nextCursor: hasMore ? String(offset + limit) : null, backwardsCursor: null };
+}
+
+/** 重命名指定 Claude 会话；尚未发送消息的草稿会话无法重命名。 */
+export async function renameClaudeThread(_emit: AgentEmit, threadId: string, name: string, cwd = "") {
+    assertThreadId(threadId);
+    if (!(await sessionInfo(threadId, cwd))) throw new Error("请先发送一条消息后再重命名该对话");
+    await renameSession(threadId, name, { dir: cwd });
 }
 
 /** 归档指定 Claude 会话并清理画布侧历史。 */
@@ -265,7 +272,7 @@ async function runClaudeTurnNow(prompt: string, lifecycleEmit: AgentEmit, attach
             if (message.type === "result") {
                 const failed = message.subtype !== "success" || message.is_error;
                 const error = failed ? ("errors" in message && message.errors.length ? message.errors.join("\n") : "result" in message ? message.result : "") : "";
-                await finish(turn.interrupted ? "interrupted" : failed ? "failed" : "completed", turn.interrupted ? undefined : error || undefined, message.usage);
+                await finish(turn.interrupted ? "interrupted" : failed ? "failed" : "completed", turn.interrupted ? undefined : error || undefined, { ...message.usage, total_cost_usd: message.total_cost_usd });
                 continue;
             }
             translator.handle(message);
@@ -318,7 +325,8 @@ export class ClaudeTurnTranslator {
     async complete(status: string, error: string | undefined, usage: unknown, prompt: string, messageText?: string) {
         this.tools.forEach((item) => this.itemEvent("item.completed", { ...item, status: status === "completed" ? "completed" : "failed" }));
         this.tools.clear();
-        const normalizedUsage = usage ? { input_tokens: Number(field(usage, "input_tokens") || 0), cached_input_tokens: Number(field(usage, "cache_read_input_tokens") || 0), output_tokens: Number(field(usage, "output_tokens") || 0), reasoning_output_tokens: 0 } : null;
+        const cost = Number(field(usage, "total_cost_usd") || 0);
+        const normalizedUsage = usage ? { input_tokens: Number(field(usage, "input_tokens") || 0), cached_input_tokens: Number(field(usage, "cache_read_input_tokens") || 0), output_tokens: Number(field(usage, "output_tokens") || 0), reasoning_output_tokens: 0, ...(cost ? { cost_usd: cost } : {}) } : null;
         if (normalizedUsage) this.event({ type: "usage.updated", usage: normalizedUsage });
         const turn = { id: this.turnId, status, ...(error ? { error: { message: error } } : {}), input: prompt, ...(messageText ? { messageText } : {}), ...(this.plan.length ? { plan: this.plan } : {}) };
         await this.history.recordTurn({ threadId: this.threadId, turnId: this.turnId, turn }).catch((historyError) => logger.warn("Failed to persist Claude turn history", { threadId: this.threadId, turnId: this.turnId, error: historyError }));
@@ -419,10 +427,20 @@ function toolItem(id: string, name: string, input: JsonRecord, cwd: string): Jso
         return { id, type: "mcp_tool_call", server, tool: tool.join("__"), arguments: input, status: "inProgress" };
     }
     if (name === "Bash") return { id, type: "command_execution", command: String(input.command || ""), cwd, status: "inProgress" };
-    if (FILE_TOOLS.has(name)) return { id, type: "file_change", changes: [{ path: String(input.file_path || input.notebook_path || ""), kind: "update" }], status: "inProgress" };
+    if (FILE_TOOLS.has(name)) return { id, type: "file_change", changes: [{ path: String(input.file_path || input.notebook_path || ""), kind: "update", diff: fileToolDiff(name, input) }], status: "inProgress" };
     if (name === "WebSearch") return { id, type: "web_search", query: String(input.query || ""), action: { type: "search", query: String(input.query || "") }, status: "inProgress" };
     if (name === "WebFetch") return { id, type: "web_search", query: "", action: { type: "openPage", url: String(input.url || "") }, status: "inProgress" };
     return { id, type: "dynamic_tool_call", tool: name, arguments: input, status: "inProgress" };
+}
+
+/** 根据 Claude 文件工具参数生成与 Codex fileChange 一致的简易 diff 文本。 */
+function fileToolDiff(name: string, input: JsonRecord) {
+    const lines = (prefix: string, value: unknown) => String(value ?? "").split("\n").map((line) => `${prefix}${line}`);
+    const edits = name === "MultiEdit" && Array.isArray(input.edits) ? input.edits as JsonRecord[] : [input];
+    const diff = name === "Write" || name === "NotebookEdit"
+        ? lines("+", input.content ?? input.new_source)
+        : edits.flatMap((item) => [...lines("-", item.old_string), ...lines("+", item.new_string)]);
+    return diff.join("\n");
 }
 
 function completeToolItem(item: JsonRecord, text: string, failed: boolean): JsonRecord {

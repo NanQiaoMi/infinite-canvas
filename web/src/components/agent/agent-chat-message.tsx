@@ -271,6 +271,10 @@ export function AgentApprovalCard({ approval, onDecision }: { approval: AgentPen
     const isNetwork = Boolean(approval.networkApprovalContext);
     const title = t(isNetwork ? "agent.message.networkApproval" : isFile ? "agent.message.fileApproval" : approval.method === "item/permissions/requestApproval" ? "agent.message.permissionApproval" : "agent.message.commandApproval");
     const target = isNetwork ? approvalTarget(approval.networkApprovalContext) : isFile ? approval.grantRoot || approval.cwd : commandText(approval.command) || approval.cwd;
+    const [expanded, setExpanded] = useState(false);
+    const longTarget = (target || "").length > 160 || (target || "").split("\n").length > 3;
+    const approvalDetail = useAgentStore((state) => isFile && approval.itemId ? state.messages.find((item) => item.itemId === approval.itemId)?.detail : undefined);
+    const approvalFiles = userDetail(approvalDetail)?.files ?? [];
     return (
         <div className="min-w-0 rounded-xl border px-3 py-3" style={{ borderColor: `color-mix(in srgb, ${theme.status.warning} 32%, transparent)`, background: `color-mix(in srgb, ${theme.status.warning} 3.5%, transparent)`, color: theme.node.text }}>
             <div className="flex items-start gap-2.5">
@@ -278,7 +282,18 @@ export function AgentApprovalCard({ approval, onDecision }: { approval: AgentPen
                 <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium">{title}</div>
                     {approval.reason ? <div className="mt-1 text-xs leading-5" style={{ color: theme.node.muted }}>{approval.reason}</div> : null}
-                    {target ? <div className="mt-1.5 break-all rounded-lg px-2.5 py-2 font-mono text-[11px] leading-4" style={{ background: theme.toolbar.panel, color: theme.node.text }}>{target}</div> : null}
+                    {target ? (
+                        <>
+                            <div className={`mt-1.5 whitespace-pre-wrap break-all rounded-lg px-2.5 py-2 font-mono text-[11px] leading-4 ${expanded ? "" : "max-h-24 overflow-hidden"}`} style={{ background: theme.toolbar.panel, color: theme.node.text }}>{target}</div>
+                            {longTarget ? <button type="button" className="mt-1 text-[11px] opacity-70 hover:opacity-100" style={{ color: theme.node.muted }} onClick={() => setExpanded((value) => !value)}>{t(expanded ? "agent.message.collapse" : "agent.message.expand")}</button> : null}
+                        </>
+                    ) : null}
+                    {approvalFiles.length ? (
+                        <div className="mt-1.5 space-y-0.5 font-mono text-[11px] leading-4" style={{ color: theme.node.muted }}>
+                            {approvalFiles.slice(0, 5).map((file) => <div key={file.path} className="break-all">{file.path}</div>)}
+                            {approvalFiles.length > 5 ? <div>{t("agent.message.moreFiles", { count: approvalFiles.length })}</div> : null}
+                        </div>
+                    ) : null}
                 </div>
             </div>
             <div className="mt-3 flex flex-wrap justify-end gap-1.5 border-t pt-3" style={{ borderColor: theme.node.stroke }}>
@@ -511,7 +526,7 @@ function approvalTarget(value: unknown) {
 
 type PlanTask = { step: string; status: string };
 type PlanDetail = { status: string; tasks: PlanTask[]; explanation?: string };
-type UserDetail = { kind?: string; status?: string; rows?: Array<{ label: string; value: string }>; output?: string; files?: Array<{ path: string; action?: string }> };
+type UserDetail = { kind?: string; status?: string; rows?: Array<{ label: string; value: string }>; output?: string; files?: Array<{ path: string; action?: string; diff?: string }> };
 
 function AgentDetailBlock({ detail }: { detail: UserDetail }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
@@ -532,10 +547,13 @@ function AgentDetailBlock({ detail }: { detail: UserDetail }) {
                 <div className="space-y-1.5">
                     <div className="opacity-60">{t("agent.message.files")}</div>
                     {detail.files.map((file) => (
-                        <div key={`${file.action}-${file.path}`} className="flex items-start gap-2">
-                            <FileText className="mt-0.5 size-3.5 shrink-0" />
-                            <span className="min-w-0 flex-1 break-all" style={{ color: theme.node.text }}>{file.path}</span>
-                            {file.action ? <span className="shrink-0 opacity-60">{file.action}</span> : null}
+                        <div key={`${file.action}-${file.path}`} className="min-w-0">
+                            <div className="flex items-start gap-2">
+                                <FileText className="mt-0.5 size-3.5 shrink-0" />
+                                <span className="min-w-0 flex-1 break-all" style={{ color: theme.node.text }}>{file.path}</span>
+                                {file.action ? <span className="shrink-0 opacity-60">{file.action}</span> : null}
+                            </div>
+                            {file.diff ? <AgentFileDiff diff={file.diff} /> : null}
                         </div>
                     ))}
                 </div>
@@ -547,6 +565,25 @@ function AgentDetailBlock({ detail }: { detail: UserDetail }) {
                 </div>
             ) : null}
         </div>
+    );
+}
+
+function AgentFileDiff({ diff }: { diff: string }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const { t } = useTranslation();
+    const lines = diff.split("\n");
+    const colorOf = (line: string) => line.startsWith("+") && !line.startsWith("+++") ? theme.status.success
+        : line.startsWith("-") && !line.startsWith("---") ? theme.status.danger
+            : line.startsWith("@@") ? theme.status.info
+                : theme.node.muted;
+    return (
+        <details className="ml-5.5 mt-1">
+            <summary className="cursor-pointer opacity-70">{t("agent.message.viewDiff")}</summary>
+            <pre className="thin-scrollbar mt-1.5 max-h-64 overflow-auto text-[11px] leading-5 font-mono" style={{ background: theme.toolbar.panel }}>
+                {lines.slice(0, 400).map((line, index) => <span key={index} className="block whitespace-pre" style={{ color: colorOf(line) }}>{line || " "}</span>)}
+            </pre>
+            {lines.length > 400 ? <div className="mt-1 opacity-60" style={{ color: theme.node.muted }}>{t("agent.message.diffTruncated")}</div> : null}
+        </details>
     );
 }
 
@@ -649,7 +686,8 @@ function userDetail(value: unknown): UserDetail | null {
         ? detail.files.flatMap((file) => {
               if (!file || typeof file !== "object") return [];
               const path = String((file as Record<string, unknown>).path || "");
-              return path ? [{ path, action: String((file as Record<string, unknown>).action || "") || undefined }] : [];
+              const diff = String((file as Record<string, unknown>).diff || "");
+              return path ? [{ path, action: String((file as Record<string, unknown>).action || "") || undefined, diff: diff || undefined }] : [];
           })
         : [];
     const error = objectField(detail.error, "message");

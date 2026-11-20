@@ -17,6 +17,7 @@ import {
     agentTitle,
     bindPendingTurnMessages,
     eventUsage,
+    eventUsageTotal,
     formatAgentActivity,
     formatAgentEvent,
     formatAgentEventLog,
@@ -245,6 +246,7 @@ export function useAgentEvents({ endpoint, clientIdRef, canvasContextRef, liveTu
             const current = useAgentStore.getState();
             setAgentState({
                 activeTurnId: current.activeTurnId === scope.turnId ? "" : current.activeTurnId,
+                tokenUsageTotal: event.usage && !event.replayed ? eventUsageTotal(current.tokenUsageTotal, event.usage) : current.tokenUsageTotal,
                 messages: current.messages.map((message) => message.threadId === scope.threadId && message.turnId === scope.turnId && message.streamId ? { ...message, streamId: undefined } : message),
             });
             if (event.status === "failed") showAgentError(event.error?.message, event, !event.replayed);

@@ -192,13 +192,16 @@ function isCommandMessage(item: AgentChatItem) {
 
 export function AgentUsageBar({ usage }: { usage: AgentTokenUsage }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const total = useAgentStore((state) => state.tokenUsageTotal);
     const { t } = useTranslation();
     return (
-        <div className="flex items-center justify-center gap-4 px-4 pt-1 text-[11px] tabular-nums" style={{ color: theme.node.muted }}>
+        <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 px-4 pt-1 text-[11px] tabular-nums" style={{ color: theme.node.muted }}>
             <span className="opacity-70">{t("agent.chat.latestCall")}</span>
             <UsageNumber label={t("agent.chat.input")} value={usage.input} color={theme.node.text} />
             <UsageNumber label={t("agent.chat.cached")} value={usage.cached} color={theme.node.text} />
             <UsageNumber label={t("agent.chat.output")} value={usage.output} color={theme.node.text} />
+            {total ? <span className="opacity-70">{t("agent.usage.total", { input: total.input_tokens.toLocaleString(), output: total.output_tokens.toLocaleString() })}</span> : null}
+            {total && total.cost_usd > 0 ? <span className="opacity-70">{t("agent.usage.cost", { cost: total.cost_usd.toFixed(4) })}</span> : null}
         </div>
     );
 }

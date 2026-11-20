@@ -73,7 +73,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
     // canvasContext is intentionally excluded because project updates it every frame during dragging and resizing.
     // The panel uses it only for ref synchronization and debounced postState calls, never during rendering.
     // Subscribing here would rerender the panel every frame and amplify the #185 crash, so it is observed imperatively below.
-    const { width, url, token, connected, enabled, prompt, attachments, sending, waiting, tokenUsage, eventLogs, threads, threadsNextCursor, threadSearch, activeThreadId, workspacePath, loadingThreads, activeTab, confirmTools, runtime, permissionMode, models, model, reasoningEffort, activity, conversation, connectError, reconnectAttempt, pendingTool, pendingApprovals } = useAgentStore(
+    const { width, url, token, connected, enabled, prompt, attachments, sending, waiting, tokenUsage, eventLogs, threads, threadsNextCursor, pinnedThreadIds, threadSearch, activeThreadId, workspacePath, loadingThreads, activeTab, confirmTools, runtime, permissionMode, models, model, reasoningEffort, activity, conversation, connectError, reconnectAttempt, pendingTool, pendingApprovals } = useAgentStore(
         useShallow((state) => ({
             width: state.width,
             url: state.url,
@@ -88,6 +88,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
             eventLogs: state.eventLogs,
             threads: state.threads,
             threadsNextCursor: state.threadsNextCursor,
+            pinnedThreadIds: state.pinnedThreadIds,
             threadSearch: state.threadSearch,
             activeThreadId: state.activeThreadId,
             workspacePath: state.workspacePath,
@@ -136,7 +137,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
     const liveTurnKeysRef = useRef(new Set<string>());
     const endpoint = useMemo(() => url.trim().replace(/\/$/, ""), [url]);
     const { addMessage, addEventLog, showAgentError, handleAgentEvent } = useAgentEvents({ endpoint, clientIdRef, canvasContextRef, liveTurnKeysRef });
-    const { loadThreadsSequenceRef, threadMessagesRef, authoritativeHistoryTurnsRef, threadOperationRef, applyConversationState, applyWorkspaceChange, loadThreads, loadMoreThreads, searchThreads, switchRuntime, startNewThread, resumeThread, confirmDeleteThreads } = useAgentThreads({ endpoint, clientIdRef, connectedRef, pendingToolRef, liveTurnKeysRef, addEventLog });
+    const { loadThreadsSequenceRef, threadMessagesRef, authoritativeHistoryTurnsRef, threadOperationRef, applyConversationState, applyWorkspaceChange, loadThreads, loadMoreThreads, searchThreads, switchRuntime, startNewThread, resumeThread, confirmDeleteThreads, renameThread, togglePinThread } = useAgentThreads({ endpoint, clientIdRef, connectedRef, pendingToolRef, liveTurnKeysRef, addEventLog });
     const urlAgentAutoConnect = searchParams.has("agentUrl") && searchParams.has("agentToken");
     useEffect(() => {
         let disposed = false;
@@ -781,6 +782,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
         setAgentState({
             messages: [],
             tokenUsage: null,
+            tokenUsageTotal: null,
             threads: [],
             activeThreadId: "",
             activeTurnId: "",
@@ -880,6 +882,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
                 <AgentHistoryView
                     threads={threads}
                     hasMore={Boolean(threadsNextCursor)}
+                    pinnedThreadIds={pinnedThreadIds}
                     search={threadSearch}
                     onSearch={searchThreads}
                     onLoadMore={loadMoreThreads}
@@ -892,6 +895,8 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
                     onNewThread={() => void startNewThread()}
                     onResumeThread={(threadId) => void resumeThread(threadId)}
                     onDeleteThreads={confirmDeleteThreads}
+                    onRenameThread={renameThread}
+                    onTogglePinThread={togglePinThread}
                 />
             ) : activeTab === "log" ? (
                 <AgentLogView
