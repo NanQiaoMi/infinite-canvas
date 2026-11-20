@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { App, Button, Segmented, Tooltip } from "antd";
-import { Bot, History, MessageSquare, PanelRightClose, PlugZap, Plus, Sparkles, Terminal } from "lucide-react";
+import { App, Button, Dropdown, Tooltip } from "antd";
+import { Bot, ChevronDown, History, MessageSquare, PanelRightClose, PlugZap, Plus, Sparkles, Terminal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import i18n from "@/i18n";
@@ -509,7 +509,12 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
             message.warning(rt(canvasReferences.length ? "someCanvasReferencesMissing" : "canvasReferencesMissing"));
         }
         const requestPrompt = promptWithCanvasReferences(promptWithAttachments(text, files), canvasReferences);
-        if (!currentState.connected || !requestPrompt || currentState.sending || currentState.waiting || currentState.loadingThreads || !["ready", "warning"].includes(currentState.conversation.status)) return;
+        const blockedReason = !currentState.connected ? "sendBlockedOffline" : currentState.sending || currentState.waiting ? "sendBlockedBusy" : currentState.loadingThreads || !["ready", "warning"].includes(currentState.conversation.status) ? "sendBlockedPreparing" : "";
+        if (!requestPrompt) return;
+        if (blockedReason) {
+            message.info(rt(blockedReason));
+            return;
+        }
         let referenceImages: AgentAttachment[] = [];
         if (canvasReferences.some((item) => item.kind === "image")) {
             setAgentState({ sending: true, activity: rt("readingCanvasImages") });
@@ -808,12 +813,21 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
                         </span>
                         <div className="hidden text-base font-semibold leading-5 @min-[560px]:block">Agent</div>
                         <Tooltip title={t("agent.panel.switchRuntime")} placement="bottom">
-                            <Segmented
-                                size="small"
-                                value={runtime}
-                                options={[{ value: "codex", label: "Codex" }, { value: "claude", label: "Claude" }]}
-                                onChange={(value) => void switchRuntime(value as AgentRuntimeName)}
-                            />
+                            <span className="inline-flex shrink-0">
+                                <Dropdown
+                                    trigger={["click"]}
+                                    menu={{
+                                        items: [{ key: "codex", label: "Codex" }, { key: "claude", label: "Claude" }],
+                                        selectedKeys: [runtime],
+                                        onClick: ({ key }) => void switchRuntime(key as AgentRuntimeName),
+                                    }}
+                                >
+                                    <button type="button" className="inline-flex h-8 items-center gap-1 rounded-md px-2 text-sm font-medium hover:bg-black/5 dark:hover:bg-white/10" style={{ color: theme.node.text }}>
+                                        {runtime === "claude" ? "Claude" : "Codex"}
+                                        <ChevronDown className="size-3.5" />
+                                    </button>
+                                </Dropdown>
+                            </span>
                         </Tooltip>
                         <Tooltip title={t("agent.panel.connectionSettings", { status: connectionStatus })} placement="bottom">
                             <Button size="small" type="text" className="!h-8 !w-8 !min-w-8 !px-0 @min-[560px]:!w-auto @min-[560px]:!min-w-0 @min-[560px]:!px-[7px]" aria-label={t("agent.panel.connectionSettingsLabel", { status: connectionStatus })} icon={<PlugZap className="size-3.5" style={{ color: connectionStatusColor }} />} onClick={() => setAgentState({ activeTab: "setup" })}>

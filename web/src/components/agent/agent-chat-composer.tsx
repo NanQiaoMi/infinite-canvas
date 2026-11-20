@@ -77,7 +77,7 @@ export function AgentChatComposer({
                 ) : null}
                 <AgentChatPromptInput value={prompt} disabled={disabled || sending} placeholder={placeholder} onChange={onPromptChange} onSubmit={() => { if (canSubmit) void onSubmit(); }} onAddFiles={onAddFiles} />
                 <div className="@container mt-2 flex items-center justify-between gap-2">
-                    <div className="flex min-w-0 items-center gap-1">
+                    <div className="flex min-w-0 flex-1 items-center gap-1">
                         {onAddFiles ? (
                             <>
                                 <input ref={fileInputRef} hidden type="file" accept="image/*" multiple onChange={(event) => {
@@ -116,12 +116,12 @@ function AgentModelControls({ models, model, reasoningEffort, onModelChange, onR
     return (
         <div className="flex min-w-0 items-center gap-1">
             <Tooltip title={t("agent.composer.model", { model: current.displayName || current.model })} placement="top" open={modelOpen ? false : undefined}>
-                <span className="inline-flex shrink-0">
+                <span className="inline-flex min-w-0">
                     <Select value={model} open={modelOpen} onOpenChange={setModelOpen} onValueChange={onModelChange}>
-                        <SelectTrigger hideChevron className="h-9 w-9 min-w-9 justify-center gap-0 rounded-full border-0 bg-transparent px-0 text-xs font-medium shadow-none hover:bg-black/5 focus:ring-0 @min-[660px]:w-auto @min-[660px]:min-w-36 @min-[660px]:max-w-36 @min-[660px]:justify-start @min-[660px]:gap-1.5 @min-[660px]:px-2.5 dark:hover:bg-white/10" aria-label={t("agent.composer.selectModel", { model: current.displayName || current.model })}>
+                        <SelectTrigger hideChevron className="h-9 min-w-0 justify-start gap-1.5 rounded-full border-0 bg-transparent px-2.5 text-xs font-medium shadow-none hover:bg-black/5 focus:ring-0 dark:hover:bg-white/10" aria-label={t("agent.composer.selectModel", { model: current.displayName || current.model })}>
                             <Cpu className="size-3.5 shrink-0 opacity-70" />
-                            <span className="hidden min-w-0 flex-1 truncate text-left @min-[660px]:inline">{current.displayName || current.model}</span>
-                            <ChevronUp className="hidden size-3 opacity-50 @min-[660px]:block" />
+                            <span className="min-w-0 max-w-[5rem] truncate text-left @min-[560px]:max-w-[7rem]">{current.displayName || current.model}</span>
+                            <ChevronUp className="size-3 shrink-0 opacity-50" />
                         </SelectTrigger>
                         <SelectContent data-canvas-no-zoom position="popper" side="top" align="start" sideOffset={6} className="z-[1200] w-64 rounded-xl border border-border/70 bg-popover p-1 shadow-xl">
                             {models.map((item) => <SelectItem key={item.model} value={item.model}>{item.displayName || item.model}</SelectItem>)}
@@ -173,10 +173,10 @@ function PermissionModeMenu({ permissionMode, onChange }: { permissionMode: Agen
                         })),
                     }}
                 >
-                    <button type="button" className="flex h-9 w-9 min-w-9 shrink-0 items-center justify-center gap-0 rounded-full px-0 text-xs font-medium transition hover:bg-black/5 @min-[660px]:h-9 @min-[660px]:w-auto @min-[660px]:min-w-0 @min-[660px]:justify-start @min-[660px]:gap-1.5 @min-[660px]:px-2.5 dark:hover:bg-white/10" style={{ color: permissionMode === "full" ? theme.status.warning : theme.node.text }} aria-label={t("agent.composer.selectPermission", { mode: current.title })}>
+                    <button type="button" className="flex h-9 min-w-0 items-center justify-start gap-1.5 rounded-full px-2.5 text-xs font-medium transition hover:bg-black/5 dark:hover:bg-white/10" style={{ color: permissionMode === "full" ? theme.status.warning : theme.node.text }} aria-label={t("agent.composer.selectPermission", { mode: current.title })}>
                         {current.icon}
-                        <span className="hidden @min-[660px]:inline">{current.shortTitle}</span>
-                        <ChevronUp className="hidden size-3 opacity-50 @min-[660px]:block" />
+                        <span className="min-w-0 max-w-[7rem] truncate">{current.shortTitle}</span>
+                        <ChevronUp className="size-3 shrink-0 opacity-50" />
                     </button>
                 </Dropdown>
             </span>

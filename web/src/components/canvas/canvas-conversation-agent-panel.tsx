@@ -493,7 +493,7 @@ export function CanvasConversationAgentPanel({ onSwitchToCodex }: { onSwitchToCo
                         />
                     </Tooltip>
                     {onSwitchToCodex ? (
-                        <Tooltip title="切换至本地 Codex 模式">
+                        <Tooltip title={t("agent.panel.switchToLocal")}>
                             <Button
                                 type="text"
                                 size="small"

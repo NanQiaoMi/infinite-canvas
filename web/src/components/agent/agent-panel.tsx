@@ -14,6 +14,7 @@ export function AgentPanel() {
     const { t } = useTranslation();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const width = useAgentStore((state) => state.width);
+    const runtime = useAgentStore((state) => state.runtime);
     const [resizing, setResizing] = useState(false);
     const [agentMode, setAgentMode] = useState<"conversation" | "codex">("conversation");
     const panelMounted = useAgentStore((state) => state.panelMounted);
@@ -64,14 +65,14 @@ export function AgentPanel() {
                 ) : (
                     <div className="relative flex h-full w-full flex-col">
                         <div className="flex h-9 shrink-0 items-center justify-between border-b px-3 text-xs" style={{ borderColor: theme.node.stroke }}>
-                            <span className="font-semibold" style={{ color: theme.node.muted }}>外部本地 Codex 面板</span>
+                            <span className="font-semibold" style={{ color: theme.node.muted }}>{t("agent.panel.localTitle", { agent: runtime === "claude" ? "Claude" : "Codex" })}</span>
                             <button
                                 type="button"
                                 className="hover:underline"
                                 style={{ color: theme.status.success }}
                                 onClick={() => setAgentMode("conversation")}
                             >
-                                返回内置 AI 助手
+                                {t("agent.panel.backToBuiltin")}
                             </button>
                         </div>
                         <div className="flex-1 overflow-hidden">
