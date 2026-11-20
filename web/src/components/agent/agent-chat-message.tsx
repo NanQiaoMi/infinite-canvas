@@ -1,6 +1,6 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { App, Button, Image, Modal, Popover } from "antd";
-import { Brain, CheckCircle2, ChevronDown, ChevronRight, Circle, CircleAlert, Copy, ExternalLink, FilePenLine, FileText, FolderOpen, ListChecks, LoaderCircle, Search, ShieldAlert, TerminalSquare, Wrench, XCircle } from "lucide-react";
+import { Brain, Check, CheckCircle2, ChevronDown, ChevronRight, Circle, CircleAlert, Copy, ExternalLink, FilePenLine, FileText, FolderOpen, ListChecks, LoaderCircle, Pencil, RotateCcw, Search, ShieldAlert, TerminalSquare, Wrench, XCircle } from "lucide-react";
 import { Streamdown, type LinkSafetyModalProps } from "streamdown";
 import { useTranslation } from "react-i18next";
 
@@ -104,7 +104,7 @@ export type AgentChatMessageItem = {
     streamId?: string;
 };
 
-export function AgentChatMessage({ item, onRejectTool, onApproveTool }: { item: AgentChatMessageItem; onRejectTool?: (id: string) => void; onApproveTool?: (id: string) => void }) {
+export function AgentChatMessage({ item, editable, onRegenerate, onRejectTool, onApproveTool }: { item: AgentChatMessageItem; editable?: boolean; onRegenerate?: () => void; onRejectTool?: (id: string) => void; onApproveTool?: (id: string) => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const isUser = item.role === "user";
     const isSystem = item.role === "system";
@@ -124,7 +124,7 @@ export function AgentChatMessage({ item, onRejectTool, onApproveTool }: { item: 
         return <AgentToolCard title={item.title || tr("toolCall")} text={item.text} detail={item.detail} />;
     }
     return (
-        <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
+        <div className={`group flex ${isUser ? "justify-end" : "justify-start"}`}>
             <div
                 className={isUser ? "min-w-0 max-w-[82%] py-1 text-right text-sm leading-6" : "min-w-0 w-full text-left text-sm leading-6"}
                 style={{ color }}
@@ -136,8 +136,52 @@ export function AgentChatMessage({ item, onRejectTool, onApproveTool }: { item: 
                 )}
                 {item.attachments?.length ? <AgentMessageAttachments attachments={item.attachments} alignRight={isUser} /> : null}
                 {item.meta ? <div className={`mt-1 text-[11px] tabular-nums opacity-55 ${isUser ? "text-right" : ""}`}>{item.meta}</div> : null}
+                {item.streamId ? null : (
+                    <div className={`mt-0.5 flex items-center gap-0.5 ${isUser ? "justify-end" : ""}`}>
+                        {editable ? <AgentMessageIconButton className="opacity-0 group-hover:opacity-100" icon={<Pencil className="size-3.5" />} label={tr("edit")} onClick={() => useAgentStore.getState().setAgentState({ prompt: item.text })} /> : null}
+                        <AgentCopyButton text={item.text} />
+                        {onRegenerate ? <AgentMessageIconButton icon={<RotateCcw className="size-3.5" />} label={tr("regenerate")} onClick={onRegenerate} /> : null}
+                    </div>
+                )}
             </div>
         </div>
+    );
+}
+
+function AgentCopyButton({ text }: { text: string }) {
+    const copyText = useCopyText();
+    const [copied, setCopied] = useState(false);
+    useEffect(() => {
+        if (!copied) return;
+        const timer = window.setTimeout(() => setCopied(false), 1500);
+        return () => window.clearTimeout(timer);
+    }, [copied]);
+    return (
+        <AgentMessageIconButton
+            className="opacity-0 group-hover:opacity-100"
+            icon={copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+            label={tr("copy")}
+            onClick={() => {
+                copyText(text);
+                setCopied(true);
+            }}
+        />
+    );
+}
+
+function AgentMessageIconButton({ icon, label, className = "", onClick }: { icon: ReactNode; label: string; className?: string; onClick: () => void }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    return (
+        <button
+            type="button"
+            title={label}
+            aria-label={label}
+            className={`grid size-6 place-items-center rounded-md transition hover:bg-black/5 focus-visible:opacity-100 focus-visible:outline-none dark:hover:bg-white/10 ${className}`}
+            style={{ color: theme.node.muted }}
+            onClick={onClick}
+        >
+            {icon}
+        </button>
     );
 }
 

@@ -495,16 +495,18 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
             document.removeEventListener("visibilitychange", activateVisible);
         };
     }, [connected, endpoint, token]);
-    const sendPrompt = async () => {
-        const text = prompt.trim();
-        const files = attachments;
+    // resendText 为重新生成时传入的历史用户消息文本：只重发文本，不复用当前输入框的附件、画布引用和 Skill，也不清空输入框草稿。
+    const sendPrompt = async (resendText?: string) => {
+        const resend = resendText !== undefined;
+        const text = (resend ? resendText : prompt).trim();
+        const files = resend ? [] : attachments;
         const skillState = useAgentSkillStore.getState();
-        const selectedSkill = skillState.selectedSkill;
+        const selectedSkill = resend ? undefined : skillState.selectedSkill;
         const selectedSkillRevision = skillState.selectionRevision;
         const currentState = useAgentStore.getState();
         const canvasNodeIds = new Set(currentState.canvasContext?.snapshot.nodes.map((node) => node.id) || []);
-        const canvasReferences = currentState.canvasReferences.filter((item) => canvasNodeIds.has(item.nodeId));
-        if (canvasReferences.length !== currentState.canvasReferences.length) {
+        const canvasReferences = resend ? [] : currentState.canvasReferences.filter((item) => canvasNodeIds.has(item.nodeId));
+        if (!resend && canvasReferences.length !== currentState.canvasReferences.length) {
             setAgentState({ canvasReferences });
             message.warning(rt(canvasReferences.length ? "someCanvasReferencesMissing" : "canvasReferencesMissing"));
         }
@@ -547,7 +549,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
         loadThreadsSequenceRef.current += 1;
         const currentBeforeSend = useAgentStore.getState();
         const requestThreadId = currentBeforeSend.activeThreadId;
-        setAgentState({ prompt: "", attachments: [], canvasReferences: [], activity: rt("sending"), sending: true, loadingThreads: false, activeTurnId: "", messages: currentBeforeSend.messages });
+        setAgentState({ ...(resend ? {} : { prompt: "", attachments: [], canvasReferences: [] }), activity: rt("sending"), sending: true, loadingThreads: false, activeTurnId: "", messages: currentBeforeSend.messages });
         addMessage({ id: messageId, itemId: "synthetic:user", clientMessageId: messageId, threadId: requestThreadId, turnId: "", role: "user", text: userText, attachments: files, canvasReferences: messageReferences, skill: messageSkill });
         let threadId = requestThreadId;
         try {
@@ -599,7 +601,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
                 if (next.length !== messages.length) threadMessagesRef.current.set(cachedThreadId, next);
             });
             const ownsCurrentThread = state.activeThreadId === (threadId || requestThreadId);
-            const restoreDraft = state.prompt || state.attachments.length || state.canvasReferences.length ? {} : { prompt, attachments: files, canvasReferences };
+            const restoreDraft = resend || state.prompt || state.attachments.length || state.canvasReferences.length ? {} : { prompt, attachments: files, canvasReferences };
             if (ownsCurrentThread) {
                 setAgentState({
                     activity: rt(stale ? "conversationSynced" : busy ? "codexRunning" : "sendFailed"),
@@ -907,7 +909,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
                             <button type="button" className="shrink-0 rounded px-1.5 py-0.5 hover:bg-black/5 dark:hover:bg-white/10" style={{ color: theme.node.muted }} onClick={reconnectNow}>{rt("reconnectNow")}</button>
                         </div>
                     ) : null}
-                    <AgentChatTimeline pendingTool={pendingTool} pendingApprovals={pendingApprovals} sending={sending} waiting={waiting} onRejectTool={rejectPendingTool} onApproveTool={approvePendingTool} onApprovalDecision={decideApproval} />
+                    <AgentChatTimeline pendingTool={pendingTool} pendingApprovals={pendingApprovals} sending={sending} waiting={waiting} onRejectTool={rejectPendingTool} onApproveTool={approvePendingTool} onApprovalDecision={decideApproval} onResend={sendPrompt} />
                     <AgentTaskProgress busy={sending || waiting} />
                     {tokenUsage ? <AgentUsageBar usage={tokenUsage} /> : null}
                     <AgentChatComposer

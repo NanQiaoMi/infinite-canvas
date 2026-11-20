@@ -21,6 +21,7 @@ export function AgentChatTimeline({
     onRejectTool,
     onApproveTool,
     onApprovalDecision,
+    onResend,
 }: {
     pendingTool: AgentPendingToolCall | null;
     pendingApprovals: AgentPendingApproval[];
@@ -29,12 +30,20 @@ export function AgentChatTimeline({
     onRejectTool: () => void;
     onApproveTool: () => void;
     onApprovalDecision: (approval: AgentPendingApproval, decision: "accept" | "acceptForSession" | "decline") => void;
+    onResend: (text: string) => void;
 }) {
     const { t } = useTranslation();
     const messages = useAgentStore((state) => state.messages);
     const bootstrapStatus = useAgentStore((state) => state.bootstrapStatus);
     const mcpStartupStatuses = useAgentStore((state) => state.mcpStartupStatuses);
+    const conversationStatus = useAgentStore((state) => state.conversation.status);
     const timeline = useMemo(() => groupTimelineMessages(messages), [messages]);
+    const lastUser = useMemo(() => messages.filter((item) => item.role === "user").at(-1), [messages]);
+    const conversationReady = conversationStatus === "ready" || conversationStatus === "warning";
+    const idle = conversationReady && !sending && !waiting;
+    const lastItem = messages.at(-1);
+    const regenerateId = idle && lastUser && lastItem?.role === "assistant" ? lastItem.id : "";
+    const editId = idle && lastUser ? lastUser.id : "";
     const listRef = useRef<HTMLDivElement>(null);
     const contentRef = useRef<HTMLDivElement>(null);
     const followMessagesRef = useRef(true);
@@ -80,7 +89,7 @@ export function AgentChatTimeline({
                 <div ref={contentRef} className="space-y-4 px-4 pt-4">
                     {timeline.map((entry) => entry.type === "commands"
                         ? <AgentCommandGroupRow key={entry.id} items={entry.items} />
-                        : <AgentChatMessageRow key={entry.item.id} item={entry.item} />)}
+                        : <AgentChatMessageRow key={entry.item.id} item={entry.item} editable={entry.item.id === editId} onRegenerate={entry.item.id === regenerateId ? () => onResend(lastUser!.text) : undefined} />)}
                     {pendingTool ? (
                         <AgentPendingToolCard
                             summary={summarizeCanvasAgentOps(pendingTool.input?.ops || []) || toolName(pendingTool.name)}
@@ -91,6 +100,7 @@ export function AgentChatTimeline({
                     ) : null}
                     {pendingApprovals.map((approval) => <AgentApprovalCard key={approval.requestId} approval={approval} onDecision={(decision) => onApprovalDecision(approval, decision)} />)}
                     {(sending || waiting || showBootstrap) && !streaming && !pendingTool && !pendingApprovals.length ? <AgentWorkingMessage text={working.text} detail={"detail" in working && typeof working.detail === "string" ? working.detail : undefined} status={showBootstrap ? bootstrapStatus?.status : undefined} mcpStatuses={showBootstrap ? Object.entries(mcpStartupStatuses).map(([name, item]) => ({ name, ...item })) : []} activityKey={working.key} /> : null}
+                    {!messages.length && conversationReady ? <AgentChatWelcome /> : null}
                 </div>
             </div>
             {showScrollToBottom ? (
@@ -111,15 +121,34 @@ export function AgentTaskProgress({ busy }: { busy: boolean }) {
     );
 }
 
-const AgentChatMessageRow = memo(function AgentChatMessageRow({ item }: { item: AgentChatItem }) {
+const AgentChatMessageRow = memo(function AgentChatMessageRow({ item, editable, onRegenerate }: { item: AgentChatItem; editable?: boolean; onRegenerate?: () => void }) {
     const endpoint = useAgentStore((state) => state.url);
     const token = useAgentStore((state) => state.token);
     return (
         <div style={item.streamId ? undefined : historyMessageStyle}>
-            <AgentChatMessage item={agentMessageToChatMessage(item, endpoint, token)} />
+            <AgentChatMessage item={agentMessageToChatMessage(item, endpoint, token)} editable={editable} onRegenerate={onRegenerate} />
         </div>
     );
 });
+
+function AgentChatWelcome() {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const runtime = useAgentStore((state) => state.runtime);
+    const { t } = useTranslation();
+    const suggestions = [t("agent.chat.suggestion1"), t("agent.chat.suggestion2"), t("agent.chat.suggestion3")];
+    return (
+        <div className="flex flex-col items-center gap-3 py-8 text-center">
+            <div className="text-sm font-medium" style={{ color: theme.node.text }}>{t("agent.chat.welcomeTitle", { agent: runtime === "claude" ? "Claude" : "Codex" })}</div>
+            <div className="flex flex-col items-center gap-1">
+                {suggestions.map((text) => (
+                    <button key={text} type="button" className="rounded-md px-2.5 py-1.5 text-xs transition hover:bg-black/5 dark:hover:bg-white/10" style={{ color: theme.node.muted }} onClick={() => useAgentStore.getState().setAgentState({ prompt: text })}>
+                        {text}
+                    </button>
+                ))}
+            </div>
+        </div>
+    );
+}
 
 const AgentCommandGroupRow = memo(function AgentCommandGroupRow({ items }: { items: AgentChatItem[] }) {
     return (
