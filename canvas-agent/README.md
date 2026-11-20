@@ -153,20 +153,34 @@ default_tools_approval_mode = "approve"
 
 侧边栏上传或粘贴的图片会先发到本机 Canvas Agent，再由 Canvas Agent 临时写入本机文件并作为 app-server `localImage` 输入传给 Codex；前端会提示附件体积，单次请求体限制为 30MB。
 
-## Claude Code
+## 侧边栏 Claude
 
-Claude Code Adapter 代码暂时保留，但当前网页侧边栏只开放 Codex。后续开放 Claude 入口时，Canvas Agent 会调用本机 `claude -p --output-format stream-json` 并把流式 JSON 事件转发到侧边栏。
+侧边栏顶部可在 Codex 与 Claude 之间切换，两者共用同一套对话、历史、Skill、权限审批和中断接口（`/agent/:runtime/...`）。Claude 运行时基于官方 `@anthropic-ai/claude-agent-sdk`：
 
-如果希望 Claude Code 也能操作画布，需要给 Claude Code 添加同一个 MCP。建议用 user scope，避免 Canvas Agent 从不同目录启动时找不到配置：
+- 首次使用前需在终端运行 `claude` 并执行 `/login`，或配置 `ANTHROPIC_API_KEY`；未登录时侧边栏会给出明确提示。
+- Canvas Agent 直接把 `infinite-canvas` MCP 传给 Claude，无需额外注册；准备对话时会真实启动一次 MCP 检查是否就绪，画布工具自动放行。
+- 权限模式：「请求」对应 Claude 默认模式并走网页审批卡片，「自动」对应 auto 模式，「完全访问」对应 bypassPermissions。
+- 会话由 Claude 自身保存（`~/.claude/projects/`），画布侧的展示历史保存在 `~/.infinite-canvas/claude-history/`；删除对话会归档 Claude 会话并清理画布侧历史。
+- Skill 与 Codex 共用工作空间的 `.agents/skills`（通过 `.claude/skills` 链接），另会列出 `~/.claude/skills`；Claude 只加载技能页中启用的 Skill，插件自带 Skill 暂不加载。
+
+## 在 Claude Code、Codex、Antigravity 中使用画布 MCP
+
+推荐用 `install-mcp` 一键注册（见上文「一键接入 MCP」）。它会把当前版本安装到 `~/.infinite-canvas/runtime`，并以 node 绝对路径注册，避免图形界面应用找不到 `npx`。
+
+也可以手动注册：
 
 ```bash
-claude mcp add --scope user --transport stdio infinite-canvas -- npx -y @basketikun/canvas-agent@latest mcp
+claude mcp add --scope user infinite-canvas -- npx -y @basketikun/canvas-agent@latest mcp
 ```
 
-本仓库开发时可以改成：
+Antigravity 的全局 MCP 配置文件为 `~/.gemini/config/mcp_config.json`：
 
-```bash
-claude mcp add --scope user --transport stdio infinite-canvas -- node /path/to/infinite-canvas/canvas-agent/dist/index.js mcp
+```json
+{
+  "mcpServers": {
+    "infinite-canvas": { "command": "/绝对路径/node", "args": ["/Users/<you>/.infinite-canvas/runtime/node_modules/@basketikun/canvas-agent/dist/index.js", "mcp"] }
+  }
+}
 ```
 
-Canvas Agent 调用 Claude Code 时会默认带上 `--allowedTools mcp__infinite-canvas__*`，画布写操作仍由网页侧边栏确认。
+修改后在 Antigravity 的 MCP Servers 中刷新或重启应用。无论哪种客户端，都需要 Canvas Agent 正在运行，且网页画布已连接 Agent，画布工具才能生效。

@@ -5,6 +5,9 @@ description: Planned follow-up work
 
 # TODO
 
+- Publish canvas-agent 0.7.0 (protocol 7, Claude runtime, `install-mcp`) and update `~/.infinite-canvas/runtime`; until then npx users get 0.6.0, which the new web panel rejects as outdated. After publishing, add an `install-mcp` entry to the Agent connect tab.
+- Verify with real Codex/Claude conversations: copy / regenerate / edit, file diffs, approval cards, cumulative usage and cost, rename/pin, and history paging beyond 40 conversations.
+- Claude runtime does not load plugin-provided Skills (the SDK only supports an allow-list); evaluate whether to list and enable plugin Skills in the Skills tab.
 - Add Skill installation from web search, Skill resource-file management, and controlled local-memory persistence.
 - Verify the server-side image task lifecycle after reloads and unloads: task ids must not be reused across server restarts or instances, and task status lookups should keep echoing prompt/model so the client can reject mismatched results.
 - Investigate chatgpt2api burst behavior during client batch recovery: after reloading mid-batch, resubmitting the remaining slots can hit `429 Too Many Requests`, and one recovered `GET /tasks/{id}` returned `Task ... not found or expired`. Add server-side admission waiting / retry-after handling and confirm task TTL and eviction semantics under load.
