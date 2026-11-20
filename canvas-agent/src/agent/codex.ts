@@ -14,7 +14,7 @@ import type { CodexReasoningEffort, CodexSkillMetadata, CodexSkillSelector, Code
 import type { AgentAttachment, AgentEmit, AgentPermissionMode } from "./types.js";
 
 type CodexRunOptions = { threadId?: string; cwd?: string; permissionMode?: AgentPermissionMode; model?: string; effort?: CodexReasoningEffort; skill?: CodexSkillSelector; messageText?: string; appEmit?: AgentEmit; onStart?: () => void; onThread?: (threadId: string) => void; onTurn?: (turnId: string) => void; onFinish?: () => void };
-type CodexSkillDraftInput = { model?: string; effort?: CodexReasoningEffort } & ({ source: "conversation"; threadId: string } | { source: "canvas"; snapshot: CanvasSnapshot });
+export type CodexSkillDraftInput = { model?: string; effort?: CodexReasoningEffort } & ({ source: "conversation"; threadId: string } | { source: "canvas"; snapshot: CanvasSnapshot });
 
 const skillNamePattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const skillDraftSchema = z.object({
@@ -28,7 +28,7 @@ const skillDraftSchema = z.object({
     if (draft.defaultPrompt && !mentionsSkill(draft.defaultPrompt, draft.name)) context.addIssue({ code: "custom", path: ["defaultPrompt"], message: `默认提示词必须包含 $${draft.name}` });
 });
 
-const SKILL_DRAFT_OUTPUT_SCHEMA: JsonRecord = {
+export const SKILL_DRAFT_OUTPUT_SCHEMA: JsonRecord = {
     type: "object",
     additionalProperties: false,
     required: ["name", "displayName", "description", "instructions", "shortDescription", "defaultPrompt"],
@@ -256,26 +256,31 @@ async function generateCodexSkillDraftNow(emit: AgentEmit, cwd: string, input: C
         } catch {
             throw new Error("Codex 返回的 Skill 草稿不是有效 JSON");
         }
-        const parsed = skillDraftSchema.safeParse(value);
-        if (!parsed.success) throw new Error("Codex 返回的 Skill 草稿格式不正确");
-        assertDraftHasNoSensitiveValues(parsed.data, input.source === "canvas" ? canvasPrivateValues(input.snapshot) : []);
-        return parsed.data;
+        return parseSkillDraft(value, input, "Codex");
     } finally {
         if (threadId) await app.closeSkillDraftThread(threadId).catch((error) => logger.warn("Failed to release Skill draft thread", { threadId, error }));
     }
 }
 
-function skillDraftPrompt(input: CodexSkillDraftInput) {
+/** 校验 Agent 返回的 Skill 草稿结构，并拒绝含敏感信息的结果。 */
+export function parseSkillDraft(value: unknown, input: CodexSkillDraftInput, agentName: string) {
+    const parsed = skillDraftSchema.safeParse(value);
+    if (!parsed.success) throw new Error(`${agentName} 返回的 Skill 草稿格式不正确`);
+    assertDraftHasNoSensitiveValues(parsed.data, input.source === "canvas" ? canvasPrivateValues(input.snapshot) : []);
+    return parsed.data;
+}
+
+export function skillDraftPrompt(input: CodexSkillDraftInput, agentName = "Codex") {
     const source = input.source === "conversation"
         ? "从这个临时分支继承的完整对话中，识别已经实际完成且值得复用的稳定流程。不要总结本条提炼请求，也不要保留一次性的结论、错误排查过程或工具日志。"
         : `从下面经过清理的画布快照中，识别节点、连线和生成步骤所表达的可复用流程。不要把画布节点 ID 写进执行说明。\n\n画布快照：\n${JSON.stringify(canvasSkillSource(input.snapshot))}`;
     return [
-        "请生成一个可编辑的 Codex Skill 草稿。",
+        `请生成一个可编辑的 ${agentName} Skill 草稿。`,
         source,
         "要求：",
         "- name 使用不超过 64 个字符的小写字母、数字和连字符，优先使用简短的动词短语。",
         "- description 同时说明能力和触发场景；所有何时使用的信息都写在这里。",
-        "- instructions 只写另一个 Codex 真正需要的、可复用的命令式步骤、约束和输出要求，不写 YAML frontmatter。",
+        `- instructions 只写另一个 ${agentName} 真正需要的、可复用的命令式步骤、约束和输出要求，不写 YAML frontmatter。`,
         "- shortDescription 写 25–64 个字符的人类可读短说明；没有合适内容时返回空字符串。",
         "- defaultPrompt 必须包含与 name 完全一致的 $skill-name 调用标记；没有合适内容时返回空字符串。",
         "- displayName 使用简洁的人类可读名称。",
@@ -481,7 +486,7 @@ function threadInWorkspace(thread: unknown, cwd: string) {
 }
 
 /** 比较跨平台绝对路径；Windows 路径不区分大小写。 */
-function samePath(left: string, right: string) {
+export function samePath(left: string, right: string) {
     const normalize = (value: string) => process.platform === "win32" ? path.resolve(value).toLowerCase() : path.resolve(value);
     return normalize(left) === normalize(right);
 }

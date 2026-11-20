@@ -3,13 +3,13 @@ import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 
-import { runClaudeTurn } from "../agent/claude.js";
-import { archiveCodexThread, CodexSkillLookupError, configureCodexSkill, generateCodexSkillDraft, interruptCodexTurn, isRecoverableThreadError, listCodexModels, listCodexSkills, listCodexThreads, readCodexThread, resolveCodexApproval, resolveCodexSkill, resumeCodexThread, runCodexTurn, startCodexThread, summarizeCodexThread } from "../agent/codex.js";
+import { CodexSkillLookupError, summarizeCodexThread } from "../agent/codex.js";
+import { agentRuntimes, isAgentRuntime } from "../agent/runtimes.js";
 import type { CodexReasoningEffort, CodexSkillSelector } from "../agent/codex-protocol.js";
 import { messageMetadataStore } from "../agent/message-metadata.js";
 import type { AgentAttachment, AgentPermissionMode } from "../agent/types.js";
 import { AGENT_PROTOCOL_VERSION, CanvasSession } from "../canvas/session.js";
-import { DEFAULT_PORT, ensureSiteWorkspace, loadConfig, saveConfig, updateSiteWorkspace, type CanvasAgentConfig } from "../config.js";
+import { DEFAULT_PORT, ensureSiteWorkspace, loadConfig, saveConfig, updateSiteWorkspace, type AgentRuntimeName, type CanvasAgentConfig } from "../config.js";
 import { logger } from "../utils/logger.js";
 import { checkVersions } from "../version-check.js";
 import { SkillStore, SkillStoreError } from "../skills/store.js";
@@ -49,26 +49,29 @@ export function startHttpServer() {
         threadId ? session.emitThread(type, threadId, data) : session.emitAll(type, data);
     };
     /** 保存并广播当前站点工作空间的活跃线程。 */
-    const setActiveThread = (activeThreadId: string, payload: Record<string, unknown> = {}, preserveConversation = false) => {
-        const workspace = updateSiteWorkspace(config, { activeThreadId: activeThreadId || undefined });
+    const setActiveThread = (activeThreadId: string, payload: Record<string, unknown> = {}, preserveConversation = false, runtime?: AgentRuntimeName) => {
+        const workspace = updateSiteWorkspace(config, { activeThreadId: activeThreadId || undefined, ...(runtime ? { runtime } : {}) });
         if (!preserveConversation) session.activateConversation(activeThreadId, String(payload.sourceClientId || "") || undefined);
         if (!session.codexBusy && session.codexThreadId !== activeThreadId) session.setCodexState({ threadId: activeThreadId, turnId: "" });
-        session.emitThread("workspace_changed", activeThreadId, { ...payload, activeThreadId, conversation: session.conversationStateSnapshot });
+        session.emitThread("workspace_changed", activeThreadId, { ...payload, activeThreadId, runtime: activeRuntime(), conversation: session.conversationStateSnapshot });
         return workspace;
     };
-    let draftThreadStart: ReturnType<typeof startCodexThread> | null = null;
+    const activeRuntime = (): AgentRuntimeName => ensureSiteWorkspace(config).runtime || "codex";
+    let draftThreadStart: Promise<unknown> | null = null;
+    let draftRuntime: AgentRuntimeName = "codex";
     let skillDraftRunning = false;
-    const prepareDraftThread = (clientId: string, permission: AgentPermissionMode) => {
-        if (draftThreadStart) return draftThreadStart;
+    const prepareDraftThread = (clientId: string, permission: AgentPermissionMode, runtime: AgentRuntimeName) => {
+        if (draftThreadStart && draftRuntime === runtime) return draftThreadStart;
         const workspace = ensureSiteWorkspace(config);
-        let prepared!: ReturnType<typeof startCodexThread>;
+        let prepared!: Promise<unknown>;
+        draftRuntime = runtime;
         prepared = (async () => {
             emit("agent_bootstrap", { type: "codex.preparing", sourceClientId: clientId });
             try {
-                const thread = await startCodexThread(emit, workspace.workspacePath, permission, true);
+                const thread = await agentRuntimes[runtime].startThread(emit, workspace.workspacePath, permission, true);
                 if (draftThreadStart !== prepared) return thread;
                 const threadId = String((thread as Record<string, unknown>).id || "");
-                if (threadId && !ensureSiteWorkspace(config).activeThreadId) {
+                if (threadId && !ensureSiteWorkspace(config).activeThreadId && activeRuntime() === runtime) {
                     session.completeConversationPreparation(threadId);
                     setActiveThread(threadId, { emptyThread: true, draftThread: true, sourceClientId: clientId }, true);
                 }
@@ -88,11 +91,11 @@ export function startHttpServer() {
         return prepared;
     };
     /** 恢复已有线程并等待完整 MCP 清单，供启动恢复和手动切换共用。 */
-    const prepareExistingThread = async (threadId: string, clientId = "", permission: AgentPermissionMode = "request") => {
+    const prepareExistingThread = async (threadId: string, clientId = "", permission: AgentPermissionMode = "request", runtime: AgentRuntimeName = activeRuntime()) => {
         const workspace = ensureSiteWorkspace(config);
         session.beginConversation({ conversationId: threadId, threadId, sourceClientId: clientId || undefined });
         emit("agent_bootstrap", { type: "codex.preparing", threadId, sourceClientId: clientId || undefined });
-        const result = await resumeCodexThread(emit, threadId, workspace.workspacePath, permission, true);
+        const result = await agentRuntimes[runtime].resumeThread(emit, threadId, workspace.workspacePath, permission, true);
         session.completeConversationPreparation(threadId);
         return result;
     };
@@ -127,7 +130,7 @@ export function startHttpServer() {
         res.status(401).json({ ok: false, error: "invalid token" });
     });
     app.get("/events", (req, res) => {
-        session.openEvents(requestUrl(req, config), res, ensureSiteWorkspace(config).activeThreadId || "");
+        session.openEvents(requestUrl(req, config), res, ensureSiteWorkspace(config).activeThreadId || "", activeRuntime());
     });
     app.post("/canvas/state", (req, res) => {
         session.updateState(req.body, String(req.query.clientId || "") || undefined);
@@ -170,17 +173,19 @@ export function startHttpServer() {
         res.type(path.extname(filePath)).send(await readFile(filePath));
     }));
     app.post("/api/tools", route(async (req, res) => res.json({ ok: true, result: await session.callTool(req.body?.name, req.body?.input || {}) })));
-    app.get("/agent/codex/workspace", (_req, res) => {
+    app.get("/agent/:runtime/workspace", (req, res) => {
+        runtimeOf(req);
         const workspace = ensureSiteWorkspace(config);
         res.json({ ok: true, workspace, conversation: session.conversationStateSnapshot });
     });
-    app.get("/agent/codex/models", route(async (_req, res) => res.json({ ok: true, ...(await listCodexModels(emit)) })));
-    app.get("/agent/codex/skills", route(async (req, res) => {
+    app.get("/agent/:runtime/models", route(async (req, res) => res.json({ ok: true, ...(await runtimeOf(req).listModels(emit)) })));
+    app.get("/agent/:runtime/skills", route(async (req, res) => {
         const workspace = ensureSiteWorkspace(config);
-        const result = await listCodexSkills(emit, workspace.workspacePath, String(req.query.forceReload || "") === "1");
+        const result = await runtimeOf(req).listSkills(emit, workspace.workspacePath, String(req.query.forceReload || "") === "1");
         res.json({ ok: true, data: result.skills.map((skill) => ({ ...skill, managed: skillStore.isManagedPath(skill.path) })), errors: result.errors });
     }));
-    app.post("/agent/codex/skills/draft", codexMutation(async (req, res) => {
+    app.post("/agent/:runtime/skills/draft", codexMutation(async (req, res) => {
+        const runtime = runtimeOf(req);
         const workspace = ensureSiteWorkspace(config);
         const source = String(req.body?.source || "");
         if (source !== "conversation" && source !== "canvas") return res.status(400).json({ ok: false, error: "Skill 草稿来源无效" });
@@ -195,17 +200,17 @@ export function startHttpServer() {
                 const threadId = String(req.body?.threadId || "");
                 if (!threadId) return res.status(409).json({ ok: false, error: "当前没有可提炼的对话" });
                 if (threadId !== (workspace.activeThreadId || "")) return res.status(409).json({ ok: false, error: "当前对话已在其他页面切换，请同步后重试" });
-                const history = await readCodexThread(emit, threadId, workspace.workspacePath);
+                const history = await runtime.readThread(emit, threadId, workspace.workspacePath);
                 if (!history.messages.some((message) => message.role === "user" && message.turnId)) return res.status(409).json({ ok: false, error: "当前对话还没有可提炼的已完成内容" });
                 session.setCodexState({ busy: true, threadId, turnId: "" }, { preserveReplay: true });
-                const data = await generateCodexSkillDraft(emit, workspace.workspacePath, { source, threadId, model, effort });
+                const data = await runtime.generateSkillDraft(emit, workspace.workspacePath, { source, threadId, model, effort });
                 if (!session.hasClient(clientId)) return res.status(409).json({ ok: false, error: "发起提炼的网页已断开，请重新连接后再试" });
                 return res.json({ ok: true, data });
             }
             const snapshot = session.canvasStateForClient(clientId);
             if (!snapshot || (snapshot as Record<string, unknown>).hasCanvas === false) return res.status(409).json({ ok: false, error: "当前页面没有可提炼的画布" });
             session.setCodexState({ busy: true, threadId: workspace.activeThreadId || "", turnId: "" }, { preserveReplay: true });
-            const data = await generateCodexSkillDraft(emit, workspace.workspacePath, { source, snapshot, model, effort });
+            const data = await runtime.generateSkillDraft(emit, workspace.workspacePath, { source, snapshot, model, effort });
             if (!session.hasClient(clientId)) return res.status(409).json({ ok: false, error: "发起提炼的网页已断开，请重新连接后再试" });
             return res.json({ ok: true, data });
         } finally {
@@ -213,83 +218,90 @@ export function startHttpServer() {
             session.setCodexState(previousCodexState, { preserveReplay: true });
         }
     }));
-    app.get("/agent/codex/skills/:name", route(async (req, res) => {
+    app.get("/agent/:runtime/skills/:name", route(async (req, res) => {
         res.json({ ok: true, data: await skillStore.get(routeParam(req.params.name)) });
     }));
-    app.post("/agent/codex/skills", codexMutation(async (req, res) => {
+    app.post("/agent/:runtime/skills", codexMutation(async (req, res) => {
         const data = await skillStore.create(req.body);
         session.emitAll("skills_changed", { forceReload: true });
         res.status(201).json({ ok: true, data });
     }));
-    app.post("/agent/codex/skills/:name/enabled", codexMutation(async (req, res) => {
+    app.post("/agent/:runtime/skills/:name/enabled", codexMutation(async (req, res) => {
         if (typeof req.body?.enabled !== "boolean") return res.status(400).json({ ok: false, error: "Skill 启用状态无效" });
         const workspace = ensureSiteWorkspace(config);
         const selector = skillSelector(req.body);
         if (selector.name !== routeParam(req.params.name)) return res.status(400).json({ ok: false, error: "Skill 选择无效" });
-        const data = await configureCodexSkill(emit, workspace.workspacePath, selector, req.body.enabled);
+        const data = await runtimeOf(req).configureSkill(emit, workspace.workspacePath, selector, req.body.enabled);
         session.emitAll("skills_changed", { forceReload: true });
         res.json({ ok: true, data });
     }));
-    app.post("/agent/codex/skills/:name/delete", codexMutation(async (req, res) => {
+    app.post("/agent/:runtime/skills/:name/delete", codexMutation(async (req, res) => {
         await skillStore.delete(routeParam(req.params.name), String(req.body?.expectedRevision || ""));
         session.emitAll("skills_changed", { forceReload: true });
         res.json({ ok: true });
     }));
-    app.post("/agent/codex/skills/:name", codexMutation(async (req, res) => {
+    app.post("/agent/:runtime/skills/:name", codexMutation(async (req, res) => {
         const data = await skillStore.update(routeParam(req.params.name), req.body);
         session.emitAll("skills_changed", { forceReload: true });
         res.json({ ok: true, data });
     }));
-    app.get("/agent/codex/threads", route(async (req, res) => {
+    app.get("/agent/:runtime/threads", route(async (req, res) => {
         const workspace = ensureSiteWorkspace(config);
-        const result = await listCodexThreads(emit, { cwd: workspace.workspacePath, searchTerm: String(req.query.searchTerm || "") });
+        const result = await runtimeOf(req).listThreads(emit, { cwd: workspace.workspacePath, searchTerm: String(req.query.searchTerm || "") });
         res.json({ ok: true, workspace, conversation: session.conversationStateSnapshot, ...result });
     }));
-    app.post("/agent/codex/threads/new", codexMutation(async (req, res) => {
+    app.post("/agent/:runtime/threads/new", codexMutation(async (req, res) => {
+        const runtime = runtimeName(req);
         const clientId = String(req.body?.clientId || "");
         session.beginConversation({ sourceClientId: clientId });
-        setActiveThread("", { emptyThread: true, draftThread: true, sourceClientId: clientId }, true);
-        const thread = await prepareDraftThread(clientId, permissionMode(req.body?.permissionMode));
+        setActiveThread("", { emptyThread: true, draftThread: true, sourceClientId: clientId }, true, runtime);
+        const thread = await prepareDraftThread(clientId, permissionMode(req.body?.permissionMode), runtime);
         res.json({ ok: true, workspace: ensureSiteWorkspace(config), conversation: session.conversationStateSnapshot, thread: summarizeCodexThread(thread), messages: [] });
     }));
-    app.post("/agent/codex/threads/reset", codexMutation(async (req, res) => {
+    app.post("/agent/:runtime/threads/reset", codexMutation(async (req, res) => {
+        const runtime = runtimeName(req);
         const clientId = String(req.body?.clientId || "");
         session.beginConversation({ sourceClientId: clientId });
-        setActiveThread("", { emptyThread: true, draftThread: true, sourceClientId: clientId }, true);
-        await prepareDraftThread(clientId, permissionMode(req.body?.permissionMode));
+        setActiveThread("", { emptyThread: true, draftThread: true, sourceClientId: clientId }, true, runtime);
+        await prepareDraftThread(clientId, permissionMode(req.body?.permissionMode), runtime);
         res.json({ ok: true, workspace: ensureSiteWorkspace(config), conversation: session.conversationStateSnapshot });
     }));
-    app.get("/agent/codex/threads/:threadId", route(async (req, res) => {
+    app.get("/agent/:runtime/threads/:threadId", route(async (req, res) => {
         const workspace = ensureSiteWorkspace(config);
         const threadId = routeParam(req.params.threadId);
-        res.json({ ok: true, workspace, conversation: session.conversationStateSnapshot, ...(await readCodexThread(emit, threadId, workspace.workspacePath)) });
+        res.json({ ok: true, workspace, conversation: session.conversationStateSnapshot, ...(await runtimeOf(req).readThread(emit, threadId, workspace.workspacePath)) });
     }));
-    app.post("/agent/codex/history/ack", (req, res) => {
+    app.post("/agent/:runtime/history/ack", (req, res) => {
         const threadId = String(req.body?.threadId || "");
         const turnIds = Array.isArray(req.body?.turnIds) ? req.body.turnIds.map(String) : [];
         session.acknowledgeCodexHistory(threadId, turnIds);
         res.json({ ok: true });
     });
-    app.post("/agent/codex/threads/:threadId/resume", codexMutation(async (req, res) => {
+    app.post("/agent/:runtime/threads/:threadId/resume", codexMutation(async (req, res) => {
+        const runtime = runtimeName(req);
         const threadId = routeParam(req.params.threadId);
         const clientId = String(req.body?.clientId || "");
         try {
-            const result = await prepareExistingThread(threadId, clientId, permissionMode(req.body?.permissionMode));
-            const nextWorkspace = setActiveThread(threadId, { sourceClientId: clientId }, true);
+            const result = await prepareExistingThread(threadId, clientId, permissionMode(req.body?.permissionMode), runtime);
+            const nextWorkspace = setActiveThread(threadId, { sourceClientId: clientId }, true, runtime);
             res.json({ ok: true, workspace: nextWorkspace, conversation: session.conversationStateSnapshot, ...result });
         } catch (error) {
             failPreparedConversation(error, threadId, clientId);
             throw error;
         }
     }));
-    app.post("/agent/codex/threads/:threadId/delete", codexMutation(async (req, res) => {
+    app.post("/agent/:runtime/threads/:threadId/delete", codexMutation(async (req, res) => {
         const workspace = ensureSiteWorkspace(config);
         const threadId = routeParam(req.params.threadId);
-        await archiveCodexThread(emit, threadId, workspace.workspacePath);
-        const nextWorkspace = setActiveThread(workspace.activeThreadId === threadId ? "" : workspace.activeThreadId || "", { sourceClientId: String(req.body?.clientId || "") });
+        const runtime = runtimeName(req);
+        await agentRuntimes[runtime].archiveThread(emit, threadId, workspace.workspacePath);
+        const activeThreadId = activeRuntime() === runtime && workspace.activeThreadId === threadId ? "" : workspace.activeThreadId || "";
+        const nextWorkspace = setActiveThread(activeThreadId, { sourceClientId: String(req.body?.clientId || "") });
         res.json({ ok: true, workspace: nextWorkspace, conversation: session.conversationStateSnapshot });
     }));
-    app.post("/agent/codex/turn", codexMutation(async (req, res) => {
+    app.post("/agent/:runtime/turn", codexMutation(async (req, res) => {
+        const runtimeKey = runtimeName(req);
+        const runtime = agentRuntimes[runtimeKey];
         const attachments = Array.isArray(req.body?.attachments) ? (req.body.attachments as AgentAttachment[]) : [];
         const workspace = ensureSiteWorkspace(config);
         const prompt = String(req.body?.prompt || "");
@@ -301,20 +313,20 @@ export function startHttpServer() {
         const conversation = session.conversationStateSnapshot;
         const requestedConversationId = String(req.body?.conversationId || "");
         const expectedRevision = Number(req.body?.expectedRevision || 0);
-        if (requestedThreadId !== activeThreadId || conversation.threadId !== activeThreadId || (requestedConversationId && requestedConversationId !== conversation.conversationId) || (expectedRevision && expectedRevision !== conversation.revision)) {
+        if (runtimeKey !== activeRuntime() || requestedThreadId !== activeThreadId || conversation.threadId !== activeThreadId || (requestedConversationId && requestedConversationId !== conversation.conversationId) || (expectedRevision && expectedRevision !== conversation.revision)) {
             return res.status(409).json({ ok: false, code: "CONVERSATION_STALE", error: "当前会话已切换，已同步最新状态，请确认后重试", state: conversation });
         }
         if (!activeThreadId || !["ready", "warning"].includes(conversation.status)) {
-            return res.status(409).json({ ok: false, code: "CONVERSATION_NOT_READY", error: "Codex 对话仍在初始化，请等待 MCP 加载完成", state: conversation });
+            return res.status(409).json({ ok: false, code: "CONVERSATION_NOT_READY", error: `${runtime.title} 对话仍在初始化，请等待 MCP 加载完成`, state: conversation });
         }
         const model = String(req.body?.model || "") || undefined;
         const effort = reasoningEffort(req.body?.effort);
-        const skill = req.body?.skill === undefined ? undefined : await resolveCodexSkill(emit, workspace.workspacePath, skillSelector(req.body.skill), true);
+        const skill = req.body?.skill === undefined ? undefined : await runtime.resolveSkill(emit, workspace.workspacePath, skillSelector(req.body.skill), true);
         const messageId = String(req.body?.messageId || Date.now());
         const messageText = String(req.body?.messageText || prompt || `发送了 ${attachments.length} 张图片`);
         const messageMetadata = await messageMetadataStore.recordPending(messageId, req.body?.messageMetadata);
         let threadId = activeThreadId;
-        logger.info("Codex turn accepted", { threadId: req.body?.threadId, model: model || "default", reasoningEffort: effort || "default", promptLength: prompt.length, attachmentCount: attachments.length });
+        logger.info("Agent turn accepted", { runtime: runtimeKey, threadId: req.body?.threadId, model: model || "default", reasoningEffort: effort || "default", promptLength: prompt.length, attachmentCount: attachments.length });
         session.bindClient(clientId);
         session.markConversationRunning(threadId);
         session.setCodexState({ busy: true, threadId, turnId: "" });
@@ -340,7 +352,7 @@ export function startHttpServer() {
                     ...(sourceClientId ? { sourceClientId } : {}),
                 });
             };
-            void runCodexTurn(withAttachmentContext(prompt, attachmentRefs), lifecycleEmit, attachments, {
+            void runtime.runTurn(withAttachmentContext(prompt, attachmentRefs), lifecycleEmit, attachments, {
                 threadId,
                 cwd: workspace.workspacePath,
                 permissionMode: permissionMode(req.body?.permissionMode),
@@ -410,20 +422,16 @@ export function startHttpServer() {
             }
         });
     }
-    app.post("/agent/codex/approval", route(async (req, res) => {
+    app.post("/agent/:runtime/approval", route(async (req, res) => {
         const decision = String(req.body?.decision || "");
         if (!["accept", "acceptForSession", "decline", "cancel"].includes(decision)) return res.status(400).json({ ok: false, error: "无效的审批决定" });
-        const ok = await resolveCodexApproval(String(req.body?.requestId || ""), decision);
+        const ok = await runtimeOf(req).resolveApproval(String(req.body?.requestId || ""), decision);
         res.status(ok ? 200 : 409).json({ ok, ...(ok ? {} : { error: "审批请求已失效" }) });
     }));
-    app.post("/agent/codex/interrupt", route(async (req, res) => {
-        const ok = await interruptCodexTurn(skillDraftRunning ? undefined : String(req.body?.threadId || ""));
+    app.post("/agent/:runtime/interrupt", route(async (req, res) => {
+        const ok = await runtimeOf(req).interrupt(skillDraftRunning ? undefined : String(req.body?.threadId || ""));
         res.status(ok ? 200 : 409).json({ ok, ...(ok ? {} : { error: "当前没有可停止的任务" }) });
     }));
-    app.post("/agent/claude/turn", (req, res) => {
-        runClaudeTurn(String(req.body?.prompt || ""), emit);
-        res.json({ ok: true });
-    });
     app.use((_req, res) => res.status(404).json({ ok: false, error: "not found" }));
     app.use((error: Error, req: Request, res: Response, _next: NextFunction) => {
         logger.error("HTTP request failed", { method: req.method, path: req.path, error });
@@ -442,15 +450,27 @@ export function startHttpServer() {
         if (logger.enabled) console.log(`Debug log: ${logger.filePath}`);
         logger.info("Canvas Agent started", { url: config.url, workspace: ensureSiteWorkspace(config).workspacePath, debugLog: logger.filePath });
         const activeThreadId = initialWorkspace.activeThreadId || "";
+        const runtime = initialWorkspace.runtime || "codex";
         if (activeThreadId && session.beginCodexMutation()) {
-            void prepareExistingThread(activeThreadId).catch(async (error) => {
-                if (!isRecoverableThreadError(error)) return failPreparedConversation(error, activeThreadId);
+            void prepareExistingThread(activeThreadId, "", "request", runtime).catch(async (error) => {
+                if (!agentRuntimes[runtime].isRecoverableThreadError(error)) return failPreparedConversation(error, activeThreadId);
                 session.beginConversation();
                 setActiveThread("", { emptyThread: true, draftThread: true }, true);
-                await prepareDraftThread("", "request");
+                await prepareDraftThread("", "request", runtime);
             }).finally(() => session.endCodexMutation()).catch(() => undefined);
         }
     });
+}
+
+/** 读取路由中的运行时名称，未知运行时按 404 处理。 */
+function runtimeName(req: Request): AgentRuntimeName {
+    const value = routeParam(req.params.runtime);
+    if (!isAgentRuntime(value)) throw new CodexSkillLookupError("未知的 Agent 运行时", 404);
+    return value;
+}
+
+function runtimeOf(req: Request) {
+    return agentRuntimes[runtimeName(req)];
 }
 
 /** 将异步 Express 路由异常交给统一错误处理中间件。 */

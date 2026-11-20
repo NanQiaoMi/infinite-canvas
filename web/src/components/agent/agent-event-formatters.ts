@@ -65,9 +65,14 @@ export function agentAttachmentToChatAttachment(item: AgentMessageAttachment, en
     return { id: item.id, name: item.name, url: resolveAgentMessageAssetUrl(endpoint, token, item.dataUrl || item.url) };
 }
 
+/** 根据事件来源返回聊天气泡标题。 */
+export function agentTitle(agent?: unknown) {
+    return agent === "claude" ? "Claude" : "Codex";
+}
+
 export function formatAgentEvent(event: AgentEventPayload): Omit<AgentChatItem, "id"> | null {
     const item = event.item;
-    if (event.type === "item.completed" && item?.type === "agent_message") return { role: "assistant", title: "Codex", text: stringText(item.text) };
+    if (event.type === "item.completed" && item?.type === "agent_message") return { role: "assistant", title: agentTitle(event.agent), text: stringText(item.text) };
     return null;
 }
 

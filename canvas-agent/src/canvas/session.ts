@@ -23,7 +23,7 @@ export type ConversationState = {
     error?: string;
 };
 type McpInventoryItem = { name: string; authStatus?: string };
-export const AGENT_PROTOCOL_VERSION = 6;
+export const AGENT_PROTOCOL_VERSION = 7;
 
 const SITE_TOOLS = new Set<ToolName>([
     "site_navigate",
@@ -266,7 +266,7 @@ export class CanvasSession {
     }
 
     /** 建立网页与 Canvas Agent 之间的 SSE 连接。 */
-    openEvents(url: URL, res: ServerResponse, activeThreadId = "") {
+    openEvents(url: URL, res: ServerResponse, activeThreadId = "", runtime = "codex") {
         const clientId = url.searchParams.get("clientId") || crypto.randomUUID();
         const statusOnly = url.searchParams.get("role") === "status";
         logger.info("SSE client connected", { clientId, statusOnly });
@@ -279,7 +279,7 @@ export class CanvasSession {
                 this.clientFocusOrder.set(clientId, ++this.focusSequence);
             }
         }
-        sendEvent(res, "hello", { ok: true, protocolVersion: AGENT_PROTOCOL_VERSION, clientId, workspace: { activeThreadId }, conversation: this.conversationStateSnapshot, codex: this.codexState, pendingApprovals: this.codexPendingApprovals });
+        sendEvent(res, "hello", { ok: true, protocolVersion: AGENT_PROTOCOL_VERSION, clientId, workspace: { activeThreadId, runtime }, conversation: this.conversationStateSnapshot, codex: this.codexState, pendingApprovals: this.codexPendingApprovals });
         if (!statusOnly && activeThreadId && this.codexState.threadId === activeThreadId) this.codexReplayEvents.forEach((event) => sendEvent(res, event.type, event.payload));
         const timer = setInterval(() => sendEvent(res, "ping", { time: Date.now() }), 15000);
         res.on("close", () => {

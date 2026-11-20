@@ -13,6 +13,7 @@ export type AgentChatItem = { id: string; itemId?: string; clientMessageId?: str
 export type AgentEventLog = { id: string; time: string; title: string; text: string; raw?: unknown };
 export type AgentPendingToolCall = { requestId: string; name: string; threadId?: string; turnId?: string; input?: { ops?: CanvasAgentOp[]; path?: string } & Record<string, unknown> };
 export type AgentPermissionMode = "request" | "automatic" | "full";
+export type AgentRuntimeName = "codex" | "claude";
 export type AgentReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 export type AgentModel = {
     id: string;
@@ -70,6 +71,7 @@ type AgentStore = {
     loadingThreads: boolean;
     activeTab: AgentPanelTab;
     confirmTools: boolean;
+    runtime: AgentRuntimeName;
     permissionMode: AgentPermissionMode;
     models: AgentModel[];
     model: string;
@@ -122,6 +124,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     loadingThreads: false,
     activeTab: "setup",
     confirmTools: false,
+    runtime: typeof window !== "undefined" && localStorage.getItem("canvas-agent-runtime") === "claude" ? "claude" : "codex",
     permissionMode: typeof window === "undefined" ? "request" : (localStorage.getItem("canvas-agent-permission-mode") as AgentPermissionMode) || "request",
     models: [],
     model: typeof window === "undefined" ? "" : localStorage.getItem("canvas-agent-model") || "",

@@ -17,7 +17,7 @@ i18n.use(initReactI18next).init({
     fallbackLng: "zh-CN",
     supportedLngs: ["zh-CN", "en-US"],
     initAsync: false,
-    interpolation: { escapeValue: false },
+    interpolation: { escapeValue: false, defaultVariables: { agent: typeof window !== "undefined" && localStorage.getItem("canvas-agent-runtime") === "claude" ? "Claude" : "Codex" } },
     react: { useSuspense: false },
 });
 

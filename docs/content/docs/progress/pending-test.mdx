@@ -7,6 +7,14 @@ description: Implemented changes that still need manual verification
 
 The current release needs manual verification in these areas:
 
+- Local Agent Codex / Claude switch (Claude runs through the Claude Agent SDK; log in once with `claude` → `/login` in a terminal or set `ANTHROPIC_API_KEY` first):
+  1. The Agent panel header shows a Codex / Claude switch; switching while idle starts a new conversation in the chosen runtime, while a running task blocks the switch with a hint; the choice survives reloads and stays in sync across tabs;
+  2. In Claude mode, chat streams text and thinking, canvas MCP tools (`canvas_get_state`, `canvas_apply_ops`, generation tools) run without approval, and the turn ends with usage shown;
+  3. In "request" permission mode, Bash / file edits show the existing approval card; accept, accept for session, and decline behave as expected; "full access" runs without prompts;
+  4. Stop interrupts a running Claude turn; History lists Claude conversations, resumes them with full history after reloading the page or restarting Canvas Agent, and deletes them;
+  5. Model and reasoning-effort pickers list Claude models; Skills tab lists workspace `.agents/skills` and `~/.claude/skills`, enable/disable works, `/skill` invocation works, and "extract Skill" from a conversation or canvas returns a draft;
+  6. Codex mode still behaves exactly as before; a not-logged-in Claude shows a clear "please log in" error instead of hanging.
+
 - Upstream API compatibility layer (for upstreams such as ChatGPT2API that only expose `/api/image-tasks`):
   1. Submitting from the image workbench or canvas batch generation returns a queued/running task within about a second instead of hanging on a synchronous response or failing with `该地址不在管理员配置的渠道范围内`;
   2. Completed images render normally (result URLs are fetched through `/api/relay`, no broken cross-origin images);

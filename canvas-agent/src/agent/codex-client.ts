@@ -19,7 +19,7 @@ type PendingDelta = { delta: string; itemType: string; params: ItemDeltaParams; 
 type ApprovalRequest = { id: number; method: string; params: JsonRecord; decision?: string };
 type PendingTurnStart = { threadId: string; prompt: string; messageText?: string; turnId?: string; onTurn?: (turnId: string) => void };
 
-const canvasAgentMcp = canvasAgentMcpCommand();
+export const canvasAgentMcp = canvasAgentMcpCommand();
 const require = createRequire(import.meta.url);
 const STREAM_UPDATE_INTERVAL_MS = 40;
 const supplementalItemTypes = new Set(["agent_message", "reasoning", "plan", "mcp_tool_call", "command_execution", "file_change", "dynamic_tool_call", "collab_tool_call", "web_search", "image_view", "image_generation", "context_compaction"]);

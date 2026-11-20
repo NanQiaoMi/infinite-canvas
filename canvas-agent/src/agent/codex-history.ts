@@ -34,7 +34,7 @@ export function settledTurnIds(thread: unknown, supplementalHistory: CodexSupple
 }
 
 /** 将 Codex turn items 转换为网页聊天历史。 */
-export function threadMessages(thread: unknown, planUpdates: CodexPlanUpdate[] = [], supplementalHistory: CodexSupplementalHistory = emptySupplementalHistory): AgentHistoryMessage[] {
+export function threadMessages(thread: unknown, planUpdates: CodexPlanUpdate[] = [], supplementalHistory: CodexSupplementalHistory = emptySupplementalHistory, agentTitle = "Codex"): AgentHistoryMessage[] {
     const threadId = String(field(thread, "id") || "");
     if (!threadId) return [];
     const turns = mergeHistoryTurns(thread, supplementalHistory);
@@ -89,7 +89,7 @@ export function threadMessages(thread: unknown, planUpdates: CodexPlanUpdate[] =
             }
             if (type === "agentMessage") {
                 const text = String(field(item, "text") || "").trim();
-                if (text) push({ id, role: "assistant", title: "Codex", text });
+                if (text) push({ id, role: "assistant", title: agentTitle, text });
             }
             if (type === "mcpToolCall") {
                 const tool = String(field(item, "tool") || "工具调用");
