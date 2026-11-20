@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { App, Button, Segmented, Tooltip } from "antd";
 import { Bot, History, MessageSquare, PanelRightClose, PlugZap, Plus, Sparkles, Terminal } from "lucide-react";
@@ -14,9 +14,9 @@ import { randomId } from "@/lib/utils";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useAgentSkillStore } from "@/stores/use-agent-skill-store";
 import { useShallow } from "zustand/react/shallow";
-import { useAgentStore, type AgentAttachment, type AgentBootstrapStatus, type AgentCanvasContext, type AgentCanvasReference, type AgentChatItem, type AgentConversationState, type AgentModel, type AgentPendingApproval, type AgentPendingToolCall, type AgentPermissionMode, type AgentReasoningEffort, type AgentRuntimeName, type AgentThreadSummary } from "@/stores/use-agent-store";
+import { isAgentUrl, useAgentStore, type AgentAttachment, type AgentCanvasContext, type AgentCanvasReference, type AgentChatItem, type AgentConversationState, type AgentModel, type AgentPendingApproval, type AgentPendingToolCall, type AgentPermissionMode, type AgentReasoningEffort, type AgentRuntimeName } from "@/stores/use-agent-store";
 import { isAgentThreadEvent as isCurrentThreadToolCall } from "@/lib/agent/agent-event-formatters";
-import { acknowledgeCodexHistory, activateAgentClient, AgentApiError, agentPath, discoverAgentConfig, fetchAgentJson, interruptCodexTurn, postCodexApproval, postState } from "@/services/api/canvas-agent";
+import { activateAgentClient, AgentApiError, agentPath, discoverAgentConfig, fetchAgentJson, interruptCodexTurn, postCodexApproval, postState, resetAgentThread } from "@/services/api/canvas-agent";
 import { AgentChatTimeline, AgentTaskProgress, AgentUsageBar } from "./agent-chat";
 import { AgentChatComposer } from "./agent-chat-composer";
 import { AgentConnectView } from "./agent-connect-view";
@@ -28,8 +28,6 @@ import {
     bindPendingTurnMessages,
     isConnectionErrorMessage,
     isCurrentThreadEvent,
-    mergeAgentMessages,
-    normalizeHistoryMessages,
     parseEventData,
     promptWithAttachments,
     promptWithCanvasReferences,
@@ -42,8 +40,9 @@ import { AgentHistoryView } from "./agent-history-view";
 import { AgentLogView } from "./agent-log-view";
 import { AgentPanelTabs } from "./agent-panel-tabs";
 import { AgentSkillsView } from "./agent-skills-view";
-import { createId, readDataUrl, rt } from "./agent-panel-utils";
+import { agentErrorState, connectionColor, createId, readDataUrl, rt } from "./agent-panel-utils";
 import { useAgentEvents } from "./use-agent-events";
+import { syncRuntime, useAgentThreads, type AgentWorkspaceEvent } from "./use-agent-threads";
 import { useAgentToolCalls } from "./use-agent-tool-calls";
 
 const MAX_ATTACHMENTS = 6;
@@ -52,81 +51,16 @@ const MESSAGE_PREVIEW_LONG_EDGE = 192;
 const MESSAGE_PREVIEW_MAX_LENGTH = 500_000;
 const DEFAULT_AGENT_URL = "http://127.0.0.1:17371";
 const AGENT_PROTOCOL_VERSION = 7;
-const HISTORY_RETRY_DELAYS_MS = [0, 150, 350, 700, 1200];
 const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000, 16000, 30000];
 const AGENT_REASONING_EFFORTS = new Set<AgentReasoningEffort>(["minimal", "low", "medium", "high", "xhigh", "max", "ultra"]);
 
-/** 切换本地运行时，并让界面文案中的 {{agent}} 跟随当前运行时。 */
-function syncRuntime(next: AgentRuntimeName) {
-    if (i18n.options.interpolation) i18n.options.interpolation.defaultVariables = { agent: next === "claude" ? "Claude" : "Codex" };
-    if (useAgentStore.getState().runtime === next) return;
-    try {
-        localStorage.setItem("canvas-agent-runtime", next);
-    } catch {}
-    useAgentStore.getState().setAgentState({
-        runtime: next,
-        threadSearch: "",
-        threadsNextCursor: "",
-        models: [],
-        model: localStorage.getItem(`canvas-agent-model:${next}`) || "",
-        reasoningEffort: (localStorage.getItem(`canvas-agent-reasoning-effort:${next}`) as AgentReasoningEffort | null) || "",
-    });
-}
-
-type AgentWorkspace = { workspacePath: string; activeThreadId?: string };
-type AgentThreadsResponse = { ok?: boolean; workspace?: AgentWorkspace; conversation?: AgentConversationState; data?: AgentThreadSummary[]; nextCursor?: string | null };
-/** 历史列表请求路径，带上当前搜索词与分页游标（空值不拼入）。 */
-function threadsPath(cursor = "") {
-    const params = new URLSearchParams();
-    const searchTerm = useAgentStore.getState().threadSearch;
-    if (searchTerm) params.set("searchTerm", searchTerm);
-    if (cursor) params.set("cursor", cursor);
-    const query = params.toString();
-    return agentPath(`/threads${query ? `?${query}` : ""}`);
-}
-type AgentThreadResponse = { ok?: boolean; workspace?: AgentWorkspace; conversation?: AgentConversationState; thread?: AgentThreadSummary; messages?: AgentChatItem[]; settledTurnIds?: string[]; historyReady?: boolean };
-type AgentWorkspaceResponse = { ok?: boolean; workspace?: AgentWorkspace; conversation?: AgentConversationState };
 type AgentTurnResponse = { ok?: boolean; threadId?: string };
 type AgentModelsResponse = { ok?: boolean; data?: AgentModel[] };
 type AgentCodexState = { busy?: boolean; threadId?: string; turnId?: string };
 type AgentHelloEvent = { ok?: boolean; protocolVersion?: number; clientId?: string; workspace?: { activeThreadId?: string; runtime?: AgentRuntimeName }; conversation?: AgentConversationState; codex?: AgentCodexState; pendingApprovals?: AgentPendingApproval[] };
-type AgentWorkspaceEvent = { activeThreadId?: string; runtime?: AgentRuntimeName; threadId?: string; sourceClientId?: string; emptyThread?: boolean; draftThread?: boolean; conversation?: AgentConversationState };
 type AgentChatEvent = { threadId?: string; turnId?: string; sourceClientId?: string; replayed?: boolean; message?: AgentChatItem };
 type AgentBootstrapEvent = { type?: "codex.preparing" | "codex.prepare_failed" | "mcp.startup" | "mcp.complete"; phase?: "preheat" | "runtime"; threadId?: string; name?: string; status?: "starting" | "ready" | "failed" | "cancelled"; error?: string | null; failureReason?: string | null };
 type AgentClientGlobal = typeof globalThis & { __infiniteCanvasAgentClientIdPromise?: Promise<string> };
-
-function authoritativeHistoryTurnKeys(threadId: string, settledTurnIds: string[]) {
-    return new Set(settledTurnIds.map((turnId) => `${threadId}\0${turnId}`));
-}
-
-function agentErrorState(error: unknown) {
-    return error instanceof AgentApiError ? (error.response as { state?: AgentConversationState }).state : undefined;
-}
-
-function conversationBootstrapView(conversation: AgentConversationState) {
-    const mcpStartupStatuses: Record<string, AgentBootstrapStatus> = Object.fromEntries(Object.entries(conversation.mcpStatuses).map(([name, item]) => {
-        const view: AgentBootstrapStatus = item.status === "starting"
-            ? { key: `mcp:${name}:starting`, text: rt("mcpStarting", { name }), detail: rt("mcpConnecting"), status: "running" }
-            : item.status === "ready"
-                ? { key: `mcp:${name}:ready`, text: rt("mcpReadyNamed", { name }), detail: rt("toolsReady"), status: "ready" }
-                : { key: `mcp:${name}:${item.status}`, text: rt(item.status === "failed" ? "mcpFailedNamed" : "mcpCanceledNamed", { name }), detail: item.error || rt("toolInitFailed"), status: "error" };
-        return [name, view];
-    }));
-    const services = Object.values(mcpStartupStatuses);
-    const pending = services.filter((item) => item.status === "running").length;
-    const bootstrapStatus: AgentBootstrapStatus | null = conversation.status === "idle" || conversation.status === "preparing"
-        ? services.length
-            ? { key: "mcp:starting", text: rt("mcpServicesStarting"), detail: pending ? rt("toolServicesPending", { count: pending }) : rt("checkingToolServices"), status: "running" }
-            : { key: "codex:preparing", text: rt("conversationInitializing"), detail: rt("conversationCreating"), status: "running" }
-        : conversation.status === "warning"
-            ? { key: "mcp:warning", text: rt("someMcpFailed"), detail: rt("remainingToolsReady"), status: "error" }
-            : conversation.status === "failed"
-                ? { key: "codex:prepare_failed", text: rt("conversationInitFailed"), detail: conversation.error || rt("conversationCreateFailed"), status: "error" }
-                : conversation.status === "ready"
-                    ? { key: "mcp:ready", text: rt("mcpServicesReady", { count: services.length }), detail: rt("toolsReady"), status: "ready" }
-                    : null;
-    return { bootstrapStatus, mcpStartupStatuses };
-}
 
 export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?: boolean; headless?: boolean; autoConnect?: boolean }) {
     const { t } = useTranslation();
@@ -199,14 +133,10 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
         reconnectTimerRef.current = null;
         setReconnectNonce((nonce) => nonce + 1);
     };
-    const loadThreadsSequenceRef = useRef(0);
-    const loadingMoreThreadsRef = useRef(false);
-    const threadMessagesRef = useRef(new Map<string, AgentChatItem[]>());
-    const authoritativeHistoryTurnsRef = useRef(new Set<string>());
     const liveTurnKeysRef = useRef(new Set<string>());
-    const threadOperationRef = useRef(0);
-    const threadOperationSequenceRef = useRef(0);
     const endpoint = useMemo(() => url.trim().replace(/\/$/, ""), [url]);
+    const { addMessage, addEventLog, showAgentError, handleAgentEvent } = useAgentEvents({ endpoint, clientIdRef, canvasContextRef, liveTurnKeysRef });
+    const { loadThreadsSequenceRef, threadMessagesRef, authoritativeHistoryTurnsRef, threadOperationRef, applyConversationState, applyWorkspaceChange, loadThreads, loadMoreThreads, searchThreads, switchRuntime, startNewThread, resumeThread, confirmDeleteThreads } = useAgentThreads({ endpoint, clientIdRef, connectedRef, pendingToolRef, liveTurnKeysRef, addEventLog });
     const urlAgentAutoConnect = searchParams.has("agentUrl") && searchParams.has("agentToken");
     useEffect(() => {
         let disposed = false;
@@ -218,151 +148,6 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
         });
         return () => { disposed = true; };
     }, []);
-    const loadThreadSnapshot = useCallback(async (threadId: string, sequence: number, response?: AgentThreadResponse, expectedTurnId = "") => {
-        let thread = response;
-        let lastError: unknown;
-        for (const delayMs of HISTORY_RETRY_DELAYS_MS) {
-            if (delayMs) await delay(delayMs);
-            if (sequence !== loadThreadsSequenceRef.current || useAgentStore.getState().activeThreadId !== threadId) return false;
-            try {
-                thread ||= await fetchAgentJson<AgentThreadResponse>(endpoint, token, agentPath(`/threads/${encodeURIComponent(threadId)}`));
-                lastError = undefined;
-            } catch (error) {
-                lastError = error;
-                thread = undefined;
-                continue;
-            }
-            const history = normalizeHistoryMessages(thread.messages || []);
-            const latest = useAgentStore.getState();
-            if (sequence !== loadThreadsSequenceRef.current || latest.activeThreadId !== threadId) return false;
-            const historyTurns = authoritativeHistoryTurnKeys(threadId, thread.settledTurnIds || []);
-            const hasExpectedTurn = !expectedTurnId || historyTurns.has(`${threadId}\0${expectedTurnId}`);
-            historyTurns.forEach((key) => liveTurnKeysRef.current.delete(key));
-            if (latest.activeTurnId) liveTurnKeysRef.current.add(`${threadId}\0${latest.activeTurnId}`);
-            authoritativeHistoryTurnsRef.current = historyTurns;
-            const messages = mergeAgentMessages(history, latest.messages, threadId, liveTurnKeysRef.current);
-            threadMessagesRef.current.set(threadId, messages);
-            setAgentState({ messages, connectError: "" });
-            const coveredTurnIds = [...historyTurns].map((key) => key.slice(threadId.length + 1));
-            if (coveredTurnIds.length) void acknowledgeCodexHistory(endpoint, token, threadId, coveredTurnIds).catch(() => undefined);
-            if (hasExpectedTurn && (thread.historyReady !== false || Boolean(expectedTurnId))) return true;
-            thread = undefined;
-        }
-        if (lastError) throw lastError;
-        return false;
-    }, [endpoint, setAgentState, token]);
-    const applyWorkspaceChange = useCallback((data: AgentWorkspaceEvent) => {
-        const nextThreadId = data.activeThreadId ?? data.threadId ?? "";
-        const current = useAgentStore.getState();
-        const threadChanged = current.activeThreadId !== nextThreadId;
-        const emptyThread = Boolean(data.emptyThread || data.draftThread);
-        const pendingMessage = [...current.messages].reverse().find((item) => item.role === "user" && !item.turnId);
-        const keepPendingMessage = Boolean(
-            data.emptyThread
-            && pendingMessage
-            && (current.sending || current.waiting)
-            && (!data.sourceClientId || data.sourceClientId === clientIdRef.current),
-        );
-        if (threadChanged && current.activeThreadId) {
-            const messages = keepPendingMessage ? current.messages.filter((item) => item.id !== pendingMessage!.id) : current.messages;
-            threadMessagesRef.current.set(current.activeThreadId, messages);
-        }
-        if (emptyThread && nextThreadId) threadMessagesRef.current.delete(nextThreadId);
-        if (threadChanged || emptyThread) {
-            loadThreadsSequenceRef.current += 1;
-            authoritativeHistoryTurnsRef.current.clear();
-            liveTurnKeysRef.current.clear();
-        }
-        const messages = keepPendingMessage
-            ? [scopeChatItem(pendingMessage!, nextThreadId, "")]
-            : emptyThread ? []
-                : threadChanged ? threadMessagesRef.current.get(nextThreadId) || []
-                    : current.messages;
-        pendingToolRef.current = null;
-        setAgentState({
-            activeThreadId: nextThreadId,
-            activeTurnId: threadChanged || emptyThread ? "" : current.activeTurnId,
-            messages,
-            tokenUsage: threadChanged || emptyThread ? null : current.tokenUsage,
-            pendingTool: null,
-            pendingApprovals: threadChanged || emptyThread ? [] : current.pendingApprovals,
-        });
-        return loadThreadsSequenceRef.current;
-    }, [setAgentState]);
-    const applyConversationState = useCallback((next: AgentConversationState, force = false) => {
-        const current = useAgentStore.getState();
-        if (!next?.revision || !force && next.revision <= current.conversation.revision) return false;
-        const conversationChanged = next.conversationId !== current.conversation.conversationId;
-        if (conversationChanged || next.threadId !== current.activeThreadId) {
-            applyWorkspaceChange({
-                activeThreadId: next.threadId,
-                emptyThread: conversationChanged || !current.activeThreadId,
-                draftThread: next.status === "preparing",
-                sourceClientId: next.sourceClientId,
-            });
-        }
-        setAgentState({ conversation: next, ...conversationBootstrapView(next) });
-        return true;
-    }, [applyWorkspaceChange, setAgentState]);
-    const loadThreads = useCallback(async (skipHistory = false, expectedTurnId = "") => {
-        if (!connectedRef.current && !useAgentStore.getState().connected) return;
-        let sequence = ++loadThreadsSequenceRef.current;
-        setAgentState({ loadingThreads: true });
-        try {
-            const data = await fetchAgentJson<AgentThreadsResponse>(endpoint, token, threadsPath());
-            if (sequence !== loadThreadsSequenceRef.current) return;
-            if (data.conversation) {
-                applyConversationState(data.conversation);
-                sequence = loadThreadsSequenceRef.current;
-            }
-            const current = useAgentStore.getState();
-            const currentThreadId = current.activeThreadId || data.workspace?.activeThreadId || "";
-            if (!data.conversation && currentThreadId !== current.activeThreadId) sequence = applyWorkspaceChange({ activeThreadId: currentThreadId });
-            if (sequence !== loadThreadsSequenceRef.current || useAgentStore.getState().activeThreadId !== currentThreadId) return;
-            setAgentState({ threads: data.data || [], threadsNextCursor: data.nextCursor || "", workspacePath: data.workspace?.workspacePath || "" });
-            if (currentThreadId && !skipHistory) {
-                await loadThreadSnapshot(currentThreadId, sequence, undefined, expectedTurnId);
-            } else {
-                authoritativeHistoryTurnsRef.current.clear();
-                liveTurnKeysRef.current.clear();
-            }
-        } catch (error) {
-            addEventLog(rt("historyReadFailed"), error);
-        } finally {
-            if (sequence === loadThreadsSequenceRef.current && !threadOperationRef.current) setAgentState({ loadingThreads: false });
-        }
-    }, [applyConversationState, applyWorkspaceChange, endpoint, loadThreadSnapshot, setAgentState, token]);
-    const loadMoreThreads = useCallback(async () => {
-        const current = useAgentStore.getState();
-        if (!current.connected || !current.threadsNextCursor || loadingMoreThreadsRef.current) return;
-        const sequence = loadThreadsSequenceRef.current;
-        loadingMoreThreadsRef.current = true;
-        try {
-            const data = await fetchAgentJson<AgentThreadsResponse>(endpoint, token, threadsPath(current.threadsNextCursor));
-            if (sequence !== loadThreadsSequenceRef.current || useAgentStore.getState().threadSearch !== current.threadSearch) return;
-            const latest = useAgentStore.getState();
-            const ids = new Set(latest.threads.map((thread) => thread.id));
-            setAgentState({ threads: [...latest.threads, ...(data.data || []).filter((thread) => !ids.has(thread.id))], threadsNextCursor: data.nextCursor || "" });
-        } catch (error) {
-            addEventLog(rt("historyReadFailed"), error);
-        } finally {
-            loadingMoreThreadsRef.current = false;
-        }
-    }, [endpoint, setAgentState, token]);
-    /** 搜索只刷新历史列表，不触碰当前对话的历史快照与实时消息去重状态。 */
-    const searchThreads = useCallback(async (term: string) => {
-        const threadSearch = term.trim();
-        setAgentState({ threadSearch, loadingThreads: true });
-        try {
-            const data = await fetchAgentJson<AgentThreadsResponse>(endpoint, token, threadsPath());
-            if (useAgentStore.getState().threadSearch !== threadSearch) return;
-            setAgentState({ threads: data.data || [], threadsNextCursor: data.nextCursor || "" });
-        } catch (error) {
-            addEventLog(rt("historyReadFailed"), error);
-        } finally {
-            if (useAgentStore.getState().threadSearch === threadSearch) setAgentState({ loadingThreads: false });
-        }
-    }, [endpoint, setAgentState, token]);
     // Imperatively subscribe to canvasContext to keep the ref current and debounce snapshot reports without rerendering the panel.
     useEffect(() => {
         let timer: ReturnType<typeof setTimeout> | null = null;
@@ -455,7 +240,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
             void postState(endpoint, token, clientId, canvasContextRef.current?.snapshot || null);
             if (document.visibilityState === "visible" && document.hasFocus()) void activateAgentClient(endpoint, token, clientId);
             if (!busy && !nextThreadId && (!hello?.conversation || hello.conversation.status === "idle")) {
-                void fetchAgentJson<AgentWorkspaceResponse>(endpoint, token, agentPath("/threads/reset"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ clientId, permissionMode }) })
+                void resetAgentThread(endpoint, token, clientId, permissionMode)
                     .then((result) => result.conversation && applyConversationState(result.conversation))
                     .catch((error) => {
                         const state = agentErrorState(error);
@@ -940,10 +725,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
             }
             return;
         }
-        try {
-            const parsed = new URL(nextEndpoint);
-            if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error("invalid protocol");
-        } catch {
+        if (!isAgentUrl(nextEndpoint)) {
             const text = rt("invalidAddress");
             if (!silent) {
                 setAgentState({ connectError: text });
@@ -964,10 +746,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
             useAgentStore.getState().openPanel();
             return;
         }
-        try {
-            const parsed = new URL(bootstrap.url);
-            if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error("invalid protocol");
-        } catch {
+        if (!isAgentUrl(bootstrap.url)) {
             setAgentState({ fragmentBootstrap: false, activeTab: "setup", connectError: rt("invalidAddress") });
             useAgentStore.getState().openPanel();
             return;
@@ -1014,113 +793,10 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
         pendingToolRef.current = null;
     }
 
-    const beginThreadOperation = () => {
-        const operation = ++threadOperationSequenceRef.current;
-        threadOperationRef.current = operation;
-        setAgentState({ loadingThreads: true });
-        return operation;
-    };
-
-    const finishThreadOperation = (operation: number) => {
-        if (threadOperationRef.current !== operation) return;
-        threadOperationRef.current = 0;
-        setAgentState({ loadingThreads: false });
-    };
-
-    const switchRuntime = async (next: AgentRuntimeName) => {
-        const current = useAgentStore.getState();
-        if (next === current.runtime) return;
-        if (current.connected && (current.sending || current.waiting || current.loadingThreads || ["preparing", "running"].includes(current.conversation.status))) {
-            message.warning(t("agent.panel.runtimeBusy"));
-            return;
-        }
-        syncRuntime(next);
-        setAgentState({ messages: [], threads: [], activeThreadId: "", activeTurnId: "", tokenUsage: null });
-        if (current.connected) {
-            await startNewThread();
-            await loadThreads(true);
-        }
-    };
-
-    const startNewThread = async () => {
-        const current = useAgentStore.getState();
-        if (!current.connected || current.sending || current.waiting || current.loadingThreads || ["preparing", "running"].includes(current.conversation.status)) return;
-        const operation = beginThreadOperation();
-        clearSkillSelection();
-        setAgentState({ activeTab: "chat", activity: rt("creatingConversation") });
-        try {
-            const result = await fetchAgentJson<AgentWorkspaceResponse>(endpoint, token, agentPath("/threads/reset"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ clientId: clientIdRef.current, permissionMode }) });
-            if (threadOperationRef.current !== operation) return;
-            if (result.conversation) applyConversationState(result.conversation);
-            setAgentState({ activeTab: "chat", activity: rt("newConversation") });
-        } catch (error) {
-            const state = agentErrorState(error);
-            if (state) applyConversationState(state);
-            addEventLog(rt("newConversationFailed"), error);
-            message.error(error instanceof Error ? error.message : rt("newConversationFailed"));
-            await loadThreads();
-        } finally {
-            finishThreadOperation(operation);
-        }
-    };
-
-    const resumeThread = async (threadId: string) => {
-        const current = useAgentStore.getState();
-        if (!current.connected || !threadId || current.sending || current.waiting || current.loadingThreads || ["preparing", "running"].includes(current.conversation.status)) return;
-        const operation = beginThreadOperation();
-        try {
-            const result = await fetchAgentJson<AgentThreadResponse>(endpoint, token, agentPath(`/threads/${encodeURIComponent(threadId)}/resume`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ permissionMode, clientId: clientIdRef.current }) });
-            if (result.conversation) applyConversationState(result.conversation);
-            await loadThreads();
-            if (useAgentStore.getState().activeThreadId === threadId) setAgentState({ activeTab: "chat", activity: rt("conversationResumed") });
-        } catch (error) {
-            const state = agentErrorState(error);
-            if (state) applyConversationState(state);
-            addEventLog(rt("resumeConversationFailed"), error);
-            message.error(error instanceof Error ? error.message : rt("resumeConversationFailed"));
-            await loadThreads();
-        } finally {
-            finishThreadOperation(operation);
-        }
-    };
-
-    const deleteThreads = async (threadIds: string[]) => {
-        if (!connected || !threadIds.length || sending || waiting || loadingThreads) return;
-        const operation = beginThreadOperation();
-        let deletedCount = 0;
-        try {
-            for (const threadId of new Set(threadIds)) {
-                await fetchAgentJson(endpoint, token, agentPath(`/threads/${encodeURIComponent(threadId)}/delete`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ clientId: clientIdRef.current }) });
-                threadMessagesRef.current.delete(threadId);
-                deletedCount += 1;
-            }
-            await loadThreads();
-            message.success(rt("recordsDeleted", { count: deletedCount }));
-        } catch (error) {
-            await loadThreads();
-            addEventLog(rt("deleteConversationFailed"), error);
-            message.error(error instanceof Error ? error.message : rt("deleteConversationFailed"));
-        } finally {
-            finishThreadOperation(operation);
-        }
-    };
-
-    const confirmDeleteThreads = (threadIds: string[]) => {
-        modal.confirm({
-            title: rt("deleteConversations", { count: threadIds.length }),
-            content: rt("deleteConversationsDescription"),
-            okText: t("common.delete"),
-            okType: "danger",
-            cancelText: t("common.cancel"),
-            onOk: () => deleteThreads(threadIds),
-        });
-    };
-
-    const { addMessage, addEventLog, showAgentError, handleAgentEvent } = useAgentEvents({ endpoint, clientIdRef, canvasContextRef, liveTurnKeysRef });
     const { handleToolCall, rejectPendingTool, approvePendingTool } = useAgentToolCalls({ endpoint, clientIdRef, canvasContextRef, pendingToolRef, confirmToolsRef, navigate, addEventLog });
 
     const connectionStatus = t(connectError ? "agent.status.failed" : connected ? "agent.status.connected" : enabled ? "agent.status.connecting" : "agent.status.disconnected");
-    const connectionStatusColor = connectError ? "#dc2626" : connected ? "#16a34a" : enabled ? "#d97706" : theme.node.muted;
+    const connectionStatusColor = connectionColor({ connectError, connected, enabled }, theme.node.muted);
     const content = (
         <>
             <AgentPanelTabs
@@ -1338,8 +1014,4 @@ async function createMessageAttachmentMetadata(item: AgentAttachment) {
 
 function clamp(value: number, min: number, max: number) {
     return Math.min(max, Math.max(min, value));
-}
-
-function delay(ms: number) {
-    return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }

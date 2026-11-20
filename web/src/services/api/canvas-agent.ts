@@ -1,6 +1,6 @@
 import i18n from "@/i18n";
 import type { CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
-import { useAgentStore, type AgentReasoningEffort } from "@/stores/use-agent-store";
+import { useAgentStore, type AgentConversationState, type AgentPermissionMode, type AgentReasoningEffort } from "@/stores/use-agent-store";
 
 type AgentConfigResponse = { ok?: boolean; protocolVersion?: number; url?: string; token?: string; hasToken?: boolean };
 const AGENT_MESSAGE_ASSET_PATTERN = /^agent-asset:([a-f0-9]{64})\/([a-f0-9]{64}\.(?:gif|jpe?g|png|webp))$/;
@@ -137,6 +137,11 @@ export async function discoverAgentConfig(endpoint: string) {
     } catch {
         return null;
     }
+}
+
+type AgentWorkspaceResponse = { ok?: boolean; workspace?: { workspacePath: string; activeThreadId?: string }; conversation?: AgentConversationState };
+export function resetAgentThread(endpoint: string, token: string, clientId: string, permissionMode: AgentPermissionMode) {
+    return fetchAgentJson<AgentWorkspaceResponse>(endpoint, token, agentPath("/threads/reset"), jsonPost({ clientId, permissionMode }));
 }
 
 function jsonPost(body: unknown): RequestInit {

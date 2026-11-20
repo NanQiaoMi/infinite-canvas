@@ -100,6 +100,15 @@ type AgentStore = {
 
 export const CANVAS_AGENT_PANEL_MOTION_MS = 500;
 
+/** 校验本地 Agent 地址是否为 http(s) URL。 */
+export function isAgentUrl(value: string) {
+    try {
+        return ["http:", "https:"].includes(new URL(value).protocol);
+    } catch {
+        return false;
+    }
+}
+
 const initialRuntime: AgentRuntimeName = typeof window !== "undefined" && localStorage.getItem("canvas-agent-runtime") === "claude" ? "claude" : "codex";
 
 export const useAgentStore = create<AgentStore>((set, get) => ({
@@ -160,12 +169,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
         const endpoint = get().url.trim().replace(/\/$/, "");
         const token = get().token.trim();
         if (!endpoint || !token) return set({ connectError: silent ? "" : i18n.t("agent.state.connectionRequired") });
-        try {
-            const parsed = new URL(endpoint);
-            if (!["http:", "https:"].includes(parsed.protocol)) throw new Error();
-        } catch {
-            return set({ connectError: silent ? "" : i18n.t("agent.state.invalidUrl") });
-        }
+        if (!isAgentUrl(endpoint)) return set({ connectError: silent ? "" : i18n.t("agent.state.invalidUrl") });
         localStorage.setItem("canvas-agent-url", endpoint);
         localStorage.setItem("canvas-agent-token", token);
         // Only set enabled here; LocalAgentPanel's effect owns SSE initialization.
