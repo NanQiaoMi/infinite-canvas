@@ -7,6 +7,7 @@ description: Implemented changes that still need manual verification
 
 The current release needs manual verification in these areas:
 
+- `canvas-agent install-mcp`: `--dry-run` lists what each client would do without writing; a real run registers Claude Code at user scope, writes `~/.gemini/config/mcp_config.json` for Antigravity (with a one-time `.bak`), skips Codex when the Infinite Canvas plugin is enabled, and ends with "MCP 自检通过：N 个工具"; restarting each agent shows the infinite-canvas tools.
 - Local Agent Codex / Claude switch (Claude runs through the Claude Agent SDK; log in once with `claude` → `/login` in a terminal or set `ANTHROPIC_API_KEY` first):
   1. The Agent panel header shows a Codex / Claude switch; switching while idle starts a new conversation in the chosen runtime, while a running task blocks the switch with a hint; the choice survives reloads and stays in sync across tabs;
   2. In Claude mode, chat streams text and thinking, canvas MCP tools (`canvas_get_state`, `canvas_apply_ops`, generation tools) run without approval, and the turn ends with usage shown;

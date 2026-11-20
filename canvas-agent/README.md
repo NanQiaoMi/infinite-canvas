@@ -40,6 +40,19 @@ Codex app 插件会读取启动输出里的 Local URL 和 Connect token，并直
 
 Canvas Agent 默认只监听 `127.0.0.1`。网页第一次带正确 token 连接后，Canvas Agent 会记录该网页 Origin；之后其他 Origin 不能复用这个本地 Agent，除非用户清理 `~/.infinite-canvas/canvas-agent.json` 里的 `origins`。
 
+## 一键接入 MCP
+
+使用稳定的启动命令（当前 node 绝对路径 + 运行时入口 + `mcp`）为本地 AI 工具注册 Infinite Canvas MCP：
+
+```bash
+npx -y @basketikun/canvas-agent@latest install-mcp [--client claude|codex|antigravity|all] [--entry <dist/index.js 绝对路径>] [--dry-run]
+```
+
+- `--client`：要接入的客户端，默认 `all`；Claude Code 注册为用户级，Codex 已通过插件提供时自动跳过。
+- `--entry`：指定本地入口文件（需为绝对路径）；不指定时安装到 `~/.infinite-canvas/runtime`。
+- `--dry-run`：只显示将执行的操作，不写入任何配置。
+- 命令结束后会自检 MCP 工具列表，任一客户端失败时退出码为 1。
+
 ## 发布
 
 `canvas-agent` 使用自己的 `package.json` 版本号，不跟仓库根目录 `VERSION` 绑定。推送到 `main` 后，GitHub Actions 会检查 npm 上是否已经存在当前包版本；不存在时才发布 `@basketikun/canvas-agent`。
