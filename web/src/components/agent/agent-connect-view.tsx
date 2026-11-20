@@ -37,7 +37,7 @@ export function AgentConnectView({
     const { message } = App.useApp();
     const steps = [{ title: t("agent.connect.pluginTitle"), text: t("agent.connect.pluginText") }, { title: t("agent.connect.directTitle"), text: t("agent.connect.directText"), command: "npx -y @basketikun/canvas-agent@latest" }];
     const statusText = connectError ? t("agent.status.failed") : connected ? activity : enabled ? t("agent.status.connecting") : t("agent.status.disconnected");
-    const statusColor = connectionColor({ connectError, connected, enabled }, theme.node.muted);
+    const statusColor = connectionColor({ connectError, connected, enabled }, theme);
     const copyCommand = (command: string) => {
         copyToClipboard(command);
         message.success(t("agent.connect.commandCopied"));
@@ -144,7 +144,7 @@ export function AgentConnectView({
                             />
                         </label>
                         {connectError ? (
-                            <div className="rounded-md border px-2.5 py-2 text-xs leading-5" style={{ borderColor: "rgba(220,38,38,.35)", color: "#dc2626" }}>
+                            <div className="rounded-md border px-2.5 py-2 text-xs leading-5" style={{ borderColor: `color-mix(in srgb, ${theme.status.danger} 35%, transparent)`, color: theme.status.danger }}>
                                 {connectError}
                             </div>
                         ) : null}

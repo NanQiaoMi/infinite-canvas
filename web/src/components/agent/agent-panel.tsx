@@ -64,10 +64,11 @@ export function AgentPanel() {
                 ) : (
                     <div className="relative flex h-full w-full flex-col">
                         <div className="flex h-9 shrink-0 items-center justify-between border-b px-3 text-xs" style={{ borderColor: theme.node.stroke }}>
-                            <span className="font-semibold text-stone-500">外部本地 Codex 面板</span>
+                            <span className="font-semibold" style={{ color: theme.node.muted }}>外部本地 Codex 面板</span>
                             <button
                                 type="button"
-                                className="text-emerald-600 hover:underline dark:text-emerald-400"
+                                className="hover:underline"
+                                style={{ color: theme.status.success }}
                                 onClick={() => setAgentMode("conversation")}
                             >
                                 返回内置 AI 助手

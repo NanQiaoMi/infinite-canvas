@@ -124,7 +124,7 @@ export function AgentLogView({
 
                 <div className="border-y py-2.5" style={{ borderColor: theme.node.stroke }}>
                     <div className="flex items-start gap-2.5">
-                        <span className={`mt-1.5 size-2 shrink-0 rounded-full ${context.connected ? "bg-emerald-500" : context.enabled ? "bg-amber-500" : "bg-current opacity-30"}`} />
+                        <span className={`mt-1.5 size-2 shrink-0 rounded-full ${context.connected || context.enabled ? "" : "bg-current opacity-30"}`} style={context.connected ? { background: theme.status.success } : context.enabled ? { background: theme.status.warning } : undefined} />
                         <div className="min-w-0 flex-1">
                             <div className="flex min-w-0 items-center gap-2 text-sm">
                                 <span className="font-medium">{connectionLabel}</span>
@@ -223,13 +223,13 @@ function LogActions({ logs, lastError, context, onClear, onCopy }: { logs: Agent
 function LogRow({ item, onToggle }: { item: DisplayLog; onToggle?: (open: boolean) => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
-    const tone = item.level === "error" ? "text-red-600 dark:text-red-400" : item.level === "warning" ? "text-amber-600 dark:text-amber-400" : item.success ? "text-emerald-600 dark:text-emerald-400" : "";
+    const tone = item.level === "error" ? theme.status.danger : item.level === "warning" ? theme.status.warning : item.success ? theme.status.success : theme.node.muted;
     const Icon = item.level === "error" ? CircleAlert : item.level === "warning" ? TriangleAlert : item.success ? CheckCircle2 : CircleDot;
     return (
         <details className="group border-b last:border-b-0" style={{ borderColor: theme.node.stroke }} onToggle={(event) => onToggle?.(event.currentTarget.open)}>
             <summary className="cursor-pointer list-none px-1 py-2.5 transition hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-current/20 dark:hover:bg-white/10 [&::-webkit-details-marker]:hidden">
                 <div className="flex items-start gap-2.5">
-                    <Icon className={`mt-0.5 size-4 shrink-0 ${tone}`} style={tone ? undefined : { color: theme.node.muted }} />
+                    <Icon className="mt-0.5 size-4 shrink-0" style={{ color: tone }} />
                     <div className="min-w-0 flex-1">
                         <div className="flex min-w-0 items-center gap-2">
                             <span className="shrink-0 font-mono text-[10px] leading-5" style={{ color: theme.node.faint }}>

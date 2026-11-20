@@ -29,6 +29,7 @@ export const canvasThemes = {
             activeBg: "#e7e5df",
             activeText: "#292524",
         },
+        status: { success: "#16a34a", warning: "#d97706", danger: "#dc2626", info: "#2563eb" },
     },
     dark: {
         canvas: {
@@ -57,6 +58,7 @@ export const canvasThemes = {
             activeBg: "#3a3631",
             activeText: "#f5f5f4",
         },
+        status: { success: "#4ade80", warning: "#fbbf24", danger: "#f87171", info: "#60a5fa" },
     },
 } as const;
 

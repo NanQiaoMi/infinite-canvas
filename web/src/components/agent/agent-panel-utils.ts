@@ -1,4 +1,5 @@
 import i18n from "@/i18n";
+import type { CanvasTheme } from "@/lib/canvas-theme";
 import { randomId } from "@/lib/utils";
 import { AgentApiError } from "@/services/api/canvas-agent";
 import type { AgentConversationState } from "@/stores/use-agent-store";
@@ -24,6 +25,6 @@ export function agentErrorState(error: unknown) {
 }
 
 /** 连接状态颜色：失败红、已连接绿、连接中橙，其余用静默文字色。 */
-export function connectionColor({ connectError, connected, enabled }: { connectError: string; connected: boolean; enabled: boolean }, muted: string) {
-    return connectError ? "#dc2626" : connected ? "#16a34a" : enabled ? "#d97706" : muted;
+export function connectionColor({ connectError, connected, enabled }: { connectError: string; connected: boolean; enabled: boolean }, theme: CanvasTheme) {
+    return connectError ? theme.status.danger : connected ? theme.status.success : enabled ? theme.status.warning : theme.node.muted;
 }

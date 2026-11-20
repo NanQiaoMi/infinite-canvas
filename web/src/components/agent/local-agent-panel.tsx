@@ -796,7 +796,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
     const { handleToolCall, rejectPendingTool, approvePendingTool } = useAgentToolCalls({ endpoint, clientIdRef, canvasContextRef, pendingToolRef, confirmToolsRef, navigate, addEventLog });
 
     const connectionStatus = t(connectError ? "agent.status.failed" : connected ? "agent.status.connected" : enabled ? "agent.status.connecting" : "agent.status.disconnected");
-    const connectionStatusColor = connectionColor({ connectError, connected, enabled }, theme.node.muted);
+    const connectionStatusColor = connectionColor({ connectError, connected, enabled }, theme);
     const content = (
         <>
             <AgentPanelTabs
