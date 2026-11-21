@@ -68,6 +68,7 @@ function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: s
     const selectedInputs: NodeGenerationResourceInput[] = [];
     const labelByNodeId = new Map<string, string>();
     const textBlocks: string[] = [];
+    const textContents: string[] = [];
     const counts = { image: 0, video: 0, audio: 0, text: 0 };
     let hasToken = false;
     let lastIndex = 0;
@@ -84,7 +85,10 @@ function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: s
                 if (!label) {
                     label = generationLabel(resource.type, counts[resource.type]++);
                     labelByNodeId.set(resource.nodeId, label);
-                    if (resource.type === "text") textBlocks.push(textBlock(label, resource.text || ""));
+                    if (resource.type === "text") {
+                        textBlocks.push(textBlock(label, resource.text || ""));
+                        textContents.push(resource.text || "");
+                    }
                     else selectedInputs.push(resource);
                 }
                 return resource.type === "text" ? `【${label}】` : label;
@@ -95,7 +99,9 @@ function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: s
     }
 
     nextPrompt += prompt.slice(lastIndex);
-    if (textBlocks.length) nextPrompt = `${nextPrompt.trim()}\n\n${textBlocks.join("\n\n")}`;
+    // 提示词只由文本节点引用组成且没有媒体引用时，直接使用原文，避免模型收到孤立的“【文本1】”标签。
+    const onlyTextReferences = !prompt.replace(/@\[node:[^\]]+\]/g, "").trim() && !selectedInputs.length;
+    if (textBlocks.length) nextPrompt = onlyTextReferences ? textContents.join("\n\n") : `${nextPrompt.trim()}\n\n${textBlocks.join("\n\n")}`;
     const referenceImages = selectedInputs.map((input) => input.image).filter((image): image is ReferenceImage => Boolean(image));
     const referenceVideos = selectedInputs.map((input) => input.video).filter((video): video is ReferenceVideo => Boolean(video));
     const referenceAudios = selectedInputs.map((input) => input.audio).filter((audio): audio is ReferenceAudio => Boolean(audio));
