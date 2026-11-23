@@ -7,6 +7,11 @@ description: Implemented changes that still need manual verification
 
 The current release needs manual verification in these areas:
 
+- `muse2api` 视频生成、最高 10 张参考图与 MCP 输入输出优化验证：
+  1. `muse-video` JSON 协议与 422 自动回退：在视频创作台或无限画布选择 `muse-video`（或 `muse2api` 渠道下返回 422/415 的模型别名），文生视频、单图首帧及多图参考视频均可正常创建任务并完成；单素材超过 40 MiB、总计超过 100 MiB 或超过 10 个参考素材时提交前给出明确拦截提示；
+  2. 10 张参考图与 `[图1]~[图10]` 和谐交互：视频创作台支持上传/粘贴/拖拽/从资产选择最多 10 张参考图，显示 `图1`~`图10` 序号，点击序号可将 `[图N]` 插入提示词光标处，支持卡片拖拽排序，超过 2 张自动切为「全能参考」模式，画布中的 `【图1】`/`图1`/`Image 1` 等编号会自动规范为 `[图N]`；
+  3. 服务端 `/api/relay` 视频地址改写与进度展示：服务端开启中转模式时，`GET /v1/videos/{id}` 返回的 `muse2api` 内网或同源 `/v1/media/*` 成片链接自动改写为 `/api/relay?url=...` 并正常加载播放；轮询期间创作台与画布视频节点实时显示百分比进度，超时上限为 600 秒（240 次轮询），失败保留字符串报错信息；
+  4. MCP 工具多图视频闭环：通过 MCP 调用 `workbench_video_get_config` 可见 `maxReferences: 10` 与 `[图1]~[图10]` 提示；调用 `workbench_video_generate` 传入 `referenceAssetIds` / `referenceUrls`（最多 10 张）可自动填入参考图并回显 `referenceMapping`；调用 `canvas_generate_video` 传入超过 10 个参考节点时报错拦截，超过 2 个时自动使用 `reference` 模式；`generation_get_status` 可返回视频进度与成片链接。
 - Text-only generation prompt: a generation config whose composer contains only a reference to one text node sends the text itself (no repeated "【文本1】" label), so the resulting node title is clean; adding an instruction such as "based on @text, make a video" still keeps the label plus the referenced text block.
 - Upstream API compatibility layer (for upstreams such as ChatGPT2API that only expose `/api/image-tasks`):
   1. Submitting from the image workbench or canvas batch generation returns a queued/running task within about a second instead of hanging on a synchronous response or failing with `该地址不在管理员配置的渠道范围内`;

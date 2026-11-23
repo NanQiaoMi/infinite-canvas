@@ -192,6 +192,9 @@ export function createRelayHandler(deps: RelayDeps) {
         if (upstream.status === 204 || upstream.status === 304 || !upstream.body) {
             return new Response(null, { status: upstream.status, headers });
         }
+        if (method === "GET" && isVideoTaskQueryPath(target.pathname) && upstream.status >= 200 && upstream.status < 300) {
+            return await rewriteVideoTaskResponse(upstream, headers, target, channel);
+        }
         const body = upstream.body;
         req.signal.addEventListener("abort", () => void body.cancel().catch(() => undefined), { once: true });
         return new Response(body, { status: upstream.status, headers });
@@ -240,7 +243,7 @@ async function parseRequestInfo(method: string, target: URL, bodyBytes: Uint8Arr
 
     let capability: Capability = "text";
     if (path.endsWith("/images/generations") || path.endsWith("/images/edits")) capability = "image";
-    else if (path.endsWith("/videos") && counted) capability = "video";
+    else if ((path.endsWith("/videos") || path.endsWith("/videos/generations")) && counted) capability = "video";
     else if (path.endsWith("/audio/speech")) capability = "audio";
     else if (path.endsWith("/responses") || path.endsWith("/chat/completions")) capability = "text";
     else if (path.includes(":predictlongrunning")) capability = "video";
@@ -254,6 +257,52 @@ async function parseRequestInfo(method: string, target: URL, bodyBytes: Uint8Arr
     if (!counted || path.includes("/tasks/") || path.includes("/queue/")) units = 0;
     else if (capability === "image") units = Math.max(1, Math.min(15, Math.floor(Math.abs(requestedCount) || 1)));
     return { capability, units, model };
+}
+
+function isVideoTaskQueryPath(pathname: string): boolean {
+    return /\/v1\/videos\/(?:generations\/)?[^/]+$/i.test(pathname);
+}
+
+function shouldRelayVideoMediaUrl(rawUrl: string, target: URL, channel: InternalChannel): boolean {
+    if (!/^https?:\/\//i.test(rawUrl)) return false;
+    try {
+        const parsed = new URL(rawUrl);
+        const key = `${parsed.origin}${parsed.pathname}`;
+        return parsed.origin === target.origin || isUrlUnderBase(key, channel.baseUrl) || /\/v1\/media\//i.test(parsed.pathname);
+    } catch {
+        return false;
+    }
+}
+
+function rewriteVideoMediaField(obj: Record<string, unknown>, key: string, target: URL, channel: InternalChannel) {
+    const val = obj[key];
+    if (typeof val === "string" && shouldRelayVideoMediaUrl(val, target, channel)) {
+        obj[key] = `/api/relay?url=${encodeURIComponent(val)}`;
+    }
+}
+
+async function rewriteVideoTaskResponse(upstream: Response, headers: Headers, target: URL, channel: InternalChannel): Promise<Response> {
+    const contentType = (upstream.headers.get("content-type") || "").toLowerCase();
+    const text = await upstream.text();
+    if (!contentType.includes("application/json")) {
+        return new Response(text, { status: upstream.status, headers });
+    }
+    try {
+        const data = JSON.parse(text) as Record<string, unknown>;
+        if (data && typeof data === "object") {
+            for (const key of ["url", "video_url", "result_url"]) rewriteVideoMediaField(data, key, target, channel);
+            for (const nestedKey of ["video", "result", "content"]) {
+                const nested = data[nestedKey];
+                if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+                    for (const key of ["url", "video_url", "result_url"]) rewriteVideoMediaField(nested as Record<string, unknown>, key, target, channel);
+                }
+            }
+            return new Response(JSON.stringify(data), { status: upstream.status, headers });
+        }
+    } catch {
+        // 非预期 JSON 时原样透传
+    }
+    return new Response(text, { status: upstream.status, headers });
 }
 
 function buildUpstreamHeaders(req: Request, channel: InternalChannel): Headers {

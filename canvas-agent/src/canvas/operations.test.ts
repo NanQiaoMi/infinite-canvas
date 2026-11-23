@@ -25,3 +25,13 @@ test("generation flow still creates a prompt node for prose prompts", () => {
     const config = ops.find((op) => op.type === "add_node" && op.nodeType === "config");
     assert.match(String(config?.metadata?.prompt), /@\[node:text-/);
 });
+
+test("video generation flow auto-switches to reference mode above 2 references and rejects >10", () => {
+    const ops = opsOf("canvas_generate_video", { prompt: "combine [图1] and [图3]", referenceNodeIds: ["img-1", "img-2", "img-3"] });
+    const config = ops.find((op) => op.type === "add_node" && op.nodeType === "config");
+    assert.equal(config?.metadata?.videoMode, "reference");
+    assert.throws(
+        () => opsOf("canvas_generate_video", { prompt: "too many", referenceNodeIds: Array.from({ length: 11 }, (_, i) => `img-${i + 1}`) }),
+        /最多支持 10 个/,
+    );
+});

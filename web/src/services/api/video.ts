@@ -12,12 +12,30 @@ import { assertQuotaAvailable } from "./quota-guard";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 
-type VideoResponse = { id: string; status?: string; error?: { message?: string }; url?: string; result_url?: string; video_url?: string; content?: { video_url?: string; url?: string } | null };
+type VideoResponse = {
+    id?: string;
+    task_id?: string;
+    status?: string;
+    progress?: number;
+    error?: string | { message?: string };
+    url?: string;
+    result_url?: string;
+    video_url?: string;
+    video?: { url?: string } | null;
+    result?: { url?: string; video_url?: string } | null;
+    content?: { video_url?: string; url?: string } | null;
+};
 type ApiVideoResponse = VideoResponse | { code?: number | string; data?: VideoResponse | null; msg?: string; message?: string; error?: { message?: string } };
 type ApiEnvelope<T> = T | { code?: number | string; data?: T | null; msg?: string; message?: string; error?: { message?: string } };
-type RequestOptions = { signal?: AbortSignal };
+type VideoProgressInfo = { progress?: number; remoteStatus?: string };
+type RequestOptions = { signal?: AbortSignal; onProgress?: (info: VideoProgressInfo) => void };
 type VideoMediaOptions = RequestOptions & { videos?: ReferenceVideo[]; audios?: ReferenceAudio[] };
 const apiText = (key: string, options?: Record<string, unknown>) => i18n.t(`apiErrors.${key}`, options);
+
+export const VIDEO_MAX_REFERENCES = 10;
+export const VIDEO_MAX_REFERENCE_BYTES = 40 * 1024 * 1024;
+export const VIDEO_MAX_REFERENCE_TOTAL_BYTES = 100 * 1024 * 1024;
+export const VIDEO_POLL_MAX_ATTEMPTS = 240;
 
 export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string };
 export type VideoGenerationTask = { id: string; provider: "openai" | "gemini" | "plugin"; model: string };
@@ -28,7 +46,10 @@ type GeminiVideoOperation = {
     error?: { message?: string };
     response?: { generateVideoResponse?: { generatedSamples?: Array<{ video?: { uri?: string } }> } };
 };
-export type VideoGenerationTaskState = { status: "pending" } | { status: "completed"; result: VideoGenerationResult } | { status: "failed"; error: string };
+export type VideoGenerationTaskState =
+    | { status: "pending"; progress?: number; remoteStatus?: string }
+    | { status: "completed"; result: VideoGenerationResult }
+    | { status: "failed"; error: string };
 
 /** Results for scripted (plugin) video models, which run their own create+poll in one shot at task creation. */
 const pluginVideoResults = new Map<string, VideoGenerationResult>();
@@ -44,17 +65,65 @@ function aiHeaders(config: AiConfig, contentType?: string) {
     };
 }
 
+export function isMuseVideoModel(model: string): boolean {
+    return /^muse[-_]?vid/i.test(modelOptionName(model));
+}
+
+/** 将常见参考素材编号（如【图1】、图1、Image 1）统一规范为 muse2api 识别的 [图N] / [视频N] / [音频N]。 */
+export function normalizeMuseVideoPrompt(prompt: string): string {
+    return prompt
+        .replace(/【(?:图片|图)(\d+)】/g, "[图$1]")
+        .replace(/【(?:参考)?视频\s*(\d+)】/g, "[视频$1]")
+        .replace(/【(?:参考)?音频\s*(\d+)】/g, "[音频$1]")
+        .replace(/(?<!\[)(?:参考视频|视频)\s*(\d+)/g, "[视频$1]")
+        .replace(/(?<!\[)(?:参考音频|音频)\s*(\d+)/g, "[音频$1]")
+        .replace(/(?<!\[)(?:图片|图)(\d+)/g, "[图$1]")
+        .replace(/(?<!\[)\bReference\s+videos?\s*(\d+)\b/gi, "[视频$1]")
+        .replace(/(?<!\[)\bReference\s+audios?\s*(\d+)\b/gi, "[音频$1]")
+        .replace(/(?<!\[)\bImage\s*(\d+)\b/gi, "[图$1]")
+        .replace(/(?<!\[)\bVideo\s*(\d+)\b/gi, "[视频$1]")
+        .replace(/(?<!\[)\bAudio\s*(\d+)\b/gi, "[音频$1]");
+}
+
+/** 估算 Data URL 对应的原始字节大小（非 Data URL 返回 0）。 */
+export function estimateDataUrlBytes(dataUrl: string): number {
+    const idx = dataUrl.indexOf(";base64,");
+    if (!dataUrl.startsWith("data:") || idx < 0) return 0;
+    const base64 = dataUrl.slice(idx + 8).replace(/\s+/g, "");
+    const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+    return Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
+}
+
+/** 校验视频参考素材数量与大小上限（最多 10 个、单个 40 MiB、总计 100 MiB）。 */
+export function validateVideoReferenceLimits(items: Array<{ name?: string; bytes: number }>): void {
+    if (items.length > VIDEO_MAX_REFERENCES) {
+        throw new Error(apiText("videoMaxReferences", { max: VIDEO_MAX_REFERENCES, count: items.length }));
+    }
+    let totalBytes = 0;
+    for (let i = 0; i < items.length; i += 1) {
+        const bytes = Math.max(0, items[i].bytes || 0);
+        if (bytes > VIDEO_MAX_REFERENCE_BYTES) {
+            throw new Error(apiText("videoReferenceTooLarge", { name: items[i].name || `#${i + 1}` }));
+        }
+        totalBytes += bytes;
+    }
+    if (totalBytes > VIDEO_MAX_REFERENCE_TOTAL_BYTES) {
+        throw new Error(apiText("videoReferenceTotalTooLarge"));
+    }
+}
+
 export async function requestVideoGeneration(config: AiConfig, prompt: string, references: ReferenceImage[] = [], options?: VideoMediaOptions): Promise<VideoGenerationResult> {
     return waitForVideoGenerationTask(config, await createVideoGenerationTask(config, prompt, references, options), options);
 }
 
 export async function waitForVideoGenerationTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationResult> {
-    for (let attempt = 0; attempt < 120; attempt += 1) {
+    for (let attempt = 0; attempt < VIDEO_POLL_MAX_ATTEMPTS; attempt += 1) {
         if (options?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
         const state = await pollVideoGenerationTask(config, task, options);
         if (state.status === "completed") return state.result;
         if (state.status === "failed") throw videoTaskFailed(state.error);
-        if (attempt === 119) throw new Error(apiText("videoTimeout", { provider: "" }));
+        options?.onProgress?.({ progress: state.progress, remoteStatus: state.remoteStatus });
+        if (attempt === VIDEO_POLL_MAX_ATTEMPTS - 1) throw new Error(apiText("videoTimeout", { provider: "" }));
         await delay(2500, options?.signal);
     }
     throw new Error(apiText("videoTimeout", { provider: "" }));
@@ -72,12 +141,17 @@ function videoTaskFailed(message: string) {
 
 export async function createVideoGenerationTask(config: AiConfig, prompt: string, references: ReferenceImage[] = [], options?: VideoMediaOptions): Promise<VideoGenerationTask> {
     assertQuotaAvailable("video");
+    const totalRefs = references.length + (options?.videos?.length || 0) + (options?.audios?.length || 0);
+    if (totalRefs > VIDEO_MAX_REFERENCES) {
+        throw new Error(apiText("videoMaxReferences", { max: VIDEO_MAX_REFERENCES, count: totalRefs }));
+    }
     const selectedModel = (config.model || config.videoModel).trim();
     const requestConfig = resolveModelRequestConfig(config, selectedModel);
     const script = resolveModelScript(config, selectedModel);
     if (script) return createPluginVideoTask(requestConfig, selectedModel, script, prompt, references, options);
     assertVideoConfig(requestConfig, requestConfig.model);
     if (requestConfig.apiFormat === "gemini") return createGeminiVideoTask(requestConfig, selectedModel, prompt, references, options);
+    if (isMuseVideoModel(selectedModel)) return createMuseVideoTask(requestConfig, selectedModel, prompt, references, options);
     return createOpenAIVideoTask(requestConfig, selectedModel, prompt, references, options);
 }
 
@@ -148,6 +222,45 @@ export async function storeGeneratedVideo(result: VideoGenerationResult): Promis
     throw new Error(apiText("noPlayableVideo"));
 }
 
+async function createMuseVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], options?: VideoMediaOptions): Promise<VideoGenerationTask> {
+    const imageDataUrls = await Promise.all(references.map((image) => imageToDataUrl(image)));
+    const videoFiles = await Promise.all((options?.videos || []).map((video) => referenceMediaToFile(video, "ref.mp4", "invalidReferenceVideo", options)));
+    const audioFiles = await Promise.all((options?.audios || []).map((audio) => referenceMediaToFile(audio, "ref.mp3", "invalidReferenceAudio", options)));
+    const videoDataUrls = await Promise.all(videoFiles.map((file) => readFileAsDataUrl(file)));
+    const audioDataUrls = await Promise.all(audioFiles.map((file) => readFileAsDataUrl(file)));
+
+    validateVideoReferenceLimits([
+        ...imageDataUrls.map((dataUrl, i) => ({ name: references[i]?.name || `image_${i + 1}`, bytes: estimateDataUrlBytes(dataUrl) })),
+        ...videoFiles.map((file, i) => ({ name: file.name || `video_${i + 1}`, bytes: file.size || estimateDataUrlBytes(videoDataUrls[i] || "") })),
+        ...audioFiles.map((file, i) => ({ name: file.name || `audio_${i + 1}`, bytes: file.size || estimateDataUrlBytes(audioDataUrls[i] || "") })),
+    ]);
+
+    const ratio = inferVideoRatio(config.size || "16:9");
+    const size = normalizeVideoSize(config.size, config.vquality);
+    const parsedDuration = Number(normalizeVideoSeconds(config.videoSeconds));
+    const duration = Number.isFinite(parsedDuration) && parsedDuration > 0 ? parsedDuration : 6;
+    const payload: Record<string, unknown> = {
+        model: modelOptionName(model),
+        prompt: normalizeMuseVideoPrompt(prompt),
+        duration,
+        ...(size ? { size } : {}),
+        ...(ratio && ratio !== "auto" ? { aspect_ratio: ratio } : {}),
+        resolution: normalizeVideoResolution(config.vquality),
+        ...(imageDataUrls.length ? { images: imageDataUrls } : {}),
+        ...(videoDataUrls.length ? { videos: videoDataUrls } : {}),
+        ...(audioDataUrls.length ? { audios: audioDataUrls } : {}),
+    };
+
+    try {
+        const created = unwrapVideoResponse((await axios.post<ApiVideoResponse>(aiApiUrl(config, "/videos"), payload, { headers: aiHeaders(config, "application/json"), signal: options?.signal })).data);
+        const taskId = created.id || created.task_id;
+        if (!taskId) throw new Error(apiText("noVideoTaskId"));
+        return { id: taskId, provider: "openai", model };
+    } catch (error) {
+        throw new Error(readAxiosError(error, apiText("videoTaskCreateFailed")));
+    }
+}
+
 async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], options?: VideoMediaOptions): Promise<VideoGenerationTask> {
     const images = await Promise.all(references.map(async (image) => dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) })));
     const videos = await Promise.all((options?.videos || []).map((video) => referenceMediaToFile(video, "ref.mp4", "invalidReferenceVideo", options)));
@@ -185,9 +298,13 @@ async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: st
     audios.forEach((file) => body.append("audio[]", file));
     try {
         const created = unwrapVideoResponse((await axios.post<ApiVideoResponse>(aiApiUrl(config, "/videos"), body, { headers: aiHeaders(config), signal: options?.signal })).data);
-        if (!created.id) throw new Error(apiText("noVideoTaskId"));
-        return { id: created.id, provider: "openai", model };
+        const taskId = created.id || created.task_id;
+        if (!taskId) throw new Error(apiText("noVideoTaskId"));
+        return { id: taskId, provider: "openai", model };
     } catch (error) {
+        if (axios.isAxiosError(error) && (error.response?.status === 422 || error.response?.status === 415)) {
+            return createMuseVideoTask(config, model, prompt, references, options);
+        }
         throw new Error(readAxiosError(error, apiText("videoTaskCreateFailed")));
     }
 }
@@ -195,15 +312,22 @@ async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: st
 async function pollOpenAIVideoTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
     try {
         const video = unwrapVideoResponse((await axios.get<ApiVideoResponse>(aiApiUrl(config, `/videos/${task.id}`), { headers: aiHeaders(config), signal: options?.signal })).data);
+        const status = String(video.status || "").toLowerCase();
+        if (status === "failed" || status === "cancelled" || status === "error") {
+            return { status: "failed", error: readApiErrorMessage(video.error) || apiText("videoGenerationFailed") };
+        }
         const url = videoResultUrl(video);
         if (url) return { status: "completed", result: await videoResultFromUrl(url, options) };
-        if (video.status === "completed") {
+        if (status === "completed" || status === "succeeded" || status === "success" || status === "done") {
             const content = await axios.get<Blob>(aiApiUrl(config, `/videos/${task.id}/content`), { headers: aiHeaders(config), responseType: "blob", signal: options?.signal });
             await assertVideoBlob(content.data);
             return { status: "completed", result: { blob: content.data } };
         }
-        if (video.status === "failed" || video.status === "cancelled") return { status: "failed", error: readApiErrorMessage(video.error?.message) || apiText("videoGenerationFailed") };
-        return { status: "pending" };
+        return {
+            status: "pending",
+            progress: typeof video.progress === "number" ? video.progress : undefined,
+            remoteStatus: video.status,
+        };
     } catch (error) {
         throw new Error(readAxiosError(error, apiText("videoTaskQueryFailed")));
     }
@@ -359,7 +483,16 @@ function unwrapEnvelope<T>(payload: ApiEnvelope<T>, emptyMessage: string): T {
 }
 
 function videoResultUrl(payload: VideoResponse) {
-    return [payload.video_url, payload.result_url, payload.url, payload.content?.video_url, payload.content?.url].find((url) => typeof url === "string" && (isPublicMediaUrl(url) || /\.mp4(\?|#|$)/i.test(url)));
+    return [
+        payload.video_url,
+        payload.result_url,
+        payload.url,
+        payload.video?.url,
+        payload.result?.video_url,
+        payload.result?.url,
+        payload.content?.video_url,
+        payload.content?.url,
+    ].find((url) => typeof url === "string" && (isPublicMediaUrl(url) || /\.mp4(\?|#|$)/i.test(url)));
 }
 
 function readApiErrorMessage(value: unknown): string {
@@ -421,7 +554,7 @@ async function assertVideoBlob(blob: Blob) {
 }
 
 function isPublicMediaUrl(value: string) {
-    return /^https?:\/\//i.test(value || "");
+    return /^https?:\/\//i.test(value || "") || /^\/api\/relay\?/i.test(value || "");
 }
 
 function delay(ms: number, signal?: AbortSignal) {

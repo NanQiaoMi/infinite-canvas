@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { ReferenceImage } from "@/types/image";
 
 // The Agent panel dispatches commands through this store to set workbench prompts and optionally start generation.
 // The panel writes model, quality, size, count, and other options to use-config-store, which workbench pages read directly.
@@ -17,6 +18,7 @@ export type WorkbenchCommand = {
     nonce: number;
     taskId?: string;
     prompt?: string;
+    references?: ReferenceImage[];
     run: boolean;
     origin: WorkbenchCommandOrigin;
     page: WorkbenchCommandPage;
@@ -28,6 +30,7 @@ export type WorkbenchCommand = {
 /** dispatch 入参：归属字段可省略，由 store 补齐默认值，既有调用方无需全部改造。 */
 export type WorkbenchCommandInput = {
     prompt?: string;
+    references?: ReferenceImage[];
     run: boolean;
     origin?: WorkbenchCommandOrigin;
     page?: WorkbenchCommandPage;
@@ -40,6 +43,8 @@ export type WorkbenchGenerationTask = {
     kind: "image" | "video";
     status: "queued" | "running" | "succeeded" | "failed";
     prompt?: string;
+    progress?: number;
+    resultUrl?: string;
     createdAt: string;
     updatedAt: string;
     successCount?: number;
@@ -101,7 +106,7 @@ type WorkbenchAgentStore = {
     tasks: WorkbenchGenerationTask[];
     dispatchImage: (command: WorkbenchCommandInput) => string | undefined;
     dispatchVideo: (command: WorkbenchCommandInput) => string | undefined;
-    updateTask: (id: string, patch: Partial<Pick<WorkbenchGenerationTask, "status" | "successCount" | "failCount" | "error">>) => void;
+    updateTask: (id: string, patch: Partial<Pick<WorkbenchGenerationTask, "status" | "successCount" | "failCount" | "error" | "progress" | "resultUrl">>) => void;
     clearImageCommand: () => void;
     clearVideoCommand: () => void;
 };
@@ -137,6 +142,7 @@ function normalizeCommand(command: WorkbenchCommandInput, commandNonce: number):
     return {
         nonce: commandNonce,
         prompt: command.prompt,
+        ...(command.references?.length ? { references: command.references } : {}),
         run: command.run,
         origin: command.origin || "unknown",
         page: command.page || "unknown",

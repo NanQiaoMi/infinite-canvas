@@ -129,6 +129,10 @@ function generationFlowOps(input: Record<string, unknown>, state: CanvasSnapshot
     const textId = `text-${crypto.randomUUID()}`;
     const configId = `config-${crypto.randomUUID()}`;
     const referenceNodeIds = Array.isArray(input.referenceNodeIds) ? input.referenceNodeIds.filter((id): id is string => typeof id === "string") : [];
+    if (mode === "video" && referenceNodeIds.length > 10) {
+        throw new Error(`视频生成最多支持 10 个参考节点（当前 ${referenceNodeIds.length} 个）`);
+    }
+    const flowInput = mode === "video" && referenceNodeIds.length > 2 && !input.videoMode ? { ...input, videoMode: "reference" } : input;
     // When the prompt only @-mentions nodes already passed as references, reuse them instead of minting a duplicate text node.
     const mentionedIds = [...prompt.matchAll(/@\[node:([\w-]+)\]/g)].map((match) => match[1]);
     const reuseReferences = referenceNodeIds.length > 0 && mentionedIds.length > 0
@@ -137,7 +141,7 @@ function generationFlowOps(input: Record<string, unknown>, state: CanvasSnapshot
     const tokens = reuseReferences ? referenceNodeIds.map((id) => `@[node:${id}]`) : [`@[node:${textId}]`, ...referenceNodeIds.map((id) => `@[node:${id}]`)];
     return [
         ...(reuseReferences ? [] : [textNodeOp({ id: textId, text: prompt, title: String(input.title || "提示词") }, x, y)]),
-        configNodeOp(configId, { ...input, prompt: tokens.join("\n") }, x + 420, y),
+        configNodeOp(configId, { ...flowInput, prompt: tokens.join("\n") }, x + 420, y),
         ...(reuseReferences ? [] : [{ type: "connect_nodes", fromNodeId: textId, toNodeId: configId }]),
         ...referenceNodeIds.map((fromNodeId) => ({ type: "connect_nodes", fromNodeId, toNodeId: configId })),
         { type: "select_nodes", ids: [configId] },
