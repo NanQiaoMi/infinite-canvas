@@ -2,6 +2,7 @@
 
 ## Unreleased
 
++ [新增] 升级画布 MCP 多模态视觉校验与人物一致性闭环：MCP Server 原生返回图片内容块，新增 `video_inspect_frames`（成片 3–9 帧接触表与 `[图1]~[图10]` 参考图拼图同屏比对）、`canvas_inspect_node_visual`（节点看图）与 `canvas_extract_video_frame`（抽取尾帧/首帧/指定秒数为画布参考节点），`generation_get_status` 支持最长 30 秒短等待，并在 MCP 指令中内置多镜头人物防漂移与 5 维视觉验收 SOP。
 + [新增] 支持 `muse2api` 视频生成与最高 10 张参考图输入：兼容 `muse-video` JSON 提交与 422 自动回退、服务端 `/api/relay` 视频媒体地址改写与进度透传，视频创作台与画布支持最多 10 张参考图及 `[图1]~[图10]` 编号插入与拖拽排序，MCP 工具 `workbench_video_generate` / `canvas_generate_video` / `generation_get_status` 同步支持多图入参与结构化进度/成片输出。
 + [修复] 画布生成配置只引用了文本节点时，直接把文本原文发给模型，不再在提示词和结果标题里出现重复的「【文本1】」标签。
 + [新增] 本地 Agent 修改文件的工具卡片可展开查看 diff；审批卡片过长内容可折叠并列出将修改的文件；用量栏显示本次对话累计用量（Claude 附带费用）；历史对话支持重命名与置顶。

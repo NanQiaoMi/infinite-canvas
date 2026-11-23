@@ -1,20 +1,26 @@
 import type { NavigateFunction } from "react-router-dom";
+import localforage from "localforage";
 import { nanoid } from "nanoid";
 
 import i18n from "@/i18n";
 import { fetchPrompts } from "@/services/api/prompts";
 import { VIDEO_MAX_REFERENCES } from "@/services/api/video";
+import { resolveMediaUrl } from "@/services/file-storage";
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import type { ReferenceImage } from "@/types/image";
+import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { imageAspectOptions, imageQualityOptions, imageScaleOptions } from "@/components/image-settings-panel";
 import { videoResolutionOptions, videoSecondsRange, videoSizeOptions } from "@/components/video-settings-panel";
-import type { CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
+import { imageMetadata } from "@/lib/canvas/canvas-node-factory";
+import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
+import { buildReferenceContactSheet, captureVideoContactSheet, captureVideoFrame, encodeImageToMcpJpeg } from "@/lib/canvas/canvas-video-frame";
+import type { CanvasAgentOp, CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
 import { clampVideoSeconds } from "@/lib/media-size";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { modelOptionLabel, modelOptionName, normalizeModelOptionValue, selectableModelsByCapability, useConfigStore } from "@/stores/use-config-store";
 import { resolveWorkbenchPage, useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
-import { useAgentStore } from "@/stores/use-agent-store";
+import { useAgentStore, type AgentCanvasContext } from "@/stores/use-agent-store";
 
 // Execute site-level Agent tools in the browser, including canvas lists, workbench generation, prompt search, and asset operations.
 // Their data lives locally in the browser through localforage and Zustand, so this module accesses the relevant stores directly.
@@ -22,6 +28,9 @@ import { useAgentStore } from "@/stores/use-agent-store";
 export const SITE_TOOL_NAMES = [
     "canvas_list_projects",
     "generation_get_status",
+    "canvas_inspect_node_visual",
+    "video_inspect_frames",
+    "canvas_extract_video_frame",
     "workbench_image_get_config",
     "workbench_image_generate",
     "workbench_video_get_config",
@@ -44,6 +53,9 @@ function siteText(key: string, options?: Record<string, unknown>) {
 export const SITE_TOOL_LABELS: Record<SiteToolName, string> = {
     get canvas_list_projects() { return siteText("canvasList"); },
     get generation_get_status() { return siteText("generationStatus"); },
+    get canvas_inspect_node_visual() { return siteText("inspectNodeVisual"); },
+    get video_inspect_frames() { return siteText("inspectVideoFrames"); },
+    get canvas_extract_video_frame() { return siteText("extractVideoFrame"); },
     get workbench_image_get_config() { return siteText("imageConfig"); },
     get workbench_image_generate() { return siteText("imageGenerate"); },
     get workbench_video_get_config() { return siteText("videoConfig"); },
@@ -54,7 +66,11 @@ export const SITE_TOOL_LABELS: Record<SiteToolName, string> = {
 };
 
 type SiteToolInput = Record<string, unknown>;
-type SiteToolContext = { canvasSnapshot?: CanvasAgentSnapshot | null };
+type SiteToolContext = {
+    canvasSnapshot?: CanvasAgentSnapshot | null;
+    canvasContext?: AgentCanvasContext | null;
+    syncCanvasState?: (snapshot: CanvasAgentSnapshot) => void;
+};
 type GenerationStatus = "idle" | "queued" | "running" | "succeeded" | "failed";
 type GenerationStatusItem = {
     id: string;
@@ -78,7 +94,13 @@ export async function runSiteTool(name: SiteToolName, input: SiteToolInput, navi
         case "canvas_list_projects":
             return listCanvasProjects(input);
         case "generation_get_status":
-            return getGenerationStatus(input, context.canvasSnapshot);
+            return getGenerationStatus(input, context);
+        case "canvas_inspect_node_visual":
+            return inspectNodeVisual(input, context);
+        case "video_inspect_frames":
+            return inspectVideoFrames(input, context);
+        case "canvas_extract_video_frame":
+            return extractVideoFrameToCanvas(input, context);
         case "workbench_image_get_config":
             return getImageConfig();
         case "workbench_image_generate":
@@ -98,7 +120,7 @@ export async function runSiteTool(name: SiteToolName, input: SiteToolInput, navi
     }
 }
 
-function getGenerationStatus(input: SiteToolInput, canvasSnapshot?: CanvasAgentSnapshot | null) {
+function collectGenerationStatus(input: SiteToolInput, canvasSnapshot?: CanvasAgentSnapshot | null) {
     const scope = input.scope === "canvas" || input.scope === "image" || input.scope === "video" ? input.scope : "all";
     const taskId = typeof input.taskId === "string" ? input.taskId : "";
     const nodeIds = new Set(Array.isArray(input.nodeIds) ? input.nodeIds.filter((id): id is string => typeof id === "string") : []);
@@ -148,6 +170,18 @@ function getGenerationStatus(input: SiteToolInput, canvasSnapshot?: CanvasAgentS
     const summary: Record<GenerationStatus, number> = { idle: 0, queued: 0, running: 0, succeeded: 0, failed: 0 };
     tasks.forEach((task) => (summary[task.status] += 1));
     return { total: tasks.length, summary, tasks: tasks.slice(0, limit) };
+}
+
+async function getGenerationStatus(input: SiteToolInput, context: SiteToolContext) {
+    const waitSeconds = Math.max(0, Math.min(30, Math.floor(Number(input.waitSeconds) || 0)));
+    const deadline = Date.now() + waitSeconds * 1000;
+    const readSnapshot = () => useAgentStore.getState().canvasContext?.snapshot || context.canvasContext?.snapshot || context.canvasSnapshot;
+    let status = collectGenerationStatus(input, readSnapshot());
+    while (waitSeconds > 0 && Date.now() < deadline && (status.summary.queued > 0 || status.summary.running > 0)) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        status = collectGenerationStatus(input, readSnapshot());
+    }
+    return status;
 }
 
 function generationStatusOrder(status: GenerationStatus) {
@@ -446,4 +480,337 @@ function paginate(input: SiteToolInput, total: number, defaultSize: number) {
     const page = Math.min(maxPage, Math.max(1, Math.floor(Number(input.page)) || 1));
     const start = (page - 1) * pageSize;
     return { page, pageSize, start, end: start + pageSize };
+}
+
+type StoredVideoLog = {
+    id?: string;
+    createdAt?: number;
+    title?: string;
+    prompt?: string;
+    model?: string;
+    status?: string;
+    task?: { id?: string };
+    references?: Array<{ name?: string; dataUrl?: string; storageKey?: string }>;
+    video?: { url?: string; storageKey?: string; width?: number; height?: number };
+};
+
+const videoLogStore = localforage.createInstance({ name: "infinite-canvas", storeName: "video_generation_logs" });
+
+const VIDEO_QA_DIMENSIONS = [
+    "人物一致性（五官、发型、服饰与原始定妆照比对）",
+    "首尾与动作连贯性（起始帧是否贴合 [图1]、运动是否顺滑）",
+    "物理与肢体合理性（手部、道具交互、空间透视无崩坏）",
+    "场景与色调统一（光线、色彩与目标画幅无意外黑边）",
+    "提示词遵循度（主体动作、镜头运动是否按描述发生）",
+];
+
+function getLiveCanvasContext(context: SiteToolContext): AgentCanvasContext | null {
+    return context.canvasContext || useAgentStore.getState().canvasContext;
+}
+
+function requireCanvasSnapshot(context: SiteToolContext): CanvasAgentSnapshot {
+    const snapshot = getLiveCanvasContext(context)?.snapshot || context.canvasSnapshot;
+    if (!snapshot) throw new Error(siteText("openCanvasFirst"));
+    return snapshot;
+}
+
+async function resolveNodeVideoUrl(node: CanvasNodeData): Promise<string> {
+    const content = node.metadata?.content || "";
+    const storageKey = node.metadata?.storageKey;
+    return storageKey ? await resolveMediaUrl(storageKey, content) : content;
+}
+
+async function resolveNodeImageUrl(node: CanvasNodeData): Promise<string> {
+    const content = node.metadata?.content || "";
+    const storageKey = node.metadata?.storageKey;
+    return storageKey ? await resolveImageUrl(storageKey, content) : content;
+}
+
+function isLikelyImageReference(value: string): boolean {
+    if (!value) return false;
+    if (value.startsWith("image:") || value.startsWith("data:image/")) return true;
+    return /\.(png|jpe?g|webp|gif|bmp|avif)(\?|#|$)/i.test(value);
+}
+
+async function resolveCanvasImageReferenceUrls(node: CanvasNodeData, snapshot: CanvasAgentSnapshot): Promise<Array<{ url: string; label: string }>> {
+    const metaRefs = Array.isArray(node.metadata?.references) ? node.metadata.references.filter(isLikelyImageReference) : [];
+    if (metaRefs.length) {
+        const urls = await Promise.all(
+            metaRefs.slice(0, VIDEO_MAX_REFERENCES).map(async (ref, idx) => ({
+                url: ref.startsWith("image:") ? await resolveImageUrl(ref, "") : ref,
+                label: `[图${idx + 1}]`,
+            })),
+        );
+        return urls.filter((item) => Boolean(item.url));
+    }
+    const collected: CanvasNodeData[] = [];
+    const seen = new Set<string>();
+    const pushUpstream = (targetId: string, depth: number) => {
+        if (depth > 2) return;
+        for (const conn of snapshot.connections) {
+            if (conn.toNodeId !== targetId) continue;
+            const src = snapshot.nodes.find((n) => n.id === conn.fromNodeId);
+            if (!src || seen.has(src.id)) continue;
+            seen.add(src.id);
+            if (src.type === CanvasNodeType.Image && (src.metadata?.content || src.metadata?.storageKey)) {
+                collected.push(src);
+            } else if (src.type === CanvasNodeType.Config) {
+                pushUpstream(src.id, depth + 1);
+            }
+        }
+    };
+    pushUpstream(node.id, 0);
+    const resolved = await Promise.all(
+        collected.slice(0, VIDEO_MAX_REFERENCES).map(async (imgNode, idx) => ({
+            url: await resolveNodeImageUrl(imgNode),
+            label: `[图${idx + 1}]`,
+        })),
+    );
+    return resolved.filter((item) => Boolean(item.url));
+}
+
+async function readWorkbenchVideoLogs(): Promise<StoredVideoLog[]> {
+    const logs: StoredVideoLog[] = [];
+    await videoLogStore.iterate<StoredVideoLog, void>((value) => {
+        if (value) logs.push(value);
+    });
+    return logs.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+}
+
+async function inspectNodeVisual(input: SiteToolInput, context: SiteToolContext) {
+    const snapshot = requireCanvasSnapshot(context);
+    const nodeId = String(input.nodeId || "").trim();
+    const node = snapshot.nodes.find((item) => item.id === nodeId);
+    if (!node) throw new Error(siteText("nodeNotFound", { id: nodeId }));
+    const maxEdge = Math.max(256, Math.min(1280, Math.floor(Number(input.maxEdge) || 1280)));
+
+    if (node.type === CanvasNodeType.Image) {
+        const url = await resolveNodeImageUrl(node);
+        if (!url) throw new Error(siteText("nodeNoMedia", { title: node.title || node.id }));
+        const encoded = await encodeImageToMcpJpeg(url, maxEdge);
+        return {
+            ok: true,
+            nodeId: node.id,
+            type: node.type,
+            title: node.title,
+            width: node.metadata?.naturalWidth || encoded.width,
+            height: node.metadata?.naturalHeight || encoded.height,
+            summary: `${node.title || node.id} (${encoded.width}x${encoded.height})`,
+            _mcpImages: [{ mimeType: encoded.mimeType, data: encoded.dataBase64, label: `画布图片节点 ${node.title || node.id} (${node.id})` }],
+        };
+    }
+
+    if (node.type === CanvasNodeType.Video) {
+        const videoUrl = await resolveNodeVideoUrl(node);
+        if (!videoUrl) throw new Error(siteText("nodeNoMedia", { title: node.title || node.id }));
+        const frameCount = Math.max(3, Math.min(9, Math.floor(Number(input.frameCount) || 6)));
+        const sheet = await captureVideoContactSheet(videoUrl, { frameCount, maxEdge });
+        return {
+            ok: true,
+            nodeId: node.id,
+            type: node.type,
+            title: node.title,
+            durationSeconds: sheet.durationSeconds,
+            resolution: `${sheet.videoWidth}x${sheet.videoHeight}`,
+            timestamps: sheet.timestamps,
+            summary: `${node.title || node.id} (${sheet.durationSeconds}s, ${frameCount} 帧)`,
+            _mcpImages: [{ mimeType: sheet.mimeType, data: sheet.dataBase64, label: `视频节点 ${node.title || node.id} ${frameCount} 帧接触表` }],
+        };
+    }
+
+    return {
+        ok: true,
+        nodeId: node.id,
+        type: node.type,
+        title: node.title,
+        prompt: node.metadata?.prompt || node.metadata?.composerContent,
+        content: node.metadata?.content,
+        model: node.metadata?.model,
+        status: node.metadata?.status,
+        summary: `${node.title || node.id} (${node.type})`,
+    };
+}
+
+async function inspectVideoFrames(input: SiteToolInput, context: SiteToolContext) {
+    const snapshot = getLiveCanvasContext(context)?.snapshot || context.canvasSnapshot || null;
+    const nodeId = typeof input.nodeId === "string" ? input.nodeId.trim() : "";
+    const taskId = typeof input.taskId === "string" ? input.taskId.trim() : "";
+    const frameCount = Math.max(3, Math.min(9, Math.floor(Number(input.frameCount) || 6)));
+    const maxEdge = Math.max(512, Math.min(1280, Math.floor(Number(input.maxEdge) || 1280)));
+    const includeReferences = input.includeReferences !== false;
+
+    let videoUrl = "";
+    let prompt = "";
+    let model = "";
+    let title = "";
+    let sourceKind: "canvas" | "video" = "video";
+    let resolvedId = "";
+    let referenceItems: Array<{ url: string; label: string }> = [];
+
+    if (nodeId) {
+        if (!snapshot) throw new Error(siteText("openCanvasFirst"));
+        const node = snapshot.nodes.find((item) => item.id === nodeId);
+        if (!node) throw new Error(siteText("nodeNotFound", { id: nodeId }));
+        videoUrl = await resolveNodeVideoUrl(node);
+        if (!videoUrl) throw new Error(siteText("nodeNoMedia", { title: node.title || node.id }));
+        sourceKind = "canvas";
+        resolvedId = node.id;
+        title = node.title;
+        prompt = node.metadata?.prompt || "";
+        model = node.metadata?.model || "";
+        if (includeReferences) referenceItems = await resolveCanvasImageReferenceUrls(node, snapshot);
+    } else if (taskId) {
+        const logs = await readWorkbenchVideoLogs();
+        const agentTask = useWorkbenchAgentStore.getState().tasks.find((item) => item.id === taskId);
+        const matched = logs.find((item) => item.id === taskId || item.task?.id === taskId)
+            || (agentTask ? logs.find((item) => item.status === "success" && item.prompt === agentTask.prompt) : undefined);
+        if (!matched?.video) throw new Error(siteText("videoNotFound"));
+        videoUrl = matched.video.storageKey ? await resolveMediaUrl(matched.video.storageKey, matched.video.url || "") : (matched.video.url || "");
+        if (!videoUrl) throw new Error(siteText("videoNotFound"));
+        resolvedId = matched.id || taskId;
+        title = matched.title || "";
+        prompt = matched.prompt || "";
+        model = matched.model || "";
+        if (includeReferences && matched.references?.length) {
+            referenceItems = (
+                await Promise.all(
+                    matched.references.slice(0, VIDEO_MAX_REFERENCES).map(async (ref, idx) => ({
+                        url: await resolveImageUrl(ref.storageKey, ref.dataUrl || ""),
+                        label: `[图${idx + 1}]`,
+                    })),
+                )
+            ).filter((item) => Boolean(item.url));
+        }
+    } else {
+        const canvasVideo = snapshot
+            ? [...snapshot.nodes].reverse().find((node) => node.type === CanvasNodeType.Video && Boolean(node.metadata?.content))
+            : undefined;
+        if (canvasVideo) {
+            videoUrl = await resolveNodeVideoUrl(canvasVideo);
+            sourceKind = "canvas";
+            resolvedId = canvasVideo.id;
+            title = canvasVideo.title;
+            prompt = canvasVideo.metadata?.prompt || "";
+            model = canvasVideo.metadata?.model || "";
+            if (includeReferences && snapshot) referenceItems = await resolveCanvasImageReferenceUrls(canvasVideo, snapshot);
+        } else {
+            const latest = (await readWorkbenchVideoLogs()).find((item) => item.status === "success" && item.video);
+            if (!latest?.video) throw new Error(siteText("videoNotFound"));
+            videoUrl = latest.video.storageKey ? await resolveMediaUrl(latest.video.storageKey, latest.video.url || "") : (latest.video.url || "");
+            resolvedId = latest.id || "";
+            title = latest.title || "";
+            prompt = latest.prompt || "";
+            model = latest.model || "";
+            if (includeReferences && latest.references?.length) {
+                referenceItems = (
+                    await Promise.all(
+                        latest.references.slice(0, VIDEO_MAX_REFERENCES).map(async (ref, idx) => ({
+                            url: await resolveImageUrl(ref.storageKey, ref.dataUrl || ""),
+                            label: `[图${idx + 1}]`,
+                        })),
+                    )
+                ).filter((item) => Boolean(item.url));
+            }
+        }
+    }
+
+    if (!videoUrl) throw new Error(siteText("videoNotFound"));
+    const sheet = await captureVideoContactSheet(videoUrl, { frameCount, maxEdge });
+    const mcpImages: Array<{ mimeType: string; data: string; label?: string }> = [];
+    let referenceCollageIncluded = false;
+
+    if (includeReferences && referenceItems.length) {
+        const refSheet = await buildReferenceContactSheet(referenceItems, maxEdge);
+        if (refSheet) {
+            referenceCollageIncluded = true;
+            mcpImages.push({
+                mimeType: refSheet.mimeType,
+                data: refSheet.dataBase64,
+                label: `输入参考图对照拼图（共 ${refSheet.count} 张，按 [图1]~[图${refSheet.count}] 顺序）`,
+            });
+        }
+    }
+    mcpImages.push({
+        mimeType: sheet.mimeType,
+        data: sheet.dataBase64,
+        label: `成片 ${frameCount} 帧抽帧接触表（时长 ${sheet.durationSeconds}s，分辨率 ${sheet.videoWidth}x${sheet.videoHeight}）`,
+    });
+
+    return {
+        ok: true,
+        source: sourceKind,
+        id: resolvedId,
+        title,
+        model,
+        prompt: compactPrompt(prompt),
+        durationSeconds: sheet.durationSeconds,
+        resolution: `${sheet.videoWidth}x${sheet.videoHeight}`,
+        frameCount,
+        timestamps: sheet.timestamps,
+        referenceCount: referenceItems.length,
+        referenceCollageIncluded,
+        qaDimensions: VIDEO_QA_DIMENSIONS,
+        summary: `${title || resolvedId} · ${sheet.durationSeconds}s · ${frameCount} 帧`,
+        _mcpImages: mcpImages,
+    };
+}
+
+async function extractVideoFrameToCanvas(input: SiteToolInput, context: SiteToolContext) {
+    const canvasContext = getLiveCanvasContext(context);
+    if (!canvasContext) throw new Error(siteText("openCanvasFirst"));
+    const nodeId = String(input.nodeId || "").trim();
+    const node = canvasContext.snapshot.nodes.find((item) => item.id === nodeId);
+    if (!node) throw new Error(siteText("nodeNotFound", { id: nodeId }));
+
+    const videoUrl = await resolveNodeVideoUrl(node);
+    if (!videoUrl) throw new Error(siteText("nodeNoMedia", { title: node.title || node.id }));
+
+    const position = input.position === "first" || input.position === "time" ? input.position : "last";
+    const seconds = Math.max(0, Number(input.seconds) || 0);
+    const blob = await captureVideoFrame(videoUrl, position, seconds);
+    const uploaded = await uploadImage(blob);
+    const size = fitNodeSize(uploaded.width, uploaded.height, 640, 640);
+    const newNodeId = `image-${nanoid(10)}`;
+    const x = typeof input.x === "number" ? input.x : node.position.x + node.width + 96;
+    const y = typeof input.y === "number" ? input.y : node.position.y;
+    const defaultTitle = `${node.title || "Video"} (${position === "first" ? "首帧" : position === "time" ? `${seconds}s` : "尾帧"})`;
+    const title = typeof input.title === "string" && input.title.trim() ? input.title.trim() : defaultTitle;
+
+    const ops: CanvasAgentOp[] = [
+        {
+            type: "add_node",
+            id: newNodeId,
+            nodeType: CanvasNodeType.Image,
+            title,
+            position: { x, y },
+            width: size.width,
+            height: size.height,
+            metadata: imageMetadata(uploaded),
+        },
+        ...(input.connect !== false ? [{ type: "connect_nodes" as const, fromNodeId: node.id, toNodeId: newNodeId }] : []),
+        { type: "select_nodes", ids: [newNodeId] },
+    ];
+    const nextSnapshot = canvasContext.applyOps(ops);
+    context.syncCanvasState?.(nextSnapshot);
+
+    const mcpImages: Array<{ mimeType: string; data: string; label?: string }> = [];
+    if (input.inspect !== false) {
+        const encoded = await encodeImageToMcpJpeg(uploaded.url, 1280);
+        mcpImages.push({
+            mimeType: encoded.mimeType,
+            data: encoded.dataBase64,
+            label: `已截取视频帧节点 ${title} (${newNodeId})`,
+        });
+    }
+
+    return {
+        ok: true,
+        nodeId: newNodeId,
+        sourceNodeId: node.id,
+        position,
+        title,
+        width: uploaded.width,
+        height: uploaded.height,
+        ...(mcpImages.length ? { _mcpImages: mcpImages } : {}),
+    };
 }

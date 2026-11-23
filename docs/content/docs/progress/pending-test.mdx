@@ -7,6 +7,11 @@ description: Implemented changes that still need manual verification
 
 The current release needs manual verification in these areas:
 
+- MCP 多模态视觉校验与连续镜头人物一致性（Claude Code / Antigravity）：
+  1. 节点看图（`canvas_inspect_node_visual`）：在画布上选中图片节点、视频节点或文本/配置节点，由 Claude Code 或 Antigravity 调用该工具时，能直接收到图片或视频接触表并准确描述画面人物、服饰与场景细节；
+  2. 视频抽帧质检（`video_inspect_frames`）：视频生成完成后调用该工具（默认 6 帧接触表 + `includeReferences=true`），MCP 返回两张图片——带 `[图1]~[图N]` 角标的输入参考图对照拼图，以及带 `#1 0.0s` 等时间戳的成片多帧接触表，AI 能对照发现人物走形、换装或动作异常；
+  3. 尾帧落节点续拍（`canvas_extract_video_frame`）：对已生成视频节点调用 `position="last"`，能在视频右侧创建按比例缩放的尾帧图片节点、自动连线并返回尾帧画面，配合原始人物定妆照继续下一镜头时可明显抑制多镜头人物漂移；
+  4. 任务短等待（`generation_get_status` 传入 `waitSeconds=25`）：在生成运行中调用时能短等待至完成或超时返回，减少空轮询。
 - `muse2api` 视频生成、最高 10 张参考图与 MCP 输入输出优化验证：
   1. `muse-video` JSON 协议与 422 自动回退：在视频创作台或无限画布选择 `muse-video`（或 `muse2api` 渠道下返回 422/415 的模型别名），文生视频、单图首帧及多图参考视频均可正常创建任务并完成；单素材超过 40 MiB、总计超过 100 MiB 或超过 10 个参考素材时提交前给出明确拦截提示；
   2. 10 张参考图与 `[图1]~[图10]` 和谐交互：视频创作台支持上传/粘贴/拖拽/从资产选择最多 10 张参考图，显示 `图1`~`图10` 序号，点击序号可将 `[图N]` 插入提示词光标处，支持卡片拖拽排序，超过 2 张自动切为「全能参考」模式，画布中的 `【图1】`/`图1`/`Image 1` 等编号会自动规范为 `[图N]`；
