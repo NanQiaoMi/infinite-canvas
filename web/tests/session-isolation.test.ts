@@ -19,6 +19,18 @@ await localforage.defineDriver({
         const storeName = options?.storeName || "keyvaluepairs";
         instanceStores.set(this, storeName);
         if (!memoryBuckets.has(storeName)) memoryBuckets.set(storeName, new Map());
+        return Promise.resolve();
+    },
+    iterate(iteratorCallback, callback) {
+        const map = memoryBuckets.get(storeNameFor(this));
+        let idx = 1;
+        if (map) {
+            for (const [key, value] of map.entries()) {
+                const res = iteratorCallback(value as never, key, idx++);
+                if (res !== undefined) return resolveCallback(Promise.resolve(res as never), callback);
+            }
+        }
+        return resolveCallback(Promise.resolve(undefined as never), callback);
     },
     getItem(key, callback) {
         const value = memoryBuckets.get(storeNameFor(this))?.get(key) ?? null;
