@@ -23,6 +23,7 @@ export const toolNames = [
     "canvas_create_config_node",
     "canvas_create_image_prompt_flow",
     "canvas_create_generation_flow",
+    "canvas_create_storyboard_flow",
     "canvas_generate_text",
     "canvas_generate_image",
     "canvas_generate_video",
@@ -94,6 +95,16 @@ const generationFlowSchema = z.object({
     referenceNodeIds: z.array(z.string()).optional(),
 });
 
+const storyboardShotSchema = z.object({
+    title: z.string().optional(),
+    prompt: z.string(),
+    referenceNodeIds: z.array(z.string()).max(10).optional(),
+    seconds: z.string().optional(),
+    size: z.string().optional(),
+    vquality: z.string().optional(),
+    videoMode: z.enum(["frames", "reference"]).optional(),
+});
+
 export const toolInputSchemas = {
     canvas_connection_status: z.object({ siteUrl: z.string().optional(), autoStart: z.boolean().optional() }),
     site_navigate: z.object({ path: z.string() }),
@@ -110,6 +121,15 @@ export const toolInputSchemas = {
     canvas_create_config_node: z.object({ prompt: z.string().optional(), mode: generationModeSchema.optional(), title: z.string().optional(), x: z.number().optional(), y: z.number().optional(), width: z.number().optional(), height: z.number().optional(), autoRun: z.boolean().optional() }).merge(generationOptionsSchema),
     canvas_create_image_prompt_flow: z.object({ prompt: z.string(), x: z.number().optional(), y: z.number().optional(), autoRun: z.boolean().optional() }).merge(generationOptionsSchema),
     canvas_create_generation_flow: generationFlowSchema.extend({ mode: generationModeSchema.optional(), autoRun: z.boolean().optional() }).merge(generationOptionsSchema),
+    canvas_create_storyboard_flow: z.object({
+        shots: z.array(storyboardShotSchema).min(1).max(12),
+        sharedReferenceNodeIds: z.array(z.string()).max(10).optional(),
+        mode: generationModeSchema.optional(),
+        x: z.number().optional(),
+        y: z.number().optional(),
+        rowGap: z.number().optional(),
+        autoRunFirst: z.boolean().optional(),
+    }).merge(generationOptionsSchema),
     canvas_generate_text: generationFlowSchema.merge(generationOptionsSchema),
     canvas_generate_image: generationFlowSchema.merge(generationOptionsSchema),
     canvas_generate_video: generationFlowSchema.merge(generationOptionsSchema),
@@ -164,6 +184,7 @@ export const toolDescriptions: Record<ToolName, string> = {
     canvas_create_config_node: "创建生成配置节点，可指定 text/image/video/audio 模式和生成参数，可选择立即触发生成。",
     canvas_create_image_prompt_flow: "创建提示词文本节点和图片生成配置节点，并自动连线，可选择立即触发生图。",
     canvas_create_generation_flow: "创建通用生成流程：提示词文本节点、生成配置节点、参考节点连线，可用于文案、生图、视频或音频。",
+    canvas_create_storyboard_flow: "在画布批量创建多镜头分镜生成工作流（1–12 镜按行纵排，默认 video 模式）：支持为所有镜头统一接入 sharedReferenceNodeIds（如人物定妆照、场景设定图）并叠加单镜 referenceNodeIds（去重合并后每镜最多 10 张，超过 2 张自动切全能参考）；为防止并发过高烧额度，可选 autoRunFirst=true 仅先触发第 1 镜生成，其余镜头待前序尾帧或质检通过后再逐镜触发。",
     canvas_generate_text: "创建通用文本生成流程并立即触发生成。",
     canvas_generate_image: "创建通用图片生成流程并立即触发生成。",
     canvas_generate_video: "创建通用视频生成流程并立即触发生成。支持最多 10 个 referenceNodeIds 参考节点（超过 2 张自动切全能参考，提示词中可用 [图1]~[图10] 指代参考图顺序），兼容 muse-video。",
