@@ -2,6 +2,7 @@
 
 ## Unreleased
 
++ [修复] 大幅提升 Claude Code / Antigravity 连接本地画布 MCP 的首次连接稳定性与自愈能力：`canvas-agent mcp` 在本地 HTTP 桥接未启动时按需自动后台拉起、每次工具调用热加载最新配置并在 401/断连时自动重连重试、重复启动自动复用已有实例并给出一键连接链接，新增 `canvas_connection_status` 诊断工具；前端 `LocalAgentPanel` 默认后台常驻挂载以支持首页及默认对话模式下直接生效一键连接地址与自动重连，并在连接前通过 `/health` 与 `/auth/check` 区分服务未启动（首次自动退避重试 3 次）、版本过旧、Token 无效与来源拦截，同时关闭纯 MCP 模式下的多余会话预热。
 + [新增] 补全视频生成全链路故障预案与容错护栏：轮询连续容错 5 次（3s→15s 退避重试）防止网络抖动丢任务、成片下载 2 次短重试与空包拦截、参考图超 40/100 MiB 自动压缩降档、创作台防重复提交锁、抽帧与图片加载 15 秒超时保护，以及 MCP 任务错误分类建议与防烧额度熔断 SOP。
 + [新增] 升级画布 MCP 多模态视觉校验与人物一致性闭环：MCP Server 原生返回图片内容块，新增 `video_inspect_frames`（成片 3–9 帧接触表与 `[图1]~[图10]` 参考图拼图同屏比对）、`canvas_inspect_node_visual`（节点看图）与 `canvas_extract_video_frame`（抽取尾帧/首帧/指定秒数为画布参考节点），`generation_get_status` 支持最长 30 秒短等待，并在 MCP 指令中内置多镜头人物防漂移与 5 维视觉验收 SOP。
 + [新增] 支持 `muse2api` 视频生成与最高 10 张参考图输入：兼容 `muse-video` JSON 提交与 422 自动回退、服务端 `/api/relay` 视频媒体地址改写与进度透传，视频创作台与画布支持最多 10 张参考图及 `[图1]~[图10]` 编号插入与拖拽排序，MCP 工具 `workbench_video_generate` / `canvas_generate_video` / `generation_get_status` 同步支持多图入参与结构化进度/成片输出。

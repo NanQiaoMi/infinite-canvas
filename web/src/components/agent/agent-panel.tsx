@@ -62,24 +62,23 @@ export function AgentPanel() {
                 <button type="button" className="absolute inset-y-0 left-0 z-40 w-4 -translate-x-1/2 cursor-col-resize" onPointerDown={startResize} aria-label={t("agent.panel.resize")} />
                 {agentMode === "conversation" ? (
                     <CanvasConversationAgentPanel onSwitchToCodex={() => setAgentMode("codex")} />
-                ) : (
-                    <div className="relative flex h-full w-full flex-col">
-                        <div className="flex h-9 shrink-0 items-center justify-between border-b px-3 text-xs" style={{ borderColor: theme.node.stroke }}>
-                            <span className="font-semibold" style={{ color: theme.node.muted }}>{t("agent.panel.localTitle", { agent: runtime === "claude" ? "Claude" : "Codex" })}</span>
-                            <button
-                                type="button"
-                                className="hover:underline"
-                                style={{ color: theme.status.success }}
-                                onClick={() => setAgentMode("conversation")}
-                            >
-                                {t("agent.panel.backToBuiltin")}
-                            </button>
-                        </div>
-                        <div className="flex-1 overflow-hidden">
-                            <LocalAgentPanel embedded />
-                        </div>
+                ) : null}
+                <div className={agentMode === "codex" ? "relative flex h-full w-full flex-col" : "hidden"}>
+                    <div className="flex h-9 shrink-0 items-center justify-between border-b px-3 text-xs" style={{ borderColor: theme.node.stroke }}>
+                        <span className="font-semibold" style={{ color: theme.node.muted }}>{t("agent.panel.localTitle", { agent: runtime === "claude" ? "Claude" : "Codex" })}</span>
+                        <button
+                            type="button"
+                            className="hover:underline"
+                            style={{ color: theme.status.success }}
+                            onClick={() => setAgentMode("conversation")}
+                        >
+                            {t("agent.panel.backToBuiltin")}
+                        </button>
                     </div>
-                )}
+                    <div className="flex-1 overflow-hidden">
+                        <LocalAgentPanel embedded headless={agentMode !== "codex"} />
+                    </div>
+                </div>
             </motion.aside>
         </motion.div>
     );

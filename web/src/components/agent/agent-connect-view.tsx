@@ -9,6 +9,7 @@ import { connectionColor } from "./agent-panel-utils";
 import { useThemeStore } from "@/stores/use-theme-store";
 
 const AGENT_START_COMMAND = "npx -y @basketikun/canvas-agent@latest";
+const AGENT_INSTALL_MCP_COMMAND = "npx -y @basketikun/canvas-agent@latest install-mcp";
 const AGENT_PLUGIN_REMOVE_COMMAND = "codex plugin remove infinite-canvas";
 const AGENT_MCP_REMOVE_COMMAND = "codex mcp remove infinite-canvas";
 
@@ -63,7 +64,7 @@ export function AgentConnectView({
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
     const { message } = App.useApp();
-    const steps = [{ title: t("agent.connect.pluginTitle"), text: t("agent.connect.pluginText") }, { title: t("agent.connect.directTitle"), text: t("agent.connect.directText"), command: AGENT_START_COMMAND }];
+    const steps = [{ title: t("agent.connect.pluginTitle"), text: t("agent.connect.pluginText") }, { title: t("agent.connect.directTitle"), text: t("agent.connect.directText"), command: AGENT_START_COMMAND }, { title: t("agent.connect.installMcpTitle"), text: t("agent.connect.installMcpText"), command: AGENT_INSTALL_MCP_COMMAND }];
     const statusText = connectError ? t("agent.status.failed") : connected ? activity : enabled ? t("agent.status.connecting") : t("agent.status.disconnected");
     const statusColor = connectionColor({ connectError, connected, enabled }, theme);
     const handlePaste = (event: ClipboardEvent<HTMLInputElement>) => {

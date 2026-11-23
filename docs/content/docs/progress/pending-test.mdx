@@ -7,6 +7,11 @@ description: Implemented changes that still need manual verification
 
 The current release needs manual verification in these areas:
 
+- 画布 MCP 首次连接稳定性与前端自动诊断重试（Claude Code / Antigravity）：
+  1. MCP 按需自动拉起桥接与配置热加载：在未手动运行 `npx -y @basketikun/canvas-agent@latest` 时直接通过 Claude Code / Antigravity 调用 `canvas_connection_status` 或画布工具，MCP 会自动在后台拉起本地 HTTP 桥接服务并完成连接（仅连接 MCP 或 `install-mcp` 自检时不会提前泄露多余后台进程）；修改或重启 `canvas-agent` 生成新 Token 后再次调用 MCP 工具，无需重启 IDE 即可自动 401 热加载重试成功；
+  2. 端口占用友好回显与一键连接 URL：本地桥接已在运行时重复启动 `canvas-agent` 不再因 `EADDRINUSE` 崩溃，而是检测健康实例并打印活跃地址、Token 与一键连接 URL（`#agentUrl=...&agentToken=...`）；未打开网页时调用 MCP 工具会在报错或 `canvas_connection_status` 返回中附带该一键连接地址；
+  3. 前端后台常驻挂载与一键链接免切换：在默认界面（右侧面板关闭或处于「内置 AI 助手」模式）下直接打开含 `#agentUrl=...&agentToken=...` 的页面，即使不手动切换到本地 Codex/Claude 标签页，后台也会静默建立 SSE 连接，且在内置助手与本地模式之间切换不会断开已连接的 MCP；
+  4. 首次连接预检诊断与 3 次退避重试：服务刚启动或尚未就绪时点击连接会自动重试 3 次（1s→2s→4s），仍失败或遇到版本过旧（`outdated`）、Token 错误（`invalid_token`）、来源受限（`origin_rejected`）时立即给出对应原因提示；纯 MCP 连接不再自动创建或预热无关内置对话线程（需预热时可传 `--preheat`），连接页折叠面板内含 `install-mcp` 命令复制入口。
 - 视频生成全链路故障预案与容错护栏（预防抖动丢任务、超限与防烧额度）：
   1. 轮询容错与恢复：视频生成轮询中遇到临时网络波动、502/503 或 429 时，自动连续容错最多 5 次（3s→15s 退避）继续轮询不中断；超限后保留任务 ID，可继续恢复；遇 401/403 或明确失败终态立即停止并提示；
   2. 防重提交与超限自动压缩：视频创作台连续快速点击生成不会触发两次提交；传入超过 40 MiB 单图或合计超 100 MiB 的参考图时自动压缩降档为 JPEG，仍超限时清晰拦截；

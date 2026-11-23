@@ -41,3 +41,6 @@
   - `content_refused`（安全策略拒绝）：不要原封不动重试，改写敏感描述或更换合规参考图后再生成；
   - `invalid_input`（参数或 10 图/40 MiB/100 MiB 超限）：精简参考素材数量或调整时长/画幅参数；
   - `transient`（429/5xx/超时）：等待几秒后优先用 `generation_get_status` 续查任务状态，不要立即重新创建新任务。
+
+## 初次连接检查与排障
+- 调用画布或工作台工具若提示尚未连接网页，先调用 `canvas_connection_status`（必要时传入当前网站 `siteUrl`，如 `http://localhost:3000`），并把返回结果中的 `oneClickConnectUrl` 提供给用户在浏览器打开，打开后即可自动完成连接与 Token 注入。
