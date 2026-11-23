@@ -35,3 +35,48 @@ test("video generation flow auto-switches to reference mode above 2 references a
         /最多支持 10 个/,
     );
 });
+
+test("storyboard flow batches shots vertically, deduplicates shared references, and runs only shot 1 when autoRunFirst is true", () => {
+    const ops = opsOf("canvas_create_storyboard_flow", {
+        x: 100,
+        y: 50,
+        rowGap: 300,
+        seconds: "6",
+        sharedReferenceNodeIds: ["char-1", "scene-1"],
+        autoRunFirst: true,
+        shots: [
+            { title: "开场", prompt: "主角走进咖啡馆", referenceNodeIds: ["char-1", "prop-1"] },
+            { title: "特写", prompt: "主角微笑看镜头", seconds: "4" },
+        ],
+    });
+    const textNodes = ops.filter((op) => op.type === "add_node" && op.nodeType === "text");
+    const configNodes = ops.filter((op) => op.type === "add_node" && op.nodeType === "config");
+    const runs = ops.filter((op) => op.type === "run_generation");
+    assert.equal(textNodes.length, 2);
+    assert.equal(configNodes.length, 2);
+    assert.deepEqual(textNodes[0].position, { x: 100, y: 50 });
+    assert.deepEqual(textNodes[1].position, { x: 100, y: 350 });
+    assert.deepEqual(configNodes[0].position, { x: 520, y: 50 });
+    assert.equal(configNodes[0].metadata?.videoMode, "reference");
+    assert.equal(configNodes[1].metadata?.seconds, "4");
+    assert.equal(
+        ops.filter((op) => op.type === "connect_nodes" && op.toNodeId === configNodes[0].id).length,
+        4,
+    );
+    assert.equal(runs.length, 1);
+    assert.equal(runs[0].nodeId, configNodes[0].id);
+});
+
+test("storyboard flow rejects any shot exceeding 10 merged reference nodes", () => {
+    assert.throws(
+        () =>
+            opsOf("canvas_create_storyboard_flow", {
+                sharedReferenceNodeIds: ["s1", "s2", "s3"],
+                shots: [
+                    { prompt: "shot 1 ok", referenceNodeIds: ["r1"] },
+                    { prompt: "shot 2 too many", referenceNodeIds: ["r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8"] },
+                ],
+            }),
+        /第 2 镜参考节点超过 10 个/,
+    );
+});

@@ -34,6 +34,7 @@ export function buildCanvasToolRequest(name: ToolName, input: Record<string, unk
         return applyOps([configNodeOp(configId, input, x, y), ...(input.autoRun ? [runGenerationOp(configId, mode, prompt)] : [])]);
     }
     if (name === "canvas_create_generation_flow") return applyOps(generationFlowOps(input, state));
+    if (name === "canvas_create_storyboard_flow") return applyOps(storyboardFlowOps(input, state));
     if (name === "canvas_generate_text" || name === "canvas_generate_image" || name === "canvas_generate_video" || name === "canvas_generate_audio") {
         return applyOps(generationFlowOps({ ...input, mode: name.replace("canvas_generate_", ""), autoRun: true }, state));
     }
@@ -147,6 +148,65 @@ function generationFlowOps(input: Record<string, unknown>, state: CanvasSnapshot
         { type: "select_nodes", ids: [configId] },
         ...(input.autoRun ? [runGenerationOp(configId, mode, tokens.join("\n"))] : []),
     ];
+}
+
+/** 批量创建多镜头分镜生成工作流：按行排布文本/配置节点，统一去重连线共享定妆照与单镜参考节点。 */
+function storyboardFlowOps(input: Record<string, unknown>, state: CanvasSnapshot | null) {
+    const shots = Array.isArray(input.shots) ? (input.shots as Array<Record<string, unknown>>) : [];
+    if (!shots.length) throw new Error("请至少提供 1 个分镜项 shots");
+    const sharedRefs = Array.isArray(input.sharedReferenceNodeIds)
+        ? input.sharedReferenceNodeIds.filter((id): id is string => typeof id === "string" && Boolean(id))
+        : [];
+    const mode = input.mode ? generationMode(input.mode) : "video";
+    const startX = Number(input.x ?? nextCanvasX(state));
+    const startY = Number(input.y ?? 0);
+    const rowGap = Number(input.rowGap ?? 320);
+
+    const ops: Array<Record<string, unknown>> = [];
+    const configIds: string[] = [];
+    let firstPromptTokens = "";
+
+    shots.forEach((shot, index) => {
+        const shotRefs = Array.isArray(shot.referenceNodeIds)
+            ? shot.referenceNodeIds.filter((id): id is string => typeof id === "string" && Boolean(id))
+            : [];
+        const mergedRefs = Array.from(new Set([...shotRefs, ...sharedRefs]));
+        if (mode === "video" && mergedRefs.length > 10) {
+            throw new Error(`第 ${index + 1} 镜参考节点超过 10 个（当前 ${mergedRefs.length} 个）`);
+        }
+        const rowY = startY + index * rowGap;
+        const textId = `text-${crypto.randomUUID()}`;
+        const configId = `config-${crypto.randomUUID()}`;
+        configIds.push(configId);
+        const tokens = [`@[node:${textId}]`, ...mergedRefs.map((id) => `@[node:${id}]`)].join("\n");
+        if (index === 0) firstPromptTokens = tokens;
+
+        const videoMode = shot.videoMode ?? input.videoMode ?? (mode === "video" && mergedRefs.length > 2 ? "reference" : undefined);
+        const mergedConfigInput = {
+            ...input,
+            ...cleanRecord({
+                title: shot.title ? `${String(shot.title)} 生成` : `第 ${index + 1} 镜`,
+                seconds: shot.seconds,
+                size: shot.size,
+                vquality: shot.vquality,
+                videoMode,
+            }),
+            mode,
+            prompt: tokens,
+        };
+        ops.push(
+            textNodeOp({ id: textId, text: String(shot.prompt || ""), title: String(shot.title || `镜 ${index + 1} 提示词`) }, startX, rowY),
+            configNodeOp(configId, mergedConfigInput, startX + 420, rowY),
+            { type: "connect_nodes", fromNodeId: textId, toNodeId: configId },
+            ...mergedRefs.map((fromNodeId) => ({ type: "connect_nodes", fromNodeId, toNodeId: configId })),
+        );
+    });
+
+    ops.push({ type: "select_nodes", ids: configIds });
+    if (input.autoRunFirst === true && configIds.length > 0) {
+        ops.push(runGenerationOp(configIds[0], mode, firstPromptTokens));
+    }
+    return ops;
 }
 
 /** 创建触发节点生成的画布操作。 */
