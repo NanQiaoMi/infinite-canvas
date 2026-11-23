@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { antigravityConfigFile, codexPluginEnabled, launchSpec, parseInstallArgs, writeAntigravityConfig } from "./install-mcp.js";
+import { antigravityConfigFile, codexPluginEnabled, launchSpec, localEntry, parseInstallArgs, resolveLocalEntry, writeAntigravityConfig } from "./install-mcp.js";
 
 function makeTempHome(): string {
     return fs.mkdtempSync(path.join(os.tmpdir(), "install-mcp-test-"));
@@ -84,6 +84,29 @@ test("launchSpec uses the current node binary with entry and mcp", () => {
 
 test("parseInstallArgs defaults to all clients and parses flags", () => {
     assert.deepEqual(parseInstallArgs([]), { client: "all", dryRun: false });
-    assert.deepEqual(parseInstallArgs(["--client", "codex", "--entry", "/x", "--dry-run"]), { client: "codex", entry: "/x", dryRun: true });
+    assert.deepEqual(parseInstallArgs(["--local"]), { client: "all", dryRun: false, local: true });
+    assert.deepEqual(parseInstallArgs(["--client", "codex", "--entry", "/x", "--dry-run", "--local"]), { client: "codex", entry: "/x", dryRun: true, local: true });
     assert.throws(() => parseInstallArgs(["--client", "vscode"]), /不支持的客户端：vscode/);
+});
+
+test("localEntry resolves dist/index.js relative to module URL and resolveLocalEntry validates existence", () => {
+    const base = makeTempHome();
+    try {
+        const fakeSrcDir = path.join(base, "canvas-agent", "src");
+        fs.mkdirSync(fakeSrcDir, { recursive: true });
+        const fakeMetaUrl = new URL(`file://${fakeSrcDir}/install-mcp.ts`).href;
+        const expected = path.join(base, "canvas-agent", "dist", "index.js");
+
+        assert.equal(localEntry(fakeMetaUrl), expected);
+        assert.throws(() => resolveLocalEntry(fakeMetaUrl), /本地构建产物不存在.*npm run build/);
+
+        fs.mkdirSync(path.dirname(expected), { recursive: true });
+        fs.writeFileSync(expected, "// built");
+        assert.equal(resolveLocalEntry(fakeMetaUrl), expected);
+
+        const builtMetaUrl = new URL(`file://${base}/canvas-agent/dist/install-mcp.js`).href;
+        assert.equal(resolveLocalEntry(builtMetaUrl), expected);
+    } finally {
+        fs.rmSync(base, { recursive: true, force: true });
+    }
 });

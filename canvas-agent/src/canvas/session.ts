@@ -39,6 +39,7 @@ const SITE_TOOLS = new Set<ToolName>([
     "canvas_inspect_node_visual",
     "video_inspect_frames",
     "canvas_extract_video_frame",
+    "canvas_create_asset_nodes",
 ]);
 
 /** 管理网页画布连接、状态、附件和工具请求。 */
@@ -513,7 +514,7 @@ function requestTimeoutMs(name: ToolName, input: Record<string, unknown>) {
         const waitSeconds = Math.max(0, Math.min(30, Number(input.waitSeconds) || 0));
         if (waitSeconds > 0) return waitSeconds * 1000 + 15000;
     }
-    if (name === "video_inspect_frames" || name === "canvas_inspect_node_visual" || name === "canvas_extract_video_frame") {
+    if (name === "video_inspect_frames" || name === "canvas_inspect_node_visual" || name === "canvas_extract_video_frame" || name === "canvas_create_asset_nodes") {
         return 45000;
     }
     return 30000;
