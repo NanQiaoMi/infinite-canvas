@@ -17,7 +17,7 @@ import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { cn } from "@/lib/utils";
 import { deleteStoredMedia, resolveMediaUrl } from "@/services/file-storage";
 import { resolveImageUrl, ensureImagePreview, getImagePreviewRevision, previewUrlFor, subscribeImagePreviews, uploadImage } from "@/services/image-storage";
-import { VIDEO_MAX_REFERENCES, VIDEO_POLL_MAX_ATTEMPTS, createVideoGenerationTask, pollVideoGenerationTask, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
+import { VIDEO_MAX_REFERENCES, VIDEO_POLL_MAX_ATTEMPTS, VIDEO_POLL_MAX_CONSECUTIVE_ERRORS, classifyVideoError, createVideoGenerationTask, pollBackoffMs, pollVideoGenerationTask, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
 import { useConversationAgentStore } from "@/stores/use-conversation-agent-store";
@@ -113,6 +113,7 @@ export default function VideoPage() {
     const setLaunchContext = useConversationAgentStore((state) => state.setLaunchContext);
     const processedCommandRef = useRef(0);
     const agentTaskIdRef = useRef<string | undefined>(undefined);
+    const submittingRef = useRef(false);
 
     const model = effectiveConfig.videoModel || effectiveConfig.model;
     const canGenerate = Boolean(prompt.trim());
@@ -227,6 +228,7 @@ export default function VideoPage() {
         }
     };
     const generate = async () => {
+        if (submittingRef.current || running) return;
         const agentTaskId = agentTaskIdRef.current;
         agentTaskIdRef.current = undefined;
         const snapshot = buildRequestSnapshot();
@@ -234,6 +236,7 @@ export default function VideoPage() {
             if (agentTaskId) updateAgentTask(agentTaskId, { status: "failed", error: t("videoWorkbench.invalidParams") });
             return;
         }
+        submittingRef.current = true;
         setElapsedMs(0);
         setRunning(true);
         if (agentTaskId) updateAgentTask(agentTaskId, { status: "running", error: undefined });
@@ -253,6 +256,8 @@ export default function VideoPage() {
             await saveLog(buildLog({ prompt: snapshot.text, model, config: snapshot.config, references: snapshot.references, durationMs: performance.now() - batchStartedAt, status: "failed", error: errorMessage }));
             message.error(errorMessage);
             setRunning(false);
+        } finally {
+            submittingRef.current = false;
         }
     };
 
@@ -381,8 +386,22 @@ export default function VideoPage() {
         setResults((value) => (value.length ? value : [{ id: log.id, status: "pending" }]));
         const taskConfig = buildVideoConfig({ ...effectiveConfig, ...log.config }, log.task.model || log.model);
         try {
+            let consecutiveErrors = 0;
             for (let attempt = 0; attempt < VIDEO_POLL_MAX_ATTEMPTS; attempt += 1) {
-                const state = await pollVideoGenerationTask(configOverride || taskConfig, log.task);
+                let state;
+                try {
+                    state = await pollVideoGenerationTask(configOverride || taskConfig, log.task);
+                    consecutiveErrors = 0;
+                } catch (pollError) {
+                    const classified = classifyVideoError(pollError);
+                    if (classified.kind === "canceled" || classified.kind === "auth_quota" || classified.kind === "invalid_input") {
+                        throw pollError;
+                    }
+                    consecutiveErrors += 1;
+                    if (consecutiveErrors > VIDEO_POLL_MAX_CONSECUTIVE_ERRORS) throw pollError;
+                    await delay(pollBackoffMs(consecutiveErrors));
+                    continue;
+                }
                 if (state.status === "completed") {
                     const stored = await storeGeneratedVideo(state.result);
                     const nextVideo: GeneratedVideo = {

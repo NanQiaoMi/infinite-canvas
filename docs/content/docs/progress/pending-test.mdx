@@ -7,6 +7,10 @@ description: Implemented changes that still need manual verification
 
 The current release needs manual verification in these areas:
 
+- 视频生成全链路故障预案与容错护栏（预防抖动丢任务、超限与防烧额度）：
+  1. 轮询容错与恢复：视频生成轮询中遇到临时网络波动、502/503 或 429 时，自动连续容错最多 5 次（3s→15s 退避）继续轮询不中断；超限后保留任务 ID，可继续恢复；遇 401/403 或明确失败终态立即停止并提示；
+  2. 防重提交与超限自动压缩：视频创作台连续快速点击生成不会触发两次提交；传入超过 40 MiB 单图或合计超 100 MiB 的参考图时自动压缩降档为 JPEG，仍超限时清晰拦截；
+  3. 抽帧超时保护与生成中友好提示：对仍在生成中的视频节点调用 `video_inspect_frames` 时返回等待引导而非硬报错；损坏视频或卡死地址在 15 秒内超时退出；`generation_get_status` 失败任务返回 `errorKind` 与 `recoveryHint` 处置建议。
 - MCP 多模态视觉校验与连续镜头人物一致性（Claude Code / Antigravity）：
   1. 节点看图（`canvas_inspect_node_visual`）：在画布上选中图片节点、视频节点或文本/配置节点，由 Claude Code 或 Antigravity 调用该工具时，能直接收到图片或视频接触表并准确描述画面人物、服饰与场景细节；
   2. 视频抽帧质检（`video_inspect_frames`）：视频生成完成后调用该工具（默认 6 帧接触表 + `includeReferences=true`），MCP 返回两张图片——带 `[图1]~[图N]` 角标的输入参考图对照拼图，以及带 `#1 0.0s` 等时间戳的成片多帧接触表，AI 能对照发现人物走形、换装或动作异常；
