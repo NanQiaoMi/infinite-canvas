@@ -84,7 +84,7 @@ describe("生成诊断日志", () => {
 
     test("最近 7 天失败率按天分桶", () => {
         clearDiagnostics();
-        const now = new Date("2026-11-08T12:00:00+08:00").getTime();
+        const now = Date.now();
         recordDiagnostic({ category: "generation", level: "info", message: "ok-today" });
         recordDiagnostic({ category: "generation", level: "error", message: "fail-today" });
         recordDiagnostic({ category: "generation", level: "error", message: "fail-today-2" });

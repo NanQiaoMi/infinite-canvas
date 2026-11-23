@@ -25,10 +25,7 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
       - name: Test
-        # 暂时跳过 2 个与本 PR 无关的基线既有故障测试，待独立 fix/ 分支修复：
-        # 1) tests/diagnostics.test.ts（第 87 行写死 2026-11-08 导致超 7 天窗口）
-        # 2) tests/session-isolation.test.ts（Bun 下缺少 localforage 内存驱动桩）
-        run: find tests -maxdepth 1 -name '*.test.ts' ! -name 'diagnostics.test.ts' ! -name 'session-isolation.test.ts' -print0 | xargs -0 bun test
+        run: bun test tests/
 
   server:
     runs-on: ubuntu-latest
@@ -39,8 +36,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
       - name: Test
-        # 暂时跳过基线提交 e99aec5（upstream-compat.ts 返回 202）影响的 tests/app.test.ts，待独立 fix/ 分支修复
-        run: bun test tests/quota.test.ts tests/video-relay.test.ts
+        run: bun test tests/
 
   canvas-agent:
     runs-on: ubuntu-latest
