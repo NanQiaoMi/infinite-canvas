@@ -3,8 +3,10 @@ import fs from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-import { VERSION } from "./config.js";
+import { loadConfig, VERSION } from "./config.js";
+import { buildOneClickConnectUrl } from "./server/mcp.js";
 
 export type LaunchSpec = { command: string; args: string[] };
 type ClientName = "claude" | "codex" | "antigravity";
@@ -17,11 +19,12 @@ const require = createRequire(import.meta.url);
 
 /** 解析 install-mcp 的命令行参数。 */
 export function parseInstallArgs(argv: string[]) {
-    const opts: { client: string; entry?: string; dryRun: boolean } = { client: "all", dryRun: false };
+    const opts: { client: string; entry?: string; dryRun: boolean; local?: boolean } = { client: "all", dryRun: false };
     for (let i = 0; i < argv.length; i++) {
         if (argv[i] === "--client") opts.client = argv[++i] ?? "";
         else if (argv[i] === "--entry") opts.entry = argv[++i];
         else if (argv[i] === "--dry-run") opts.dryRun = true;
+        else if (argv[i] === "--local") opts.local = true;
         else throw new Error(`未知参数：${argv[i]}`);
     }
     if (![...CLIENTS, "all"].includes(opts.client)) throw new Error(`不支持的客户端：${opts.client}，可选 claude、codex、antigravity、all`);
@@ -57,6 +60,22 @@ export function installRuntime(home: string) {
 export function checkEntry(entry: string) {
     if (!path.isAbsolute(entry) || !fs.existsSync(entry)) throw new Error(`入口文件不存在：${entry}`);
     return entry;
+}
+
+/** 解析本地开发/构建后的 canvas-agent dist 入口路径。 */
+export function localEntry(fromMetaUrl = import.meta.url) {
+    const sibling = fileURLToPath(new URL("./index.js", fromMetaUrl));
+    if (fs.existsSync(sibling)) return sibling;
+    return path.resolve(path.dirname(fileURLToPath(fromMetaUrl)), "..", "dist", "index.js");
+}
+
+/** 校验本地构建产物存在，避免写入失效的 MCP 启动入口。 */
+export function resolveLocalEntry(fromMetaUrl = import.meta.url) {
+    const candidate = localEntry(fromMetaUrl);
+    if (!fs.existsSync(candidate)) {
+        throw new Error(`本地构建产物不存在：${candidate}，请先在 canvas-agent 目录执行 npm run build`);
+    }
+    return candidate;
 }
 
 /** Antigravity 的 MCP 配置文件路径。 */
@@ -178,7 +197,15 @@ export async function runInstallMcp(argv: string[], home = os.homedir()) {
     let failed = false;
     try {
         const opts = parseInstallArgs(argv);
-        const entry = opts.entry ? checkEntry(opts.entry) : opts.dryRun ? runtimeEntry(home) : installRuntime(home);
+        const entry = opts.entry
+            ? checkEntry(opts.entry)
+            : opts.local
+              ? opts.dryRun
+                ? localEntry()
+                : resolveLocalEntry()
+              : opts.dryRun
+                ? runtimeEntry(home)
+                : installRuntime(home);
         const spec = launchSpec(entry);
         console.log(`启动命令：${spec.command} ${spec.args.join(" ")}`);
         const clients = opts.client === "all" ? CLIENTS : [opts.client as ClientName];
@@ -194,6 +221,7 @@ export async function runInstallMcp(argv: string[], home = os.homedir()) {
         if (!opts.dryRun) {
             try {
                 console.log(`✓ MCP 自检通过：${await verifyMcp(spec, home)} 个工具`);
+                console.log(`一键连接地址：${buildOneClickConnectUrl(loadConfig(true))}`);
             } catch (e) {
                 failed = true;
                 console.log(`✗ ${(e as Error).message}`);

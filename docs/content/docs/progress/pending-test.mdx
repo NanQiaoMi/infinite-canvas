@@ -7,6 +7,10 @@ description: Implemented changes that still need manual verification
 
 The current release needs manual verification in these areas:
 
+- MCP 实战衔接与本地安装体验打磨：
+  1. 本地开发版一键安装（`install-mcp --local`）：在 `canvas-agent` 构建出 `dist/index.js` 后运行 `node dist/index.js install-mcp --local`（或 `--dry-run --local`），无需发 npm 即可直接将本地产物写入 Claude Code / Codex / Antigravity 配置，并在 MCP 自检通过后打印一键连接地址；若缺少 `dist/index.js` 则给出先执行 `npm run build` 的明确提示；
+  2. `site_navigate` 跳转画布就绪等待：先调用 `canvas_list_projects` 获取画布 ID，调用 `site_navigate({ path: "/canvas/<id>" })` 后紧接着调用 `canvas_get_state` 或 `canvas_create_asset_nodes`，`site_navigate` 会等待目标画布完成加载（最长 5 秒）并主动同步快照后返回 `canvasReady: true`，不再因页面尚在切换而报「请先打开画布」；
+  3. 从「我的素材」批量落画布节点（`canvas_create_asset_nodes`）：通过 `assets_list` 查询已保存的人物定妆照/场景图资产 ID 后调用 `canvas_create_asset_nodes({ assetIds: [...] })`（单次最多 10 张，45 秒超时），能在画布右侧按原图比例创建图片节点并选中，返回的节点 ID 可直接传给 `canvas_generate_video.referenceNodeIds` 保持多镜头人物一致性。
 - 画布 MCP 首次连接稳定性与前端自动诊断重试（Claude Code / Antigravity）：
   1. MCP 按需自动拉起桥接与配置热加载：在未手动运行 `npx -y @basketikun/canvas-agent@latest` 时直接通过 Claude Code / Antigravity 调用 `canvas_connection_status` 或画布工具，MCP 会自动在后台拉起本地 HTTP 桥接服务并完成连接（仅连接 MCP 或 `install-mcp` 自检时不会提前泄露多余后台进程）；修改或重启 `canvas-agent` 生成新 Token 后再次调用 MCP 工具，无需重启 IDE 即可自动 401 热加载重试成功；
   2. 端口占用友好回显与一键连接 URL：本地桥接已在运行时重复启动 `canvas-agent` 不再因 `EADDRINUSE` 崩溃，而是检测健康实例并打印活跃地址、Token 与一键连接 URL（`#agentUrl=...&agentToken=...`）；未打开网页时调用 MCP 工具会在报错或 `canvas_connection_status` 返回中附带该一键连接地址；
