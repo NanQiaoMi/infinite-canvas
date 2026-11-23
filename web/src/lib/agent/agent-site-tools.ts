@@ -1,8 +1,11 @@
 import type { NavigateFunction } from "react-router-dom";
+import { nanoid } from "nanoid";
 
 import i18n from "@/i18n";
 import { fetchPrompts } from "@/services/api/prompts";
-import { uploadImage } from "@/services/image-storage";
+import { VIDEO_MAX_REFERENCES } from "@/services/api/video";
+import { resolveImageUrl, uploadImage } from "@/services/image-storage";
+import type { ReferenceImage } from "@/types/image";
 import { imageAspectOptions, imageQualityOptions, imageScaleOptions } from "@/components/image-settings-panel";
 import { videoResolutionOptions, videoSecondsRange, videoSizeOptions } from "@/components/video-settings-panel";
 import type { CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
@@ -53,7 +56,22 @@ export const SITE_TOOL_LABELS: Record<SiteToolName, string> = {
 type SiteToolInput = Record<string, unknown>;
 type SiteToolContext = { canvasSnapshot?: CanvasAgentSnapshot | null };
 type GenerationStatus = "idle" | "queued" | "running" | "succeeded" | "failed";
-type GenerationStatusItem = { id: string; source: "canvas" | "image" | "video"; status: GenerationStatus; kind?: string; title?: string; prompt?: string; projectId?: string; createdAt?: string; updatedAt?: string; successCount?: number; failCount?: number; error?: string };
+type GenerationStatusItem = {
+    id: string;
+    source: "canvas" | "image" | "video";
+    status: GenerationStatus;
+    kind?: string;
+    title?: string;
+    prompt?: string;
+    projectId?: string;
+    createdAt?: string;
+    updatedAt?: string;
+    progress?: number;
+    resultUrl?: string;
+    successCount?: number;
+    failCount?: number;
+    error?: string;
+};
 
 export async function runSiteTool(name: SiteToolName, input: SiteToolInput, navigate: NavigateFunction, context: SiteToolContext = {}): Promise<unknown> {
     switch (name) {
@@ -68,7 +86,7 @@ export async function runSiteTool(name: SiteToolName, input: SiteToolInput, navi
         case "workbench_video_get_config":
             return getVideoConfig();
         case "workbench_video_generate":
-            return runVideoWorkbench(input, navigate);
+            return runVideoWorkbench(input, navigate, context);
         case "prompts_search":
             return searchPrompts(input);
         case "assets_list":
@@ -95,7 +113,26 @@ function getGenerationStatus(input: SiteToolInput, canvasSnapshot?: CanvasAgentS
             if (!status || (nodeIds.size && !nodeIds.has(node.id))) return;
             const metadata = node.metadata || {};
             if (!nodeIds.size && node.type !== "config" && status !== "running" && status !== "failed" && !metadata.generationMode && !metadata.generationType && !metadata.model) return;
-            tasks.push({ id: node.id, source: "canvas", status, kind: metadata.generationMode || node.type, title: node.title, prompt: compactPrompt(metadata.prompt || metadata.composerContent), projectId: canvasSnapshot.projectId, error: metadata.errorDetails });
+            const progress = typeof metadata.videoProgress === "number"
+                ? metadata.videoProgress
+                : typeof metadata.progress === "number"
+                  ? Math.round(metadata.progress * 100)
+                  : undefined;
+            const resultUrl = status === "succeeded" && typeof metadata.content === "string" && !metadata.content.startsWith("data:")
+                ? metadata.content
+                : undefined;
+            tasks.push({
+                id: node.id,
+                source: "canvas",
+                status,
+                kind: metadata.generationMode || node.type,
+                title: node.title,
+                prompt: compactPrompt(metadata.prompt || metadata.composerContent),
+                projectId: canvasSnapshot.projectId,
+                ...(progress !== undefined ? { progress } : {}),
+                ...(resultUrl ? { resultUrl } : {}),
+                error: metadata.errorDetails,
+            });
         });
     }
 
@@ -221,10 +258,57 @@ function getVideoConfig() {
             { value: "frames", label: i18n.t("settingsPanels.video.modes.frames") },
             { value: "reference", label: i18n.t("settingsPanels.video.modes.reference") },
         ],
+        maxReferences: VIDEO_MAX_REFERENCES,
+        referenceTokenHint: "[图1] ~ [图10]",
     };
 }
 
-function runVideoWorkbench(input: SiteToolInput, navigate: NavigateFunction) {
+async function resolveVideoToolReferences(input: SiteToolInput): Promise<ReferenceImage[]> {
+    const assetIds = Array.isArray(input.referenceAssetIds) ? input.referenceAssetIds.filter((id): id is string => typeof id === "string" && Boolean(id.trim())) : [];
+    const urls = Array.isArray(input.referenceUrls) ? input.referenceUrls.filter((url): url is string => typeof url === "string" && Boolean(url.trim())) : [];
+    const total = assetIds.length + urls.length;
+    if (total > VIDEO_MAX_REFERENCES) {
+        throw new Error(siteText("videoMaxReferences", { max: VIDEO_MAX_REFERENCES, count: total }));
+    }
+    if (!total) return [];
+
+    const assets = useAssetStore.getState().assets;
+    const refs: ReferenceImage[] = [];
+
+    for (const id of assetIds) {
+        const asset = assets.find((item) => item.id === id);
+        if (!asset) throw new Error(siteText("videoAssetNotFound", { id }));
+        if (asset.kind !== "image") throw new Error(siteText("videoAssetNotImage", { title: asset.title || id }));
+        const dataUrl = await resolveImageUrl(asset.data.storageKey, asset.data.dataUrl || asset.coverUrl);
+        refs.push({
+            id: nanoid(),
+            name: asset.title || `asset-${refs.length + 1}.png`,
+            type: asset.data.mimeType || "image/png",
+            dataUrl,
+            storageKey: asset.data.storageKey,
+        });
+    }
+
+    for (const url of urls) {
+        try {
+            const stored = await uploadImage(url);
+            refs.push({
+                id: nanoid(),
+                name: `ref-${refs.length + 1}.png`,
+                type: stored.mimeType,
+                dataUrl: stored.url,
+                storageKey: stored.storageKey,
+            });
+        } catch {
+            throw new Error(siteText("videoReferenceUrlFailed", { url: url.slice(0, 80) }));
+        }
+    }
+
+    return refs;
+}
+
+async function runVideoWorkbench(input: SiteToolInput, navigate: NavigateFunction, context: SiteToolContext = {}) {
+    const references = await resolveVideoToolReferences(input);
     const configStore = useConfigStore.getState();
     const applied: Record<string, unknown> = {};
     if (typeof input.model === "string" && input.model.trim()) {
@@ -253,15 +337,37 @@ function runVideoWorkbench(input: SiteToolInput, navigate: NavigateFunction) {
         configStore.updateConfig("videoWatermark", String(input.watermark));
         applied.watermark = input.watermark;
     }
-    if (input.mode === "frames" || input.mode === "reference") {
-        configStore.updateConfig("videoMode", input.mode);
-        applied.mode = input.mode;
+    const mode = input.mode === "frames" || input.mode === "reference" ? input.mode : references.length > 2 ? "reference" : undefined;
+    if (mode) {
+        configStore.updateConfig("videoMode", mode);
+        applied.mode = mode;
     }
     const prompt = typeof input.prompt === "string" ? input.prompt : undefined;
     const run = input.run !== false;
+    const page = resolveWorkbenchPage(typeof window !== "undefined" ? window.location.pathname : "");
+    const sessionId = useAgentStore.getState().conversation.threadId || undefined;
+    const canvasProjectId = context.canvasSnapshot?.projectId || undefined;
     navigate("/video");
-    const taskId = useWorkbenchAgentStore.getState().dispatchVideo({ prompt, run });
-    return { ok: true, navigated: "/video", prompt, run, taskId, applied, note: siteText(run ? "videoGenerationStarted" : "videoConfigApplied") };
+    const taskId = useWorkbenchAgentStore.getState().dispatchVideo({
+        prompt,
+        ...(references.length ? { references } : {}),
+        run,
+        origin: "site-tool",
+        page,
+        ...(sessionId ? { sessionId } : {}),
+        ...(canvasProjectId ? { canvasProjectId } : {}),
+    });
+    return {
+        ok: true,
+        navigated: "/video",
+        prompt,
+        run,
+        taskId,
+        applied,
+        referenceCount: references.length,
+        referenceMapping: references.map((ref, index) => ({ token: `[图${index + 1}]`, name: ref.name })),
+        note: siteText(run ? "videoGenerationStarted" : "videoConfigApplied"),
+    };
 }
 
 async function searchPrompts(input: SiteToolInput) {
