@@ -358,6 +358,8 @@ function siteToolSummary(name: string, result: unknown, input: unknown) {
     }
     if (name === "workbench_image_generate" || name === "workbench_video_generate") return typeof data.note === "string" ? data.note : tr("workbenchExecuted");
     if (name === "workbench_image_get_config" || name === "workbench_video_get_config") return tr("workbenchConfigRead");
+    if (name === "video_inspect_frames" || name === "canvas_inspect_node_visual") return typeof data.summary === "string" ? data.summary : "";
+    if (name === "canvas_extract_video_frame") return typeof data.nodeId === "string" ? data.nodeId : "";
     return "";
 }
 

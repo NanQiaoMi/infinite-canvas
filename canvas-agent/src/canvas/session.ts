@@ -36,6 +36,9 @@ const SITE_TOOLS = new Set<ToolName>([
     "assets_list",
     "assets_add",
     "generation_get_status",
+    "canvas_inspect_node_visual",
+    "video_inspect_frames",
+    "canvas_extract_video_frame",
 ]);
 
 /** 管理网页画布连接、状态、附件和工具请求。 */
@@ -493,15 +496,27 @@ export class CanvasSession {
         if (!client) throw new Error("当前没有已连接画布");
         sendEvent(client, "tool_call", { requestId, name, input });
         logger.debug("Canvas tool request sent", { requestId, name, input, clientId });
+        const timeoutMs = requestTimeoutMs(name, input);
         return await new Promise((resolve, reject) => {
             const timer = setTimeout(() => {
                 this.pending.delete(requestId);
                 logger.warn("Canvas tool request timed out", { requestId, name, clientId });
                 reject(new Error("画布操作超时"));
-            }, 30000);
+            }, timeoutMs);
             this.pending.set(requestId, { clientId, resolve: (value) => (clearTimeout(timer), resolve(value)), reject: (error) => (clearTimeout(timer), reject(error)) });
         });
     }
+}
+
+function requestTimeoutMs(name: ToolName, input: Record<string, unknown>) {
+    if (name === "generation_get_status") {
+        const waitSeconds = Math.max(0, Math.min(30, Number(input.waitSeconds) || 0));
+        if (waitSeconds > 0) return waitSeconds * 1000 + 15000;
+    }
+    if (name === "video_inspect_frames" || name === "canvas_inspect_node_visual" || name === "canvas_extract_video_frame") {
+        return 45000;
+    }
+    return 30000;
 }
 
 /** 为运行中 turn 的可重放事件生成稳定键。 */

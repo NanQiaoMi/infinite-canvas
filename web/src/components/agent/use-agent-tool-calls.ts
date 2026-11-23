@@ -41,9 +41,14 @@ export function useAgentToolCalls({ endpoint, clientIdRef, canvasContextRef, pen
         if (isSiteTool(payload.name)) {
             try {
                 addEventLog(toolName(payload.name), payload, payload);
-                const result = await runSiteTool(payload.name, payload.input || {}, navigate, { canvasSnapshot: canvasContextRef.current?.snapshot || null });
+                const result = await runSiteTool(payload.name, payload.input || {}, navigate, {
+                    canvasSnapshot: canvasContextRef.current?.snapshot || null,
+                    canvasContext: canvasContextRef.current,
+                    syncCanvasState: (snapshot) => void postState(endpoint, token, clientIdRef.current, snapshot),
+                });
                 await postToolResult(endpoint, token, clientIdRef.current, { requestId: payload.requestId, result });
-                addEventLog(rt("toolCompleted", { tool: toolName(payload.name) }), result, result);
+                const logResult = sanitizeToolResultForLog(result);
+                addEventLog(rt("toolCompleted", { tool: toolName(payload.name) }), logResult, logResult);
             } catch (error) {
                 const message = error instanceof Error ? error.message : rt("toolExecutionFailed");
                 await postToolResult(endpoint, token, clientIdRef.current, { requestId: payload.requestId, error: message });
@@ -99,6 +104,14 @@ export function useAgentToolCalls({ endpoint, clientIdRef, canvasContextRef, pen
     };
 
     return { handleToolCall, rejectPendingTool, approvePendingTool };
+}
+
+function sanitizeToolResultForLog(result: unknown): unknown {
+    if (!result || typeof result !== "object" || Array.isArray(result) || !Array.isArray((result as { _mcpImages?: unknown })._mcpImages)) {
+        return result;
+    }
+    const { _mcpImages, ...rest } = result as Record<string, unknown> & { _mcpImages: unknown[] };
+    return { ...rest, attachedImages: _mcpImages.length };
 }
 
 async function attachmentNodeOps(endpoint: string, token: string, clientId: string, value: unknown): Promise<CanvasAgentOp[]> {
