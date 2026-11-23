@@ -13,13 +13,13 @@ import { DEFAULT_PORT, ensureSiteWorkspace, loadConfig, saveConfig, updateSiteWo
 import { logger } from "../utils/logger.js";
 import { checkVersions } from "../version-check.js";
 import { SkillStore, SkillStoreError } from "../skills/store.js";
+import { buildOneClickConnectUrl, probeBridgeHealth } from "./mcp.js";
 
 /** 启动仅监听本机的 Canvas Agent HTTP 服务。 */
 export function startHttpServer() {
     const config = loadConfig(true);
     const port = Number(process.env.PORT) || Number(new URL(config.url).port) || DEFAULT_PORT;
     config.url = `http://127.0.0.1:${port}`;
-    saveConfig(config);
 
     const initialWorkspace = ensureSiteWorkspace(config);
     const session = new CanvasSession(initialWorkspace.activeThreadId || "");
@@ -129,6 +129,7 @@ export function startHttpServer() {
         if (validToken(req, requestUrl(req, config), config.token)) return next();
         res.status(401).json({ ok: false, error: "invalid token" });
     });
+    app.get("/auth/check", (_req, res) => res.json({ ok: true, protocolVersion: AGENT_PROTOCOL_VERSION, url: config.url }));
     app.get("/events", (req, res) => {
         session.openEvents(requestUrl(req, config), res, ensureSiteWorkspace(config).activeThreadId || "", activeRuntime());
     });
@@ -453,11 +454,13 @@ export function startHttpServer() {
         res.status(500).json({ ok: false, error: error.message });
     });
 
-    app.listen(port, "127.0.0.1", () => {
+    const server = app.listen(port, "127.0.0.1", () => {
+        saveConfig(config);
         console.log("Infinite Canvas Agent");
         checkVersions();
         console.log(`Local URL: ${config.url}`);
         console.log(`Connect token: ${config.token}`);
+        console.log(`One-click connect: ${buildOneClickConnectUrl(config)}`);
         console.log("Codex MCP is not installed by this command.");
         console.log("Optional MCP add: codex mcp add infinite-canvas -- npx -y @basketikun/canvas-agent@latest mcp");
         console.log("Remove manually added MCP: codex mcp remove infinite-canvas");
@@ -465,7 +468,7 @@ export function startHttpServer() {
         logger.info("Canvas Agent started", { url: config.url, workspace: ensureSiteWorkspace(config).workspacePath, debugLog: logger.filePath });
         const activeThreadId = initialWorkspace.activeThreadId || "";
         const runtime = initialWorkspace.runtime || "codex";
-        if (activeThreadId && session.beginCodexMutation()) {
+        if (process.argv.includes("--preheat") && activeThreadId && session.beginCodexMutation()) {
             void prepareExistingThread(activeThreadId, "", "request", runtime).catch(async (error) => {
                 if (!agentRuntimes[runtime].isRecoverableThreadError(error)) return failPreparedConversation(error, activeThreadId);
                 session.beginConversation();
@@ -473,6 +476,25 @@ export function startHttpServer() {
                 await prepareDraftThread("", "request", runtime);
             }).finally(() => session.endCodexMutation()).catch(() => undefined);
         }
+    });
+    server.on("error", (error: NodeJS.ErrnoException) => {
+        if (error.code !== "EADDRINUSE") {
+            logger.error("Canvas Agent HTTP server error", { error: error.message });
+            process.exit(1);
+        }
+        void (async () => {
+            const existing = await probeBridgeHealth(config.url);
+            if (existing?.ok) {
+                const active = loadConfig(true);
+                console.log("Infinite Canvas Agent is already running.");
+                console.log(`Local URL: ${active.url}`);
+                console.log(`Connect token: ${active.token}`);
+                console.log(`One-click connect: ${buildOneClickConnectUrl(active)}`);
+                process.exit(0);
+            }
+            console.error(`Port ${port} is already in use by another process.`);
+            process.exit(1);
+        })();
     });
 }
 
