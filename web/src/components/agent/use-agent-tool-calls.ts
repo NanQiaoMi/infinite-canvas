@@ -3,7 +3,7 @@ import type { NavigateFunction } from "react-router-dom";
 import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
 import { imageMetadata } from "@/lib/canvas/canvas-node-factory";
 import { type CanvasAgentOp, type CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
-import { isSiteTool, runSiteTool } from "@/lib/agent/agent-site-tools";
+import { extractCanvasProjectId, isSiteTool, runSiteTool, waitForCanvasProjectReady } from "@/lib/agent/agent-site-tools";
 import { postState, postToolResult } from "@/services/api/canvas-agent";
 import { uploadImage } from "@/services/image-storage";
 import { useAgentStore, type AgentCanvasContext, type AgentPendingToolCall } from "@/stores/use-agent-store";
@@ -63,7 +63,33 @@ export function useAgentToolCalls({ endpoint, clientIdRef, canvasContextRef, pen
             if (payload.name === "site_navigate") {
                 const path = input.path || "/";
                 navigate(path);
-                result = { ok: true, path };
+                const targetProjectId = extractCanvasProjectId(path);
+                if (targetProjectId) {
+                    const readyContext = await waitForCanvasProjectReady(
+                        targetProjectId,
+                        () => canvasContextRef.current ?? useAgentStore.getState().canvasContext,
+                    );
+                    if (readyContext) {
+                        await postState(endpoint, token, clientIdRef.current, readyContext.snapshot);
+                        result = {
+                            ok: true,
+                            path,
+                            canvasReady: true,
+                            projectId: readyContext.snapshot.projectId,
+                            title: readyContext.snapshot.title,
+                            nodeCount: readyContext.snapshot.nodes.length,
+                        };
+                    } else {
+                        result = {
+                            ok: true,
+                            path,
+                            canvasReady: false,
+                            warning: "画布尚未完成加载，请稍候重试或检查画布 ID 是否有效",
+                        };
+                    }
+                } else {
+                    result = { ok: true, path };
+                }
             } else if (payload.name === "canvas_apply_ops") {
                 const context = canvasContextRef.current;
                 if (!context) throw new Error(rt("openCanvasFirst"));

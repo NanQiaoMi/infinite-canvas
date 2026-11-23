@@ -31,6 +31,7 @@ export const SITE_TOOL_NAMES = [
     "canvas_inspect_node_visual",
     "video_inspect_frames",
     "canvas_extract_video_frame",
+    "canvas_create_asset_nodes",
     "workbench_image_get_config",
     "workbench_image_generate",
     "workbench_video_get_config",
@@ -56,6 +57,7 @@ export const SITE_TOOL_LABELS: Record<SiteToolName, string> = {
     get canvas_inspect_node_visual() { return siteText("inspectNodeVisual"); },
     get video_inspect_frames() { return siteText("inspectVideoFrames"); },
     get canvas_extract_video_frame() { return siteText("extractVideoFrame"); },
+    get canvas_create_asset_nodes() { return siteText("createAssetNodes"); },
     get workbench_image_get_config() { return siteText("imageConfig"); },
     get workbench_image_generate() { return siteText("imageGenerate"); },
     get workbench_video_get_config() { return siteText("videoConfig"); },
@@ -103,6 +105,8 @@ export async function runSiteTool(name: SiteToolName, input: SiteToolInput, navi
             return inspectVideoFrames(input, context);
         case "canvas_extract_video_frame":
             return extractVideoFrameToCanvas(input, context);
+        case "canvas_create_asset_nodes":
+            return createAssetNodesOnCanvas(input, context);
         case "workbench_image_get_config":
             return getImageConfig();
         case "workbench_image_generate":
@@ -840,4 +844,86 @@ async function extractVideoFrameToCanvas(input: SiteToolInput, context: SiteTool
         height: uploaded.height,
         ...(mcpImages.length ? { _mcpImages: mcpImages } : {}),
     };
+}
+
+/** 从 /canvas/:id 路由中提取目标画布项目 ID。 */
+export function extractCanvasProjectId(path: string): string | null {
+    const match = String(path || "").trim().match(/^\/canvas\/([^/?#]+)/);
+    if (!match?.[1]) return null;
+    try {
+        return decodeURIComponent(match[1]);
+    } catch {
+        return match[1];
+    }
+}
+
+/** 跳转画布路由后短轮询等待目标画布加载并同步上下文就绪。 */
+export async function waitForCanvasProjectReady(
+    projectId: string,
+    readContext: () => AgentCanvasContext | null,
+    options: { timeoutMs?: number; pollMs?: number } = {},
+): Promise<AgentCanvasContext | null> {
+    const timeoutMs = options.timeoutMs ?? 5000;
+    const pollMs = options.pollMs ?? 50;
+    const deadline = Date.now() + timeoutMs;
+    while (true) {
+        const ctx = readContext();
+        if (ctx?.snapshot.projectId === projectId) return ctx;
+        if (Date.now() >= deadline) return null;
+        await new Promise<void>((resolve) => setTimeout(resolve, pollMs));
+    }
+}
+
+async function createAssetNodesOnCanvas(input: SiteToolInput, context: SiteToolContext) {
+    const canvasContext = getLiveCanvasContext(context);
+    if (!canvasContext) throw new Error(siteText("openCanvasFirst"));
+    const rawIds = Array.isArray(input.assetIds) ? input.assetIds.map((id) => String(id || "").trim()).filter(Boolean) : [];
+    if (!rawIds.length) throw new Error(siteText("videoAssetNotFound", { id: "" }));
+    if (rawIds.length > VIDEO_MAX_REFERENCES) {
+        throw new Error(siteText("videoMaxReferences", { max: VIDEO_MAX_REFERENCES, count: rawIds.length }));
+    }
+    const { assets, hydrated } = useAssetStore.getState();
+    if (!hydrated) throw new Error(siteText("assetsLoading"));
+    const resolvedAssets = rawIds.map((id) => {
+        const asset = assets.find((item) => item.id === id);
+        if (!asset) throw new Error(siteText("videoAssetNotFound", { id }));
+        if (asset.kind !== "image") throw new Error(siteText("videoAssetNotImage", { title: asset.title || id }));
+        return asset;
+    });
+
+    const existingNodes = canvasContext.snapshot.nodes;
+    const rightEdge = existingNodes.reduce((max, node) => Math.max(max, node.position.x + node.width), 0);
+    const startX = typeof input.x === "number" ? input.x : existingNodes.length ? rightEdge + 96 : 0;
+    const startY = typeof input.y === "number" ? input.y : 0;
+    const gap = typeof input.gap === "number" ? input.gap : 40;
+    const direction = input.direction === "column" ? "column" : "row";
+
+    let offset = 0;
+    const created: Array<{ id: string; assetId: string; title: string; width: number; height: number }> = [];
+    const addOps: CanvasAgentOp[] = [];
+    for (const asset of resolvedAssets) {
+        const imageUrl = await resolveImageUrl(asset.data.storageKey, asset.data.dataUrl || asset.coverUrl);
+        if (!imageUrl) throw new Error(siteText("imageReadFailed"));
+        const uploaded = await uploadImage(imageUrl);
+        const size = fitNodeSize(uploaded.width, uploaded.height, 480, 480);
+        const id = `image-${nanoid(10)}`;
+        const title = asset.title || "素材图片";
+        const position = { x: direction === "row" ? startX + offset : startX, y: direction === "column" ? startY + offset : startY };
+        addOps.push({
+            type: "add_node",
+            id,
+            nodeType: CanvasNodeType.Image,
+            title,
+            position,
+            width: size.width,
+            height: size.height,
+            metadata: imageMetadata(uploaded),
+        });
+        created.push({ id, assetId: asset.id, title, width: uploaded.width, height: uploaded.height });
+        offset += (direction === "row" ? size.width : size.height) + gap;
+    }
+
+    const nextSnapshot = canvasContext.applyOps([...addOps, { type: "select_nodes", ids: created.map((item) => item.id) }]);
+    context.syncCanvasState?.(nextSnapshot);
+    return { ok: true, count: created.length, nodes: created };
 }
