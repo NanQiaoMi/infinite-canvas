@@ -1,5 +1,5 @@
 import { ArrowLeft, ArrowRight, BookOpen, ClipboardPaste, Download, FolderPlus, LoaderCircle, Menu, SlidersHorizontal, Sparkles, SquarePen, Trash2, Upload, VideoIcon } from "lucide-react";
-import { useEffect, useRef, useState, useSyncExternalStore, type DragEvent } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ComponentRef, type DragEvent } from "react";
 import { App, Button, Checkbox, Drawer, Input, Modal, Tooltip, Typography } from "antd";
 import localforage from "localforage";
 import { nanoid } from "nanoid";
@@ -17,7 +17,7 @@ import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { cn } from "@/lib/utils";
 import { deleteStoredMedia, resolveMediaUrl } from "@/services/file-storage";
 import { resolveImageUrl, ensureImagePreview, getImagePreviewRevision, previewUrlFor, subscribeImagePreviews, uploadImage } from "@/services/image-storage";
-import { createVideoGenerationTask, pollVideoGenerationTask, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
+import { VIDEO_MAX_REFERENCES, VIDEO_POLL_MAX_ATTEMPTS, createVideoGenerationTask, pollVideoGenerationTask, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
 import { useConversationAgentStore } from "@/stores/use-conversation-agent-store";
@@ -41,6 +41,7 @@ type GeneratedVideo = {
 type GenerationResult = {
     id: string;
     status: "pending" | "success" | "failed";
+    progress?: number;
     video?: GeneratedVideo;
     error?: string;
 };
@@ -76,6 +77,7 @@ export default function VideoPage() {
     const { t } = useTranslation();
     useSyncExternalStore(subscribeImagePreviews, getImagePreviewRevision);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const promptInputRef = useRef<ComponentRef<typeof Input.TextArea>>(null);
     const dragDepthRef = useRef(0);
     const activeLogIdsRef = useRef<Set<string>>(new Set());
     const config = useConfigStore((state) => state.config);
@@ -86,6 +88,10 @@ export default function VideoPage() {
     const addAsset = useAssetStore((state) => state.addAsset);
     const [prompt, setPrompt] = useState("");
     const [references, setReferences] = useState<ReferenceImage[]>([]);
+    const referencesRef = useRef<ReferenceImage[]>([]);
+    referencesRef.current = references;
+    const [draggedRefIndex, setDraggedRefIndex] = useState<number | null>(null);
+    const [dragOverRefIndex, setDragOverRefIndex] = useState<number | null>(null);
     const [results, setResults] = useState<GenerationResult[]>([]);
     const [logs, setLogs] = useState<GenerationLog[]>([]);
     const [running, setRunning] = useState(false);
@@ -121,33 +127,75 @@ export default function VideoPage() {
         void refreshLogs();
     }, []);
 
+    const appendReferences = (items: ReferenceImage[]) => {
+        if (!items.length) return;
+        const available = Math.max(0, VIDEO_MAX_REFERENCES - referencesRef.current.length);
+        if (items.length > available) {
+            message.warning(t("videoWorkbench.maxImagesReached", { max: VIDEO_MAX_REFERENCES }));
+        }
+        const accepted = items.slice(0, available);
+        if (!accepted.length) return;
+        const next = [...referencesRef.current, ...accepted].slice(0, VIDEO_MAX_REFERENCES);
+        referencesRef.current = next;
+        setReferences(next);
+        if (next.length > 2 && effectiveConfig.videoMode !== "reference") {
+            updateConfig("videoMode", "reference");
+        }
+    };
+
+    const insertReferenceToken = (index: number) => {
+        const token = `[图${index}]`;
+        const textarea = promptInputRef.current?.resizableTextArea?.textArea;
+        if (!textarea) {
+            setPrompt((prev) => (prev ? `${prev} ${token}` : token));
+            return;
+        }
+        const start = textarea.selectionStart ?? prompt.length;
+        const end = textarea.selectionEnd ?? prompt.length;
+        const nextValue = `${prompt.slice(0, start)}${token}${prompt.slice(end)}`;
+        setPrompt(nextValue);
+        window.requestAnimationFrame(() => {
+            textarea.focus();
+            const cursor = start + token.length;
+            textarea.setSelectionRange(cursor, cursor);
+        });
+    };
+
     const addReferences = async (files?: FileList | null) => {
         const selectedFiles = Array.from(files || []);
         const unsupported = selectedFiles.filter((file) => !file.type.startsWith("image/"));
         if (unsupported.length) message.warning(t("videoWorkbench.unsupportedFiles"));
-        const imageFiles = selectedFiles.filter((file) => file.type.startsWith("image/")).slice(0, 7 - references.length);
+        const allImages = selectedFiles.filter((file) => file.type.startsWith("image/"));
+        const available = Math.max(0, VIDEO_MAX_REFERENCES - referencesRef.current.length);
+        if (allImages.length > available) {
+            message.warning(t("videoWorkbench.maxImagesReached", { max: VIDEO_MAX_REFERENCES }));
+        }
+        const imageFiles = allImages.slice(0, available);
         const nextReferences = await Promise.all(
             imageFiles.map(async (file) => {
                 const image = await uploadImage(file);
                 return { id: nanoid(), name: file.name, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey };
             }),
         );
-        setReferences((value) => [...value, ...nextReferences].slice(0, 7));
+        appendReferences(nextReferences);
     };
 
     const handleReferenceDragEnter = (event: DragEvent<HTMLDivElement>) => {
+        if (draggedRefIndex !== null || !event.dataTransfer.types.includes("Files")) return;
         event.preventDefault();
         dragDepthRef.current += 1;
-        if (event.dataTransfer.types.includes("Files")) setReferenceDragTarget(true);
+        setReferenceDragTarget(true);
     };
 
     const handleReferenceDragLeave = (event: DragEvent<HTMLDivElement>) => {
+        if (draggedRefIndex !== null) return;
         event.preventDefault();
         dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
         if (!dragDepthRef.current) setReferenceDragTarget(false);
     };
 
     const handleReferenceDrop = (event: DragEvent<HTMLDivElement>) => {
+        if (draggedRefIndex !== null || !event.dataTransfer.files?.length) return;
         event.preventDefault();
         dragDepthRef.current = 0;
         setReferenceDragTarget(false);
@@ -162,14 +210,18 @@ export default function VideoPage() {
                 message.error(t("videoWorkbench.clipboardEmpty"));
                 return;
             }
+            const available = Math.max(0, VIDEO_MAX_REFERENCES - referencesRef.current.length);
+            if (blobs.length > available) {
+                message.warning(t("videoWorkbench.maxImagesReached", { max: VIDEO_MAX_REFERENCES }));
+            }
             const nextReferences = await Promise.all(
-                blobs.slice(0, 7 - references.length).map(async (blob, index) => {
+                blobs.slice(0, available).map(async (blob, index) => {
                     const image = await uploadImage(blob);
                     return { id: nanoid(), name: `clipboard-${index + 1}.png`, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey };
                 }),
             );
-            setReferences((value) => [...value, ...nextReferences].slice(0, 7));
-            message.success(t("videoWorkbench.clipboardAdded", { count: nextReferences.length }));
+            appendReferences(nextReferences);
+            if (nextReferences.length) message.success(t("videoWorkbench.clipboardAdded", { count: nextReferences.length }));
         } catch {
             message.error(t("videoWorkbench.clipboardEmpty"));
         }
@@ -186,7 +238,7 @@ export default function VideoPage() {
         setRunning(true);
         if (agentTaskId) updateAgentTask(agentTaskId, { status: "running", error: undefined });
         setPreviewLog(null);
-        setResults([{ id: nanoid(), status: "pending" }]);
+        setResults([{ id: nanoid(), status: "pending", progress: 0 }]);
         const batchStartedAt = performance.now();
         setStartedAt(batchStartedAt);
         try {
@@ -210,6 +262,14 @@ export default function VideoPage() {
         processedCommandRef.current = videoCommand.nonce;
         clearVideoCommand();
         if (typeof videoCommand.prompt === "string") setPrompt(videoCommand.prompt);
+        if (videoCommand.references) {
+            const nextRefs = videoCommand.references.slice(0, VIDEO_MAX_REFERENCES);
+            referencesRef.current = nextRefs;
+            setReferences(nextRefs);
+            if (nextRefs.length > 2 && effectiveConfig.videoMode !== "reference") {
+                updateConfig("videoMode", "reference");
+            }
+        }
         if (videoCommand.run && running) {
             if (videoCommand.taskId) updateAgentTask(videoCommand.taskId, { status: "failed", error: t("videoWorkbench.busy") });
             return;
@@ -218,7 +278,7 @@ export default function VideoPage() {
             agentTaskIdRef.current = videoCommand.taskId;
             setAutoRunToken((value) => value + 1);
         }
-    }, [videoCommand, clearVideoCommand, running, updateAgentTask]);
+    }, [videoCommand, clearVideoCommand, running, updateAgentTask, effectiveConfig.videoMode, updateConfig]);
 
     useEffect(() => {
         if (!autoRunToken) return;
@@ -237,7 +297,7 @@ export default function VideoPage() {
             openConfigDialog(true);
             return null;
         }
-        return { text, config: buildVideoConfig(effectiveConfig, model), references: [...references] };
+        return { text, config: buildVideoConfig(effectiveConfig, model), references: [...referencesRef.current] };
     };
 
     const retryResult = () => {
@@ -266,7 +326,7 @@ export default function VideoPage() {
             setPrompt(payload.content);
         } else if (payload.kind === "image") {
             const stored = await uploadImage(payload.dataUrl);
-            setReferences((value) => [...value, { id: nanoid(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }].slice(0, 7));
+            appendReferences([{ id: nanoid(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }]);
         }
         setAssetPickerOpen(false);
     };
@@ -321,7 +381,7 @@ export default function VideoPage() {
         setResults((value) => (value.length ? value : [{ id: log.id, status: "pending" }]));
         const taskConfig = buildVideoConfig({ ...effectiveConfig, ...log.config }, log.task.model || log.model);
         try {
-            for (let attempt = 0; attempt < 120; attempt += 1) {
+            for (let attempt = 0; attempt < VIDEO_POLL_MAX_ATTEMPTS; attempt += 1) {
                 const state = await pollVideoGenerationTask(configOverride || taskConfig, log.task);
                 if (state.status === "completed") {
                     const stored = await storeGeneratedVideo(state.result);
@@ -336,13 +396,17 @@ export default function VideoPage() {
                         mimeType: stored.mimeType,
                     };
                     setResults([{ id: nextVideo.id, status: "success", video: nextVideo }]);
-                    if (agentTaskId) updateAgentTask(agentTaskId, { status: "succeeded", successCount: 1, failCount: 0, error: undefined });
+                    if (agentTaskId) updateAgentTask(agentTaskId, { status: "succeeded", progress: 100, resultUrl: nextVideo.url, successCount: 1, failCount: 0, error: undefined });
                     await saveLog({ ...log, status: "success", durationMs: nextVideo.durationMs, video: nextVideo, error: undefined });
                     message.success(t("videoWorkbench.generated"));
                     return;
                 }
                 if (state.status === "failed") throw new Error(state.error);
-                if (attempt === 119) throw new Error(t("videoWorkbench.timeout"));
+                if (typeof state.progress === "number") {
+                    setResults((prev) => prev.map((item) => (item.status === "pending" ? { ...item, progress: state.progress } : item)));
+                    if (agentTaskId) updateAgentTask(agentTaskId, { progress: state.progress });
+                }
+                if (attempt === VIDEO_POLL_MAX_ATTEMPTS - 1) throw new Error(t("videoWorkbench.timeout"));
                 await delay(2500);
             }
         } catch (error) {
@@ -430,13 +494,22 @@ export default function VideoPage() {
                                     </div>
                                 </div>
                                 <div className="rounded-2xl border border-stone-300/80 bg-white p-2.5 shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-all duration-200 focus-within:border-stone-400/80 focus-within:shadow-[0_2px_14px_rgba(0,0,0,0.06)] dark:border-stone-700 dark:bg-stone-900 dark:focus-within:border-stone-600">
-                                    <Input.TextArea variant="borderless" value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} className="!px-1 !py-1 !text-sm font-serif" placeholder={t("videoWorkbench.promptPlaceholder")} />
+                                    <Input.TextArea ref={promptInputRef} variant="borderless" value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} className="!px-1 !py-1 !text-sm font-serif" placeholder={t("videoWorkbench.promptPlaceholder")} />
                                 </div>
                             </div>
 
                             <div className="min-w-0">
                                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                                    <span className="shrink-0 whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.14em] text-stone-400/90 dark:text-stone-500">{t("videoWorkbench.references")}</span>
+                                    <div className="flex min-w-0 items-center gap-2">
+                                        <span className="shrink-0 whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.14em] text-stone-400/90 dark:text-stone-500">
+                                            {t("videoWorkbench.references")} {references.length}/{VIDEO_MAX_REFERENCES}
+                                        </span>
+                                        {references.length > 2 ? (
+                                            <span className="truncate rounded-full bg-stone-200/70 px-2 py-0.5 text-[10px] text-stone-600 dark:bg-stone-800 dark:text-stone-300">
+                                                {t("videoWorkbench.autoReferenceModeHint")}
+                                            </span>
+                                        ) : null}
+                                    </div>
                                     <div className="flex flex-wrap items-center gap-1">
                                         <button type="button" className="flex h-7 shrink-0 items-center gap-1 rounded-full px-2 text-[11px] text-stone-500 transition-all duration-150 hover:bg-black/[.05] hover:text-stone-700 active:scale-95 dark:text-stone-400 dark:hover:bg-white/[.06] dark:hover:text-stone-200" onClick={() => void addReferencesFromClipboard()}>
                                             <ClipboardPaste className="size-3.5" />
@@ -454,6 +527,7 @@ export default function VideoPage() {
                                     }`}
                                     onDragEnter={handleReferenceDragEnter}
                                     onDragOver={(event) => {
+                                        if (draggedRefIndex !== null || !event.dataTransfer.types.includes("Files")) return;
                                         event.preventDefault();
                                         event.dataTransfer.dropEffect = "copy";
                                     }}
@@ -461,9 +535,51 @@ export default function VideoPage() {
                                     onDrop={handleReferenceDrop}
                                 >
                                     {references.map((item, index) => (
-                                        <div key={item.id} className="group relative size-18 shrink-0 overflow-hidden rounded-xl border border-stone-200/90 shadow-xs dark:border-stone-700/90">
+                                        <div
+                                            key={item.id}
+                                            draggable
+                                            onDragStart={(event) => {
+                                                setDraggedRefIndex(index);
+                                                event.dataTransfer.effectAllowed = "move";
+                                                event.dataTransfer.setData("text/plain", String(index));
+                                            }}
+                                            onDragEnd={() => {
+                                                setDraggedRefIndex(null);
+                                                setDragOverRefIndex(null);
+                                            }}
+                                            onDragOver={(event) => {
+                                                if (draggedRefIndex === null) return;
+                                                event.preventDefault();
+                                                event.stopPropagation();
+                                                setDragOverRefIndex(index);
+                                            }}
+                                            onDrop={(event) => {
+                                                if (draggedRefIndex === null) return;
+                                                event.preventDefault();
+                                                event.stopPropagation();
+                                                setReferences((value) => reorderListItem(value, draggedRefIndex, index));
+                                                setDraggedRefIndex(null);
+                                                setDragOverRefIndex(null);
+                                            }}
+                                            className={`group relative size-18 shrink-0 cursor-grab overflow-hidden rounded-xl border shadow-xs transition active:cursor-grabbing ${
+                                                dragOverRefIndex === index && draggedRefIndex !== index
+                                                    ? "border-stone-500 ring-2 ring-stone-400/50 dark:border-stone-400"
+                                                    : "border-stone-200/90 dark:border-stone-700/90"
+                                            }`}
+                                        >
                                             <img src={previewUrlFor(item.storageKey) || item.dataUrl} alt={item.name} className="size-full object-cover" />
-                                            <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 font-mono text-[9px] font-medium text-white backdrop-blur-sm">{index + 1}</span>
+                                            <Tooltip title={t("videoWorkbench.insertTokenTooltip", { index: index + 1 })}>
+                                                <button
+                                                    type="button"
+                                                    className="absolute left-1 top-1 rounded bg-black/65 px-1.5 py-0.5 font-mono text-[9px] font-medium text-white backdrop-blur-sm transition hover:bg-black/85"
+                                                    onClick={(event) => {
+                                                        event.stopPropagation();
+                                                        insertReferenceToken(index + 1);
+                                                    }}
+                                                >
+                                                    图{index + 1}
+                                                </button>
+                                            </Tooltip>
                                             <ReferenceOrderButtons index={index} total={references.length} onMove={(offset) => setReferences((value) => moveListItem(value, index, offset))} />
                                             <button
                                                 type="button"
@@ -524,7 +640,7 @@ export default function VideoPage() {
                         </div>
                         {results.length ? (
                             <div className="grid gap-3.5">
-                                {results.map((result) => (result.status === "success" && result.video ? <ResultVideoCard key={result.id} video={result.video} onDownload={downloadVideo} onSaveAsset={saveResultToAssets} /> : result.status === "failed" ? <FailedVideoCard key={result.id} error={result.error || t("workbench.generationFailed")} onRetry={retryResult} /> : <PendingVideoCard key={result.id} />))}
+                                {results.map((result) => (result.status === "success" && result.video ? <ResultVideoCard key={result.id} video={result.video} onDownload={downloadVideo} onSaveAsset={saveResultToAssets} /> : result.status === "failed" ? <FailedVideoCard key={result.id} error={result.error || t("workbench.generationFailed")} onRetry={retryResult} /> : <PendingVideoCard key={result.id} progress={result.progress} />))}
                             </div>
                         ) : (
                             <div className="flex min-h-[320px] flex-col items-center justify-center px-4 py-16 text-center lg:min-h-[520px]">
@@ -628,14 +744,20 @@ function ResultVideoCard({ video, onDownload, onSaveAsset }: { video: GeneratedV
     );
 }
 
-function PendingVideoCard() {
+function PendingVideoCard({ progress }: { progress?: number }) {
     const { t } = useTranslation();
+    const pct = typeof progress === "number" ? Math.min(100, Math.max(0, Math.round(progress))) : undefined;
     return (
         <div className="relative aspect-video overflow-hidden rounded-2xl bg-stone-100/50 dark:bg-stone-900/40">
             <div className="agent-shimmer absolute inset-0" />
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-xs text-stone-500 dark:text-stone-400">
                 <LoaderCircle className="size-5 animate-spin" />
-                <span>{t("workbench.generating")}</span>
+                <span>{pct && pct > 0 ? t("videoWorkbench.generatingProgress", { progress: pct }) : t("workbench.generating")}</span>
+                {pct && pct > 0 ? (
+                    <div className="h-1 w-36 overflow-hidden rounded-full bg-stone-200 dark:bg-stone-800">
+                        <div className="h-full bg-stone-600 transition-all duration-300 dark:bg-stone-300" style={{ width: `${pct}%` }} />
+                    </div>
+                ) : null}
             </div>
         </div>
     );
@@ -824,6 +946,14 @@ function moveListItem<T>(items: T[], index: number, offset: number) {
     if (targetIndex < 0 || targetIndex >= items.length) return items;
     const next = [...items];
     [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
+    return next;
+}
+
+function reorderListItem<T>(items: T[], fromIndex: number, toIndex: number) {
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= items.length || toIndex >= items.length) return items;
+    const next = [...items];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
     return next;
 }
 

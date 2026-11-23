@@ -87,6 +87,8 @@ export type CanvasNodeMetadata = {
     queuePosition?: number;
     /** 生成进度 0-1（生成中展示进度条）。 */
     progress?: number;
+    /** 视频任务进度 0-100（供 MCP 状态查询使用）。 */
+    videoProgress?: number;
     /** 预计等待秒数（排队中展示）。 */
     estimatedWaitSeconds?: number;
     videoTaskId?: string;
