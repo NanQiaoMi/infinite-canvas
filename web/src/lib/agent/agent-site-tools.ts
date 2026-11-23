@@ -4,7 +4,7 @@ import { nanoid } from "nanoid";
 
 import i18n from "@/i18n";
 import { fetchPrompts } from "@/services/api/prompts";
-import { VIDEO_MAX_REFERENCES } from "@/services/api/video";
+import { VIDEO_MAX_REFERENCES, classifyVideoError, type VideoErrorKind } from "@/services/api/video";
 import { resolveMediaUrl } from "@/services/file-storage";
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import type { ReferenceImage } from "@/types/image";
@@ -87,6 +87,8 @@ type GenerationStatusItem = {
     successCount?: number;
     failCount?: number;
     error?: string;
+    errorKind?: VideoErrorKind;
+    recoveryHint?: string;
 };
 
 export async function runSiteTool(name: SiteToolName, input: SiteToolInput, navigate: NavigateFunction, context: SiteToolContext = {}): Promise<unknown> {
@@ -143,6 +145,7 @@ function collectGenerationStatus(input: SiteToolInput, canvasSnapshot?: CanvasAg
             const resultUrl = status === "succeeded" && typeof metadata.content === "string" && !metadata.content.startsWith("data:")
                 ? metadata.content
                 : undefined;
+            const classified = status === "failed" && metadata.errorDetails ? classifyVideoError(metadata.errorDetails) : undefined;
             tasks.push({
                 id: node.id,
                 source: "canvas",
@@ -154,6 +157,7 @@ function collectGenerationStatus(input: SiteToolInput, canvasSnapshot?: CanvasAg
                 ...(progress !== undefined ? { progress } : {}),
                 ...(resultUrl ? { resultUrl } : {}),
                 error: metadata.errorDetails,
+                ...(classified ? { errorKind: classified.kind, recoveryHint: classified.hint } : {}),
             });
         });
     }
@@ -162,7 +166,13 @@ function collectGenerationStatus(input: SiteToolInput, canvasSnapshot?: CanvasAg
         useWorkbenchAgentStore.getState().tasks.forEach((task) => {
             if ((scope === "image" || scope === "video") && task.kind !== scope) return;
             if (scope === "canvas" || (taskId && task.id !== taskId)) return;
-            tasks.push({ ...task, source: task.kind, prompt: compactPrompt(task.prompt) });
+            const classified = task.status === "failed" && task.error ? classifyVideoError(task.error) : undefined;
+            tasks.push({
+                ...task,
+                source: task.kind,
+                prompt: compactPrompt(task.prompt),
+                ...(classified ? { errorKind: classified.kind, recoveryHint: classified.hint } : {}),
+            });
         });
     }
 
@@ -652,7 +662,24 @@ async function inspectVideoFrames(input: SiteToolInput, context: SiteToolContext
         const node = snapshot.nodes.find((item) => item.id === nodeId);
         if (!node) throw new Error(siteText("nodeNotFound", { id: nodeId }));
         videoUrl = await resolveNodeVideoUrl(node);
-        if (!videoUrl) throw new Error(siteText("nodeNoMedia", { title: node.title || node.id }));
+        if (!videoUrl) {
+            if (node.metadata?.status === "loading") {
+                const progress = typeof node.metadata.videoProgress === "number"
+                    ? node.metadata.videoProgress
+                    : typeof node.metadata.progress === "number"
+                      ? Math.round(node.metadata.progress * 100)
+                      : undefined;
+                return {
+                    ok: false,
+                    pending: true,
+                    status: "running",
+                    nodeId: node.id,
+                    ...(progress !== undefined ? { progress } : {}),
+                    message: "视频仍在生成中，请先调用 generation_get_status(waitSeconds=25) 等待完成后再抽帧质检",
+                };
+            }
+            throw new Error(siteText("nodeNoMedia", { title: node.title || node.id }));
+        }
         sourceKind = "canvas";
         resolvedId = node.id;
         title = node.title;
