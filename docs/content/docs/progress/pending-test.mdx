@@ -7,6 +7,9 @@ description: Implemented changes that still need manual verification
 
 The current release needs manual verification in these areas:
 
+- 画布多镜头分镜批量编排（`canvas_create_storyboard_flow`）：
+  1. 批量生成分镜节点与共享定妆照连线：传 2–4 镜分镜提示词并设置 `sharedReferenceNodeIds`（角色定妆照/场景图），画布上按行纵排生成对应提示词节点和配置节点、自动完成连线并选中所有配置节点；当单镜去重合并后超过 2 个参考节点时自动使用 `reference` 模式，超过 10 个则报错拦截；
+  2. 串行首镜触发（`autoRunFirst: true`）：只自动启动第 1 镜生成，其余镜头保持待命状态，待首镜质检并截取尾帧连线后再逐镜运行。
 - MCP 实战衔接与本地安装体验打磨：
   1. 本地开发版一键安装（`install-mcp --local`）：在 `canvas-agent` 构建出 `dist/index.js` 后运行 `node dist/index.js install-mcp --local`（或 `--dry-run --local`），无需发 npm 即可直接将本地产物写入 Claude Code / Codex / Antigravity 配置，并在 MCP 自检通过后打印一键连接地址；若缺少 `dist/index.js` 则给出先执行 `npm run build` 的明确提示；
   2. `site_navigate` 跳转画布就绪等待：先调用 `canvas_list_projects` 获取画布 ID，调用 `site_navigate({ path: "/canvas/<id>" })` 后紧接着调用 `canvas_get_state` 或 `canvas_create_asset_nodes`，`site_navigate` 会等待目标画布完成加载（最长 5 秒）并主动同步快照后返回 `canvasReady: true`，不再因页面尚在切换而报「请先打开画布」；
