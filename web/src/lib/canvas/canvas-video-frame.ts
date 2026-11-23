@@ -1,3 +1,5 @@
+export const VIDEO_FRAME_STEP_TIMEOUT_MS = 15_000;
+
 export type VideoFramePosition = "first" | "last" | "current" | "time";
 
 export type ContactSheetLayout = {
@@ -240,30 +242,66 @@ function canvasToJpegBase64(canvas: HTMLCanvasElement): EncodedMcpImage {
     };
 }
 
-function loadImageElement(source: string): Promise<HTMLImageElement> {
+function loadImageElement(source: string, timeoutMs = VIDEO_FRAME_STEP_TIMEOUT_MS): Promise<HTMLImageElement> {
     return new Promise((resolve, reject) => {
         const img = new Image();
+        let settled = false;
+        const cleanup = () => {
+            clearTimeout(timer);
+            img.onload = null;
+            img.onerror = null;
+        };
+        const timer = setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            reject(new Error("Timed out loading image"));
+        }, timeoutMs);
         if (!source.startsWith("data:") && !source.startsWith("blob:")) {
             img.crossOrigin = "anonymous";
         }
-        img.onload = () => resolve(img);
-        img.onerror = () => reject(new Error("Failed to load image"));
+        img.onload = () => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            resolve(img);
+        };
+        img.onerror = () => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            reject(new Error("Failed to load image"));
+        };
         img.src = source;
     });
 }
 
-function waitForVideo(video: HTMLVideoElement, eventName: "loadedmetadata" | "loadeddata" | "seeked") {
+function waitForVideo(video: HTMLVideoElement, eventName: "loadedmetadata" | "loadeddata" | "seeked", timeoutMs = VIDEO_FRAME_STEP_TIMEOUT_MS) {
     return new Promise<void>((resolve, reject) => {
-        const finish = () => {
+        let settled = false;
+        const cleanup = () => {
+            clearTimeout(timer);
             video.removeEventListener(eventName, finish);
             video.removeEventListener("error", fail);
+        };
+        const finish = () => {
+            if (settled) return;
+            settled = true;
+            cleanup();
             resolve();
         };
         const fail = () => {
-            video.removeEventListener(eventName, finish);
-            video.removeEventListener("error", fail);
+            if (settled) return;
+            settled = true;
+            cleanup();
             reject(new Error("Failed to read video frame"));
         };
+        const timer = setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            reject(new Error(`Timed out waiting for video ${eventName}`));
+        }, timeoutMs);
         video.addEventListener(eventName, finish);
         video.addEventListener("error", fail);
     });

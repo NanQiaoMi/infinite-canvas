@@ -28,7 +28,12 @@ type VideoResponse = {
 type ApiVideoResponse = VideoResponse | { code?: number | string; data?: VideoResponse | null; msg?: string; message?: string; error?: { message?: string } };
 type ApiEnvelope<T> = T | { code?: number | string; data?: T | null; msg?: string; message?: string; error?: { message?: string } };
 type VideoProgressInfo = { progress?: number; remoteStatus?: string };
-type RequestOptions = { signal?: AbortSignal; onProgress?: (info: VideoProgressInfo) => void };
+type RequestOptions = {
+    signal?: AbortSignal;
+    onProgress?: (info: VideoProgressInfo) => void;
+    pollDelayMs?: number;
+    backoffFn?: (consecutiveErrors: number) => number;
+};
 type VideoMediaOptions = RequestOptions & { videos?: ReferenceVideo[]; audios?: ReferenceAudio[] };
 const apiText = (key: string, options?: Record<string, unknown>) => i18n.t(`apiErrors.${key}`, options);
 
@@ -36,6 +41,10 @@ export const VIDEO_MAX_REFERENCES = 10;
 export const VIDEO_MAX_REFERENCE_BYTES = 40 * 1024 * 1024;
 export const VIDEO_MAX_REFERENCE_TOTAL_BYTES = 100 * 1024 * 1024;
 export const VIDEO_POLL_MAX_ATTEMPTS = 240;
+export const VIDEO_POLL_MAX_CONSECUTIVE_ERRORS = 5;
+export const VIDEO_DOWNLOAD_MAX_RETRIES = 2;
+
+export type VideoErrorKind = "transient" | "auth_quota" | "content_refused" | "invalid_input" | "canceled" | "unknown";
 
 export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string };
 export type VideoGenerationTask = { id: string; provider: "openai" | "gemini" | "plugin"; model: string };
@@ -112,19 +121,104 @@ export function validateVideoReferenceLimits(items: Array<{ name?: string; bytes
     }
 }
 
+/** 计算视频轮询连续失败后的退避等待时间（3s → 6s → 12s → 15s）。 */
+export function pollBackoffMs(consecutiveErrors: number): number {
+    return Math.min(15_000, 3_000 * Math.pow(2, Math.max(0, consecutiveErrors - 1)));
+}
+
+/** 将视频创建/轮询错误归类为可指导自动重试或人工处理的类别。 */
+export function classifyVideoError(error: unknown): { kind: VideoErrorKind; retryable: boolean; hint: string } {
+    if (axios.isCancel(error) || (error instanceof DOMException && error.name === "AbortError")) {
+        return { kind: "canceled", retryable: false, hint: "请求已取消，无需重试。" };
+    }
+    const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+    const message = (error instanceof Error ? error.message : String(error || "")).toLowerCase();
+
+    if (
+        status === 401
+        || status === 403
+        || /401|403|鉴权|authentication|api key|cookie|session|未授权|unauthorized|forbidden|账号异常|quota|额度不足|insufficient/.test(message)
+    ) {
+        return { kind: "auth_quota", retryable: false, hint: "请检查渠道 API Key、Cookie 登录态或账户额度，再重试。" };
+    }
+    if (
+        /安全|审核|拒绝|违禁|policy|safety|nsfw|content.?filter|refused|blocked|moderation/.test(message)
+    ) {
+        return { kind: "content_refused", retryable: false, hint: "内容可能触发安全策略，请调整提示词或更换参考图后再生成。" };
+    }
+    if (
+        status === 400
+        || status === 413
+        || status === 422
+        || /400|413|422|最多|超过|invalid|missing|unsupported|too large|must be|参数无效|提示词/.test(message)
+    ) {
+        return { kind: "invalid_input", retryable: false, hint: "输入参数或参考素材超限，请精简素材或修正参数后重试。" };
+    }
+    if (
+        status === 408
+        || status === 429
+        || (typeof status === "number" && status >= 500)
+        || /408|429|500|502|503|504|err_network|network|timeout|timed out|限流|rate.?limit|gateway|繁忙|unavailable|econnreset|socket/.test(message)
+    ) {
+        return { kind: "transient", retryable: true, hint: "上游临时波动或限流，可继续查询原任务状态或退避重试。" };
+    }
+    return { kind: "unknown", retryable: false, hint: "请查看详细错误信息并检查模型与渠道状态。" };
+}
+
+/** 带短退避与非空校验的视频 Blob 下载器。 */
+export async function downloadVideoBlobWithRetry(
+    fetcher: () => Promise<Blob>,
+    maxRetries = VIDEO_DOWNLOAD_MAX_RETRIES,
+    signal?: AbortSignal,
+    retryDelayMs = 1500,
+): Promise<Blob> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+        if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+        try {
+            const blob = await fetcher();
+            if (!blob || !blob.size) throw new Error(apiText("videoDownloadFailed"));
+            await assertVideoBlob(blob);
+            return blob;
+        } catch (error) {
+            if (axios.isCancel(error) || (error instanceof DOMException && error.name === "AbortError")) throw error;
+            if (error instanceof Error && error.name === "VideoJsonPayloadError") throw error;
+            lastError = error;
+            if (attempt < maxRetries) await delay(retryDelayMs, signal);
+        }
+    }
+    throw lastError instanceof Error ? lastError : new Error(apiText("videoDownloadFailed"));
+}
+
 export async function requestVideoGeneration(config: AiConfig, prompt: string, references: ReferenceImage[] = [], options?: VideoMediaOptions): Promise<VideoGenerationResult> {
     return waitForVideoGenerationTask(config, await createVideoGenerationTask(config, prompt, references, options), options);
 }
 
 export async function waitForVideoGenerationTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationResult> {
+    let consecutiveErrors = 0;
+    const pollDelayMs = options?.pollDelayMs ?? 2500;
+    const backoff = options?.backoffFn ?? pollBackoffMs;
     for (let attempt = 0; attempt < VIDEO_POLL_MAX_ATTEMPTS; attempt += 1) {
         if (options?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
-        const state = await pollVideoGenerationTask(config, task, options);
+        let state: VideoGenerationTaskState;
+        try {
+            state = await pollVideoGenerationTask(config, task, options);
+            consecutiveErrors = 0;
+        } catch (error) {
+            const classified = classifyVideoError(error);
+            if (classified.kind === "canceled" || classified.kind === "auth_quota" || classified.kind === "invalid_input") {
+                throw error;
+            }
+            consecutiveErrors += 1;
+            if (consecutiveErrors > VIDEO_POLL_MAX_CONSECUTIVE_ERRORS) throw error;
+            await delay(backoff(consecutiveErrors), options?.signal);
+            continue;
+        }
         if (state.status === "completed") return state.result;
         if (state.status === "failed") throw videoTaskFailed(state.error);
         options?.onProgress?.({ progress: state.progress, remoteStatus: state.remoteStatus });
         if (attempt === VIDEO_POLL_MAX_ATTEMPTS - 1) throw new Error(apiText("videoTimeout", { provider: "" }));
-        await delay(2500, options?.signal);
+        await delay(pollDelayMs, options?.signal);
     }
     throw new Error(apiText("videoTimeout", { provider: "" }));
 }
@@ -223,11 +317,17 @@ export async function storeGeneratedVideo(result: VideoGenerationResult): Promis
 }
 
 async function createMuseVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], options?: VideoMediaOptions): Promise<VideoGenerationTask> {
-    const imageDataUrls = await Promise.all(references.map((image) => imageToDataUrl(image)));
+    const rawImageDataUrls = await Promise.all(references.map((image) => imageToDataUrl(image)));
     const videoFiles = await Promise.all((options?.videos || []).map((video) => referenceMediaToFile(video, "ref.mp4", "invalidReferenceVideo", options)));
     const audioFiles = await Promise.all((options?.audios || []).map((audio) => referenceMediaToFile(audio, "ref.mp3", "invalidReferenceAudio", options)));
     const videoDataUrls = await Promise.all(videoFiles.map((file) => readFileAsDataUrl(file)));
     const audioDataUrls = await Promise.all(audioFiles.map((file) => readFileAsDataUrl(file)));
+
+    const otherMediaBytes = [
+        ...videoFiles.map((file, i) => file.size || estimateDataUrlBytes(videoDataUrls[i] || "")),
+        ...audioFiles.map((file, i) => file.size || estimateDataUrlBytes(audioDataUrls[i] || "")),
+    ].reduce((sum, bytes) => sum + bytes, 0);
+    const imageDataUrls = await compressOversizedReferenceImages(rawImageDataUrls, otherMediaBytes);
 
     validateVideoReferenceLimits([
         ...imageDataUrls.map((dataUrl, i) => ({ name: references[i]?.name || `image_${i + 1}`, bytes: estimateDataUrlBytes(dataUrl) })),
@@ -319,9 +419,12 @@ async function pollOpenAIVideoTask(config: AiConfig, task: VideoGenerationTask, 
         const url = videoResultUrl(video);
         if (url) return { status: "completed", result: await videoResultFromUrl(url, options) };
         if (status === "completed" || status === "succeeded" || status === "success" || status === "done") {
-            const content = await axios.get<Blob>(aiApiUrl(config, `/videos/${task.id}/content`), { headers: aiHeaders(config), responseType: "blob", signal: options?.signal });
-            await assertVideoBlob(content.data);
-            return { status: "completed", result: { blob: content.data } };
+            const blob = await downloadVideoBlobWithRetry(
+                async () => (await axios.get<Blob>(aiApiUrl(config, `/videos/${task.id}/content`), { headers: aiHeaders(config), responseType: "blob", signal: options?.signal })).data,
+                VIDEO_DOWNLOAD_MAX_RETRIES,
+                options?.signal,
+            );
+            return { status: "completed", result: { blob } };
         }
         return {
             status: "pending",
@@ -335,9 +438,12 @@ async function pollOpenAIVideoTask(config: AiConfig, task: VideoGenerationTask, 
 
 async function videoResultFromUrl(url: string, options?: RequestOptions): Promise<VideoGenerationResult> {
     try {
-        const response = await axios.get<Blob>(withLocalProxy(url), { responseType: "blob", signal: options?.signal });
-        await assertVideoBlob(response.data);
-        return { blob: response.data };
+        const blob = await downloadVideoBlobWithRetry(
+            async () => (await axios.get<Blob>(withLocalProxy(url), { responseType: "blob", signal: options?.signal })).data,
+            VIDEO_DOWNLOAD_MAX_RETRIES,
+            options?.signal,
+        );
+        return { blob };
     } catch (error) {
         if (axios.isCancel(error) || options?.signal?.aborted) throw error;
         return { url, mimeType: "video/mp4" };
@@ -549,8 +655,64 @@ async function assertVideoBlob(blob: Blob) {
     } catch {
         return;
     }
-    if (typeof payload.code === "number" && payload.code !== 0) throw new Error(readApiErrorMessage(payload) || apiText("videoDownloadFailed"));
-    if (payload.error?.message) throw new Error(readApiErrorMessage(payload.error.message) || payload.error.message);
+    if (typeof payload.code === "number" && payload.code !== 0) {
+        const err = new Error(readApiErrorMessage(payload) || apiText("videoDownloadFailed"));
+        err.name = "VideoJsonPayloadError";
+        throw err;
+    }
+    if (payload.error?.message) {
+        const err = new Error(readApiErrorMessage(payload.error.message) || payload.error.message);
+        err.name = "VideoJsonPayloadError";
+        throw err;
+    }
+}
+
+async function compressOversizedReferenceImages(dataUrls: string[], extraBytes = 0): Promise<string[]> {
+    if (!dataUrls.length || typeof document === "undefined") return dataUrls;
+    const isOversized = (urls: string[]) => {
+        const sizes = urls.map(estimateDataUrlBytes);
+        return sizes.some((b) => b > VIDEO_MAX_REFERENCE_BYTES) || sizes.reduce((sum, b) => sum + b, extraBytes) > VIDEO_MAX_REFERENCE_TOTAL_BYTES;
+    };
+    if (!isOversized(dataUrls)) return dataUrls;
+
+    let current = [...dataUrls];
+    for (const pass of [{ maxEdge: 2048, quality: 0.88 }, { maxEdge: 1600, quality: 0.8 }]) {
+        const totalOversized = current.reduce((sum, url) => sum + estimateDataUrlBytes(url), extraBytes) > VIDEO_MAX_REFERENCE_TOTAL_BYTES;
+        current = await Promise.all(
+            current.map((url) => {
+                if (!url.startsWith("data:image/")) return url;
+                if (estimateDataUrlBytes(url) <= VIDEO_MAX_REFERENCE_BYTES && !totalOversized) return url;
+                return compressDataUrlImage(url, pass.maxEdge, pass.quality).catch(() => url);
+            }),
+        );
+        if (!isOversized(current)) break;
+    }
+    return current;
+}
+
+function compressDataUrlImage(dataUrl: string, maxEdge: number, quality: number): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+            const w = Math.max(1, img.naturalWidth || 1);
+            const h = Math.max(1, img.naturalHeight || 1);
+            const scale = Math.min(1, maxEdge / Math.max(w, h));
+            const canvas = document.createElement("canvas");
+            canvas.width = Math.max(1, Math.round(w * scale));
+            canvas.height = Math.max(1, Math.round(h * scale));
+            const ctx = canvas.getContext("2d");
+            if (!ctx) {
+                reject(new Error("Canvas unavailable"));
+                return;
+            }
+            ctx.fillStyle = "#ffffff";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            resolve(canvas.toDataURL("image/jpeg", quality));
+        };
+        img.onerror = () => reject(new Error("Image load failed"));
+        img.src = dataUrl;
+    });
 }
 
 function isPublicMediaUrl(value: string) {
