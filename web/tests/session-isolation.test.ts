@@ -14,7 +14,7 @@ const resolveCallback = <T>(promise: Promise<T>, callback?: (err: unknown, resul
 
 await localforage.defineDriver({
     _driver: "memoryStorage",
-    _support: () => true,
+    _support: () => Promise.resolve(true),
     _initStorage(options) {
         const storeName = options?.storeName || "keyvaluepairs";
         instanceStores.set(this, storeName);
