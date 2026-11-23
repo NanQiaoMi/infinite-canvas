@@ -128,6 +128,65 @@ export async function fetchAgentJson<T>(endpoint: string, token: string, path: s
     return data;
 }
 
+export type AgentConnectionDiagnosis =
+    | { status: "ok"; protocolVersion?: number }
+    | { status: "unreachable"; detail?: string }
+    | { status: "outdated"; protocolVersion?: number }
+    | { status: "invalid_token"; protocolVersion?: number }
+    | { status: "origin_rejected"; protocolVersion?: number; detail?: string };
+
+/** 在建立 SSE 前依次探测 /health 与 /auth/check，区分服务未启动、版本过旧、Token 错误与来源被拒。 */
+export async function diagnoseAgentConnection(
+    endpoint: string,
+    token: string,
+    expectedProtocolVersion: number,
+    options: { timeoutMs?: number; fetchImpl?: typeof fetch } = {},
+): Promise<AgentConnectionDiagnosis> {
+    const base = endpoint.trim().replace(/\/$/, "");
+    const doFetch = options.fetchImpl ?? fetch;
+    const timeoutMs = options.timeoutMs ?? 2500;
+    const timedFetch = async (url: string) => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            return await doFetch(url, { signal: controller.signal });
+        } finally {
+            clearTimeout(timer);
+        }
+    };
+
+    let healthVersion: number | undefined;
+    try {
+        const healthRes = await timedFetch(`${base}/health`);
+        if (!healthRes.ok) return { status: "unreachable", detail: `HTTP ${healthRes.status}` };
+        const health = (await healthRes.json().catch(() => null)) as { ok?: boolean; protocolVersion?: number } | null;
+        if (!health?.ok) return { status: "unreachable" };
+        healthVersion = typeof health.protocolVersion === "number" ? health.protocolVersion : undefined;
+        if (healthVersion !== undefined && healthVersion < expectedProtocolVersion) {
+            return { status: "outdated", protocolVersion: healthVersion };
+        }
+    } catch (error) {
+        return { status: "unreachable", detail: error instanceof Error ? error.message : String(error || "") };
+    }
+
+    try {
+        const authRes = await timedFetch(`${base}/auth/check?token=${encodeURIComponent(token)}`);
+        if (authRes.status === 401) return { status: "invalid_token", protocolVersion: healthVersion };
+        if (authRes.status === 403) return { status: "origin_rejected", protocolVersion: healthVersion };
+        if (authRes.ok || authRes.status === 404) return { status: "ok", protocolVersion: healthVersion };
+        return { status: "unreachable", detail: `HTTP ${authRes.status}` };
+    } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") {
+            return { status: "unreachable", detail: error.message };
+        }
+        return {
+            status: "origin_rejected",
+            protocolVersion: healthVersion,
+            detail: error instanceof Error ? error.message : String(error || ""),
+        };
+    }
+}
+
 export async function discoverAgentConfig(endpoint: string) {
     try {
         const res = await fetch(`${endpoint}/config`);

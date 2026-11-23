@@ -16,7 +16,7 @@ import { useAgentSkillStore } from "@/stores/use-agent-skill-store";
 import { useShallow } from "zustand/react/shallow";
 import { isAgentUrl, useAgentStore, type AgentAttachment, type AgentCanvasContext, type AgentCanvasReference, type AgentChatItem, type AgentConversationState, type AgentModel, type AgentPendingApproval, type AgentPendingToolCall, type AgentPermissionMode, type AgentReasoningEffort, type AgentRuntimeName } from "@/stores/use-agent-store";
 import { isAgentThreadEvent as isCurrentThreadToolCall } from "@/lib/agent/agent-event-formatters";
-import { activateAgentClient, AgentApiError, agentPath, discoverAgentConfig, fetchAgentJson, interruptCodexTurn, postCodexApproval, postState, resetAgentThread } from "@/services/api/canvas-agent";
+import { activateAgentClient, AgentApiError, agentPath, diagnoseAgentConnection, discoverAgentConfig, fetchAgentJson, interruptCodexTurn, postCodexApproval, postState } from "@/services/api/canvas-agent";
 import { AgentChatTimeline, AgentTaskProgress, AgentUsageBar } from "./agent-chat";
 import { AgentChatComposer } from "./agent-chat-composer";
 import { AgentConnectView } from "./agent-connect-view";
@@ -51,6 +51,7 @@ const MESSAGE_PREVIEW_LONG_EDGE = 192;
 const MESSAGE_PREVIEW_MAX_LENGTH = 500_000;
 const DEFAULT_AGENT_URL = "http://127.0.0.1:17371";
 const AGENT_PROTOCOL_VERSION = 7;
+const INITIAL_RETRY_DELAYS_MS = [1000, 2000, 4000];
 const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000, 16000, 30000];
 const AGENT_REASONING_EFFORTS = new Set<AgentReasoningEffort>(["minimal", "low", "medium", "high", "xhigh", "max", "ultra"]);
 
@@ -128,6 +129,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
     const [clientReady, setClientReady] = useState(false);
     const [reconnectNonce, setReconnectNonce] = useState(0);
     const reconnectAttemptRef = useRef(0);
+    const initialRetryAttemptRef = useRef(0);
     const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const reconnectNow = () => {
         if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
@@ -170,11 +172,14 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
     useEffect(() => {
         pendingToolRef.current = pendingTool;
     }, [pendingTool]);
+    const headlessRef = useRef(Boolean(headless));
+    headlessRef.current = Boolean(headless);
     useEffect(() => () => attachmentUrlsRef.current.forEach((url) => URL.revokeObjectURL(url)), []);
 
     useEffect(() => {
         if (!clientReady || !enabled || !token.trim()) {
             reconnectAttemptRef.current = 0;
+            initialRetryAttemptRef.current = 0;
             return;
         }
         localStorage.setItem("canvas-agent-url", endpoint);
@@ -182,6 +187,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
         const clientId = clientIdRef.current;
         let disposed = false;
         let protocolRejected = false;
+        let activeSource: EventSource | null = null;
         let eventQueue = Promise.resolve();
         const isCurrentConnection = () => !disposed && clientIdRef.current === clientId;
         const enqueueEvent = (task: () => void | Promise<void>) => {
@@ -191,21 +197,24 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
                 if (isCurrentConnection()) addEventLog(rt("conversationSyncFailed"), error);
             });
         };
-        const source = new EventSource(`${endpoint}/events?token=${encodeURIComponent(token)}&clientId=${encodeURIComponent(clientId)}`);
-        source.addEventListener("hello", (event) => {
-            if (!isCurrentConnection()) return;
-            const hello = parseEventData<AgentHelloEvent>(event);
-            if (hello?.protocolVersion !== AGENT_PROTOCOL_VERSION) {
-                const text = rt("agentOutdated");
-                protocolRejected = true;
-                source.close();
-                connectedRef.current = false;
-                setAgentState({ enabled: false, connected: false, waiting: false, sending: false, activity: rt("restartRequired"), connectError: text, reconnectAttempt: 0, silentConnect: false, fragmentBootstrap: false, pendingTool: null, pendingApprovals: [] });
-                useAgentSkillStore.getState().reset();
-                addEventLog(rt("versionMismatch"), text, hello);
-                if (!headless) message.error(text);
-                return;
-            }
+        const openEventSource = () => {
+            const source = new EventSource(`${endpoint}/events?token=${encodeURIComponent(token)}&clientId=${encodeURIComponent(clientId)}`);
+            activeSource = source;
+            source.addEventListener("hello", (event) => {
+                if (!isCurrentConnection()) return;
+                const hello = parseEventData<AgentHelloEvent>(event);
+                if (hello?.protocolVersion !== AGENT_PROTOCOL_VERSION) {
+                    const text = rt("agentOutdated");
+                    protocolRejected = true;
+                    source.close();
+                    activeSource = null;
+                    connectedRef.current = false;
+                    setAgentState({ enabled: false, connected: false, waiting: false, sending: false, activity: rt("restartRequired"), connectError: text, reconnectAttempt: 0, silentConnect: false, fragmentBootstrap: false, pendingTool: null, pendingApprovals: [] });
+                    useAgentSkillStore.getState().reset();
+                    addEventLog(rt("versionMismatch"), text, hello);
+                    if (!headlessRef.current) message.error(text);
+                    return;
+                }
             if (hello?.workspace?.runtime) syncRuntime(hello.workspace.runtime);
             const codex = hello?.codex;
             const busy = Boolean(codex?.busy);
@@ -237,18 +246,10 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
                 messages,
                 pendingApprovals,
             });
-            if (!headless) message.success(rt("localAgentConnected"));
+            if (!headlessRef.current) message.success(rt("localAgentConnected"));
             void postState(endpoint, token, clientId, canvasContextRef.current?.snapshot || null);
             if (document.visibilityState === "visible" && document.hasFocus()) void activateAgentClient(endpoint, token, clientId);
-            if (!busy && !nextThreadId && (!hello?.conversation || hello.conversation.status === "idle")) {
-                void resetAgentThread(endpoint, token, clientId, permissionMode)
-                    .then((result) => result.conversation && applyConversationState(result.conversation))
-                    .catch((error) => {
-                        const state = agentErrorState(error);
-                        if (state) applyConversationState(state);
-                        addEventLog(rt("conversationInitFailed"), error);
-                    });
-            }
+            initialRetryAttemptRef.current = 0;
         });
         source.addEventListener("codex_state", (event) => {
             const data = parseEventData<AgentCodexState>(event);
@@ -399,7 +400,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
             const text = rt(wasConnected ? "connectionLostDescription" : "connectionFailedDescription");
             if (!reconnecting && (!errorLoggedRef.current || wasConnected)) {
                 addEventLog(rt(wasConnected ? "connectionLost" : "connectionFailed"), text);
-                if (!headless && !silent) message.error(text);
+                if (!headlessRef.current && !silent) message.error(text);
             }
             errorLoggedRef.current = true;
             connectedRef.current = false;
@@ -407,6 +408,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
             useAgentSkillStore.getState().reset();
             if (wasConnected) {
                 source.close();
+                activeSource = null;
                 const attempt = ++reconnectAttemptRef.current;
                 const delay = RECONNECT_DELAYS_MS[Math.min(attempt, RECONNECT_DELAYS_MS.length) - 1];
                 setAgentState({
@@ -438,13 +440,79 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
                 pendingApprovals: [],
             });
             source.close();
+            activeSource = null;
             setAgentState({ enabled: false });
         };
+        };
+        const startConnection = async () => {
+            const diagnosis = await diagnoseAgentConnection(endpoint, token, AGENT_PROTOCOL_VERSION);
+            if (!isCurrentConnection()) return;
+            if (diagnosis.status === "ok") {
+                initialRetryAttemptRef.current = 0;
+                openEventSource();
+                return;
+            }
+            const reconnecting = reconnectAttemptRef.current > 0;
+            const storeState = useAgentStore.getState();
+            const silent = storeState.silentConnect && !storeState.fragmentBootstrap && !reconnecting;
+            if (diagnosis.status === "outdated") {
+                const text = rt("agentOutdated");
+                protocolRejected = true;
+                reconnectAttemptRef.current = 0;
+                initialRetryAttemptRef.current = 0;
+                connectedRef.current = false;
+                setAgentState({ enabled: false, connected: false, waiting: false, sending: false, activity: rt("restartRequired"), connectError: text, reconnectAttempt: 0, silentConnect: false, fragmentBootstrap: false, pendingTool: null, pendingApprovals: [] });
+                useAgentSkillStore.getState().reset();
+                addEventLog(rt("versionMismatch"), text, diagnosis);
+                if (!headlessRef.current) message.error(text);
+                return;
+            }
+            if (diagnosis.status === "invalid_token" || diagnosis.status === "origin_rejected") {
+                const text = rt(diagnosis.status === "invalid_token" ? "invalidToken" : "originRejected");
+                reconnectAttemptRef.current = 0;
+                initialRetryAttemptRef.current = 0;
+                connectedRef.current = false;
+                setAgentState({ enabled: false, connected: false, waiting: false, sending: false, activity: rt("connectionFailed"), connectError: silent ? "" : text, reconnectAttempt: 0, silentConnect: false, fragmentBootstrap: false, pendingTool: null, pendingApprovals: [] });
+                useAgentSkillStore.getState().reset();
+                addEventLog(rt("connectionFailed"), text, diagnosis);
+                if (!headlessRef.current && !silent) message.error(text);
+                return;
+            }
+            if (reconnecting) {
+                const attempt = ++reconnectAttemptRef.current;
+                const delay = RECONNECT_DELAYS_MS[Math.min(attempt, RECONNECT_DELAYS_MS.length) - 1];
+                setAgentState({ activity: rt("reconnecting", { attempt, seconds: delay / 1000 }), connected: false, reconnectAttempt: attempt });
+                reconnectTimerRef.current = setTimeout(() => {
+                    reconnectTimerRef.current = null;
+                    setReconnectNonce((nonce) => nonce + 1);
+                }, delay);
+                return;
+            }
+            if (initialRetryAttemptRef.current < INITIAL_RETRY_DELAYS_MS.length) {
+                const attempt = ++initialRetryAttemptRef.current;
+                const delay = INITIAL_RETRY_DELAYS_MS[attempt - 1];
+                setAgentState({ connected: false, activity: rt("initialRetrying", { seconds: Math.round(delay / 1000), attempt, max: INITIAL_RETRY_DELAYS_MS.length }) });
+                reconnectTimerRef.current = setTimeout(() => {
+                    reconnectTimerRef.current = null;
+                    if (isCurrentConnection()) void startConnection();
+                }, delay);
+                return;
+            }
+            initialRetryAttemptRef.current = 0;
+            connectedRef.current = false;
+            const text = rt("agentUnreachable");
+            setAgentState({ enabled: false, connected: false, waiting: false, sending: false, activity: rt("offline"), connectError: silent ? "" : text, reconnectAttempt: 0, silentConnect: false, fragmentBootstrap: false, pendingTool: null, pendingApprovals: [] });
+            addEventLog(rt("connectionFailed"), text, diagnosis);
+            if (!headlessRef.current && !silent) message.error(text);
+        };
+        void startConnection();
         return () => {
             disposed = true;
-            source.close();
+            activeSource?.close();
+            activeSource = null;
             if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
             reconnectTimerRef.current = null;
+            initialRetryAttemptRef.current = 0;
             connectedRef.current = false;
             loadThreadsSequenceRef.current += 1;
             useAgentSkillStore.getState().reset();
@@ -452,15 +520,15 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
     }, [applyConversationState, applyWorkspaceChange, clientReady, enabled, endpoint, loadSkills, loadThreads, message, reconnectNonce, setAgentState, token]);
 
     useEffect(() => {
-        if (connected) void loadThreads();
-    }, [connected, loadThreads]);
+        if (connected && !headless && activeTab !== "setup") void loadThreads();
+    }, [activeTab, connected, headless, loadThreads]);
 
     useEffect(() => {
-        if (connected) void loadSkills(endpoint, token);
-    }, [connected, endpoint, loadSkills, runtime, token]);
+        if (connected && !headless && activeTab !== "setup") void loadSkills(endpoint, token);
+    }, [activeTab, connected, endpoint, headless, loadSkills, runtime, token]);
 
     useEffect(() => {
-        if (!connected) return;
+        if (!connected || headless || activeTab === "setup") return;
         void fetchAgentJson<AgentModelsResponse>(endpoint, token, agentPath("/models")).then(({ data = [] }) => {
             const names = new Set<string>();
             const models = data.flatMap((item) => {
@@ -481,7 +549,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
             localStorage.setItem(`canvas-agent-reasoning-effort:${runtime}`, nextEffort);
             setAgentState({ models, model: current.model, reasoningEffort: nextEffort });
         }).catch((error) => addEventLog(rt("modelListFailed"), error));
-    }, [connected, endpoint, runtime, setAgentState, token]);
+    }, [activeTab, connected, endpoint, headless, runtime, setAgentState, token]);
 
     useEffect(() => {
         if (!connected) return;
