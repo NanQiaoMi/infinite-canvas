@@ -36,6 +36,9 @@ beforeAll(() => {
                 }
                 return Response.json({ id: "c-1", choices: [{ message: { role: "assistant", content: "hello non-stream" } }] });
             }
+            if (url.pathname.endsWith("/api/image-tasks/generations")) {
+                return Response.json({ id: "task-1", status: "queued", terminal: false });
+            }
             return Response.json({ created: 1, data: [{ b64_json: "QUJD" }] });
         },
     });
@@ -278,9 +281,10 @@ describe("中转与额度", () => {
         upstreamCalls.length = 0;
 
         const response = await relayImage(ctx, cookie, { model: "img-1", prompt: "hello", n: 1 });
-        expect(response.status).toBe(200);
+        expect(response.status).toBe(202);
         const data = (await response.json()) as any;
-        expect(data.data[0].b64_json).toBe("QUJD");
+        expect(data.task_id).toBe("task-1");
+        expect(data.status).toBe("queued");
         expect(upstreamCalls.at(-1)?.authorization).toBe("Bearer sk-test-key");
 
         const quota = await request(ctx, "/api/quota", { headers: { cookie } });
@@ -339,7 +343,7 @@ describe("中转与额度", () => {
         const { cookie, clientId } = await createSession(ctx);
         await updateQuotaPolicy(ctx, adminCookie, 1, 10);
 
-        expect((await relayImage(ctx, cookie)).status).toBe(200);
+        expect((await relayImage(ctx, cookie)).status).toBe(202);
         const blocked = await relayImage(ctx, cookie);
         expect(blocked.status).toBe(429);
         const blockedData = (await blocked.json()) as any;
@@ -353,7 +357,7 @@ describe("中转与额度", () => {
             body: JSON.stringify({ scope: "all" }),
         });
         expect(reset.status).toBe(200);
-        expect((await relayImage(ctx, cookie)).status).toBe(200);
+        expect((await relayImage(ctx, cookie)).status).toBe(202);
         ctx.cleanup();
     });
 
@@ -365,11 +369,11 @@ describe("中转与额度", () => {
         const { cookie } = await createSession(ctx);
         await updateQuotaPolicy(ctx, adminCookie, 1, 10);
 
-        expect((await relayImage(ctx, cookie)).status).toBe(200);
+        expect((await relayImage(ctx, cookie)).status).toBe(202);
         expect((await relayImage(ctx, cookie)).status).toBe(429);
 
         setNowForTests(Date.UTC(2026, 10, 6, 4, 0, 0));
-        expect((await relayImage(ctx, cookie)).status).toBe(200);
+        expect((await relayImage(ctx, cookie)).status).toBe(202);
         ctx.cleanup();
     });
 

@@ -1,11 +1,86 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import localforage from "localforage";
 
 import { explicitSessionScope, matchesCanvasProject, resolvePersistedScope, selectCanvasSession, selectHydratedSessionId } from "@/lib/conversation-agent/session-select";
 import type { AgentSession } from "@/lib/conversation-agent/types";
-import { useConversationAgentStore } from "@/stores/use-conversation-agent-store";
 
-// 与 store 共用 hooks.mjs 解析到的同一个 localforage 内存桩，用来注入 hydrate 的持久化 payload。
+const memoryBuckets = new Map<string, Map<string, unknown>>();
+const instanceStores = new WeakMap<object, string>();
+const storeNameFor = (instance: object) => instanceStores.get(instance) || "keyvaluepairs";
+const resolveCallback = <T>(promise: Promise<T>, callback?: (err: unknown, result?: T) => void) => {
+    if (callback) promise.then((value) => callback(null, value), (error) => callback(error));
+    return promise;
+};
+
+await localforage.defineDriver({
+    _driver: "memoryStorage",
+    _support: () => Promise.resolve(true),
+    _initStorage(options) {
+        const storeName = options?.storeName || "keyvaluepairs";
+        instanceStores.set(this, storeName);
+        if (!memoryBuckets.has(storeName)) memoryBuckets.set(storeName, new Map());
+        return Promise.resolve();
+    },
+    iterate(iteratorCallback, callback) {
+        const map = memoryBuckets.get(storeNameFor(this));
+        let idx = 1;
+        if (map) {
+            for (const [key, value] of map.entries()) {
+                const res = iteratorCallback(value as never, key, idx++);
+                if (res !== undefined) return resolveCallback(Promise.resolve(res as never), callback);
+            }
+        }
+        return resolveCallback(Promise.resolve(undefined as never), callback);
+    },
+    getItem(key, callback) {
+        const value = memoryBuckets.get(storeNameFor(this))?.get(key) ?? null;
+        return resolveCallback(Promise.resolve(value as never), callback);
+    },
+    setItem(key, value, callback) {
+        const storeName = storeNameFor(this);
+        let map = memoryBuckets.get(storeName);
+        if (!map) {
+            map = new Map();
+            memoryBuckets.set(storeName, map);
+        }
+        map.set(key, value);
+        return resolveCallback(Promise.resolve(value), callback);
+    },
+    removeItem(key, callback) {
+        memoryBuckets.get(storeNameFor(this))?.delete(key);
+        return resolveCallback(Promise.resolve(undefined), callback);
+    },
+    clear(callback) {
+        memoryBuckets.get(storeNameFor(this))?.clear();
+        return resolveCallback(Promise.resolve(undefined), callback);
+    },
+    length(callback) {
+        return resolveCallback(Promise.resolve(memoryBuckets.get(storeNameFor(this))?.size ?? 0), callback);
+    },
+    key(n, callback) {
+        const map = memoryBuckets.get(storeNameFor(this));
+        const key = map ? Array.from(map.keys())[n] ?? "" : "";
+        return resolveCallback(Promise.resolve(key), callback);
+    },
+    keys(callback) {
+        const map = memoryBuckets.get(storeNameFor(this));
+        return resolveCallback(Promise.resolve(map ? Array.from(map.keys()) : []), callback);
+    },
+    dropInstance(options, callback) {
+        const cb = typeof options === "function" ? options : callback;
+        const storeName = (typeof options === "object" && options?.storeName) || storeNameFor(this);
+        memoryBuckets.delete(storeName);
+        return resolveCallback(Promise.resolve(undefined), cb);
+    },
+});
+
+const originalCreateInstance = localforage.createInstance.bind(localforage);
+localforage.createInstance = ((options: LocalForageOptions) => originalCreateInstance({ ...options, driver: "memoryStorage" })) as typeof localforage.createInstance;
+afterAll(() => {
+    localforage.createInstance = originalCreateInstance;
+});
+
+const { useConversationAgentStore } = await import("@/stores/use-conversation-agent-store");
 const storage = localforage.createInstance({ name: "infinite-canvas", storeName: "agent_conversations" });
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
