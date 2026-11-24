@@ -4,7 +4,16 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { antigravityConfigFile, codexPluginEnabled, launchSpec, localEntry, parseInstallArgs, resolveLocalEntry, writeAntigravityConfig } from "./install-mcp.js";
+import {
+    antigravityConfigFile,
+    codexPluginEnabled,
+    inspectAntigravityMcp,
+    launchSpec,
+    localEntry,
+    parseInstallArgs,
+    resolveLocalEntry,
+    writeAntigravityConfig,
+} from "./install-mcp.js";
 
 function makeTempHome(): string {
     return fs.mkdtempSync(path.join(os.tmpdir(), "install-mcp-test-"));
@@ -124,5 +133,32 @@ test("localEntry resolves dist/index.js relative to module URL and resolveLocalE
         assert.equal(resolveLocalEntry(builtMetaUrl), expected);
     } finally {
         fs.rmSync(base, { recursive: true, force: true });
+    }
+});
+
+test("inspectAntigravityMcp reports missing config, valid entry, and missing entry script", () => {
+    const home = makeTempHome();
+    try {
+        const missing = inspectAntigravityMcp(home);
+        assert.equal(missing.configured, false);
+        assert.equal(missing.validEntry, false);
+
+        const realEntry = path.join(home, "dist", "index.js");
+        fs.mkdirSync(path.dirname(realEntry), { recursive: true });
+        fs.writeFileSync(realEntry, "// entry");
+        writeAntigravityConfig(home, launchSpec(realEntry));
+
+        const valid = inspectAntigravityMcp(home);
+        assert.equal(valid.configured, true);
+        assert.equal(valid.validEntry, true);
+        assert.equal(valid.entry, realEntry);
+
+        fs.unlinkSync(realEntry);
+        const broken = inspectAntigravityMcp(home);
+        assert.equal(broken.configured, true);
+        assert.equal(broken.validEntry, false);
+        assert.match(broken.error ?? "", /入口脚本不存在/);
+    } finally {
+        fs.rmSync(home, { recursive: true, force: true });
     }
 });

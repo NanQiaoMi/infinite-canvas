@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { loadConfig, VERSION } from "./config.js";
-import { buildOneClickConnectUrl } from "./server/mcp.js";
+import { buildOneClickConnectUrl, probeBridgeHealth } from "./server/mcp.js";
 
 export type LaunchSpec = { command: string; args: string[] };
 type ClientName = "claude" | "codex" | "antigravity";
@@ -81,6 +81,79 @@ export function resolveLocalEntry(fromMetaUrl = import.meta.url) {
 /** Antigravity 的 MCP 配置文件路径。 */
 export function antigravityConfigFile(home: string) {
     return path.join(home, ".gemini", "config", "mcp_config.json");
+}
+
+/** 检查 Antigravity MCP 配置及启动脚本是否存在。 */
+export function inspectAntigravityMcp(home = os.homedir()): {
+    configured: boolean;
+    validEntry: boolean;
+    file: string;
+    command?: string;
+    entry?: string;
+    error?: string;
+} {
+    const file = antigravityConfigFile(home);
+    if (!fs.existsSync(file)) return { configured: false, validEntry: false, file, error: "配置文件不存在" };
+    const raw = fs.readFileSync(file, "utf8");
+    if (!raw.trim()) return { configured: false, validEntry: false, file, error: "配置文件为空" };
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(raw);
+    } catch {
+        return { configured: false, validEntry: false, file, error: "配置文件不是有效 JSON" };
+    }
+    const server = (parsed as { mcpServers?: Record<string, unknown> })?.mcpServers?.[SERVER_NAME] as
+        | { command?: unknown; args?: unknown }
+        | undefined;
+    if (!server || typeof server !== "object") return { configured: false, validEntry: false, file, error: `缺少 ${SERVER_NAME} 配置项` };
+    const command = typeof server.command === "string" ? server.command : undefined;
+    const args = Array.isArray(server.args) ? server.args.filter((item): item is string => typeof item === "string") : [];
+    const entry = args[0];
+    if (!command || !entry) return { configured: true, validEntry: false, file, command, entry, error: "缺少 command 或入口脚本路径" };
+    const commandOk = !path.isAbsolute(command) || fs.existsSync(command);
+    const entryOk = fs.existsSync(entry);
+    if (!commandOk) return { configured: true, validEntry: false, file, command, entry, error: `Node 可执行文件不存在：${command}` };
+    if (!entryOk) return { configured: true, validEntry: false, file, command, entry, error: `MCP 入口脚本不存在：${entry}` };
+    return { configured: true, validEntry: true, file, command, entry };
+}
+
+/** 诊断 Antigravity MCP、本地 HTTP 桥接、鉴权及浏览器标签页连接状态。 */
+export async function runDoctor(home = os.homedir()) {
+    let hasError = false;
+    const mcp = inspectAntigravityMcp(home);
+    if (mcp.validEntry) {
+        console.log(`✓ Antigravity MCP 配置正常（${mcp.command} ${mcp.entry}）`);
+    } else {
+        hasError = true;
+        console.log(`✗ Antigravity MCP 配置异常：${mcp.error}（${mcp.file}）`);
+    }
+
+    const cfg = loadConfig(false);
+    const health = await probeBridgeHealth(cfg.url);
+    if (!health) {
+        console.log(`· 本地 HTTP 桥接未运行（${cfg.url}，MCP 工具首次调用时会自动按需拉起）`);
+    } else {
+        const authOk = await fetch(`${cfg.url.replace(/\/+$/, "")}/auth/check?token=${encodeURIComponent(cfg.token)}`)
+            .then((res) => res.ok)
+            .catch(() => false);
+        if (authOk) {
+            console.log(`✓ 本地 HTTP 桥接运行中（${cfg.url}，protocol v${health.protocolVersion ?? "?"}）`);
+        } else {
+            hasError = true;
+            console.log(`✗ 本地 HTTP 桥接运行中但 Token 校验失败（${cfg.url}，请重新启动服务或检查 ~/.infinite-canvas/canvas-agent.json）`);
+        }
+        const tabs = health.connectedTabs ?? [];
+        if (tabs.length === 0) {
+            console.log(`· 当前无已连接浏览器标签页。请在浏览器打开一键连接地址：${buildOneClickConnectUrl(cfg)}`);
+        } else {
+            console.log(`✓ 已连接 ${tabs.length} 个浏览器标签页（画布页：${tabs.some((tab) => tab.hasCanvas) ? "有" : "无"}）`);
+            for (const tab of tabs) {
+                const label = tab.hasCanvas ? `画布 ${tab.title || tab.projectId || tab.clientId}` : "非画布页";
+                console.log(`  - ${label}（${tab.nodeCount} 节点${tab.active ? "，活跃" : ""}）`);
+            }
+        }
+    }
+    if (hasError) process.exitCode = 1;
 }
 
 /** 写入 Antigravity MCP 配置，保留其他配置项，首次修改前备份为 .bak。 */

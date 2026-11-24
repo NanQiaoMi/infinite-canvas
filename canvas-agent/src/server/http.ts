@@ -454,7 +454,8 @@ export function startHttpServer() {
         res.status(500).json({ ok: false, error: error.message });
     });
 
-    const server = app.listen(port, "127.0.0.1", () => {
+    const server = app.listen(port, "127.0.0.1", (error?: Error) => {
+        if (error) return;
         saveConfig(config);
         console.log("Infinite Canvas Agent");
         checkVersions();

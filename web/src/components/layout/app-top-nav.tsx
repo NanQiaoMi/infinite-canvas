@@ -83,15 +83,35 @@ export function AppTopNav() {
                         </div>
 
                         <div className="my-auto flex h-9 shrink-0 items-center justify-end gap-1.5 sm:gap-2 whitespace-nowrap">
-                            <Tooltip title={t(panelOpen ? "topNav.closeAgent" : "topNav.openAgent")}>
+                            <Tooltip
+                                title={
+                                    agentConnected
+                                        ? `${t(panelOpen ? "topNav.closeAgent" : "topNav.openAgent")} · ${t("agent.runtime.connected")}`
+                                        : t(panelOpen ? "topNav.closeAgent" : "topNav.openAgent")
+                                }
+                            >
                                 <button
                                     type="button"
-                                    className="inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-stone-600 transition-colors hover:bg-black/5 hover:text-stone-950 dark:text-stone-300 dark:hover:bg-white/10 dark:hover:text-white [&_svg]:size-4"
+                                    className="relative inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-stone-600 transition-colors hover:bg-black/5 hover:text-stone-950 dark:text-stone-300 dark:hover:bg-white/10 dark:hover:text-white [&_svg]:size-4"
                                     onClick={togglePanel}
-                                    aria-label={t(panelOpen ? "topNav.closeAgent" : "topNav.openAgent")}
-                                    title={t(panelOpen ? "topNav.closeAgent" : "topNav.openAgent")}
+                                    aria-label={
+                                        agentConnected
+                                            ? `${t(panelOpen ? "topNav.closeAgent" : "topNav.openAgent")} · ${t("agent.runtime.connected")}`
+                                            : t(panelOpen ? "topNav.closeAgent" : "topNav.openAgent")
+                                    }
+                                    title={
+                                        agentConnected
+                                            ? `${t(panelOpen ? "topNav.closeAgent" : "topNav.openAgent")} · ${t("agent.runtime.connected")}`
+                                            : t(panelOpen ? "topNav.closeAgent" : "topNav.openAgent")
+                                    }
                                 >
                                     <Bot className="size-4" />
+                                    {agentConnected ? (
+                                        <span
+                                            className="pointer-events-none absolute right-1 top-1 size-1.5 rounded-full bg-emerald-500 ring-1 ring-white dark:ring-stone-950"
+                                            aria-hidden="true"
+                                        />
+                                    ) : null}
                                 </button>
                             </Tooltip>
                             <UserStatusActions />
