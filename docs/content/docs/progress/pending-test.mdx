@@ -7,6 +7,9 @@ description: Implemented changes that still need manual verification
 
 The current release needs manual verification in these areas:
 
+- 画布节点防重叠与一键整理布局（`canvas_auto_layout`）：
+  1. 拓扑分层与分组排布：在多轮生图或分镜连线混乱的画布上调用 `canvas_auto_layout`，同组流程按连线依赖从左到右分层展开且同列不重叠，不同孤立分组按行纵向排开，并自动调整视口居中框选；
+  2. 局部整理与仅改坐标：传入 `nodeIds` 可只整理指定节点子集，传入 `fitViewport: false` 只更新节点位置不移动当前视口。
 - 视频续拍一体化与高精度抽帧放大复检：
   1. 一键续拍（`canvas_continue_video_shot`）：对已完成视频节点传入 `sourceVideoNodeId`、下一镜 `prompt` 及 `characterReferenceNodeIds`（最多 9 张原始人物定妆照），会在源视频右侧依次自动创建尾帧图片节点（`[图1]`）、提示词节点和视频配置节点，按 `[图1]` + 定妆照顺序自动连线（合计 >2 张自动切 `reference` 模式）并触发生成，有效避免多镜头人物变脸；
   2. 指定秒数高清复检（`video_inspect_frames` 传入 `focusTimestamps`）：传入最多 4 个秒数（如 `[1.2, 4.8]`），除了常规接触表和参考图对照拼图外，还会额外返回对应时刻的高清独立帧图片，可清晰核对五官、手部和道具细节。

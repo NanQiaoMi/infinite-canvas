@@ -53,6 +53,7 @@ export function buildCanvasToolRequest(name: ToolName, input: Record<string, unk
             return { type: "update_node", id: item.id, patch: { position: { x: item.x ?? ((current?.position.x || 0) + (item.dx || 0)), y: item.y ?? ((current?.position.y || 0) + (item.dy || 0)) } } };
         }));
     }
+    if (name === "canvas_auto_layout") return applyOps(autoLayoutOps(input, state));
     if (name === "canvas_resize_node") {
         const data = input as { id: string; width: number; height: number; freeResize?: boolean };
         return applyOps([{ type: "update_node", id: data.id, patch: { width: data.width, height: data.height }, metadata: data.freeResize === undefined ? undefined : { freeResize: data.freeResize } }]);
@@ -206,6 +207,152 @@ function storyboardFlowOps(input: Record<string, unknown>, state: CanvasSnapshot
     if (input.autoRunFirst === true && configIds.length > 0) {
         ops.push(runGenerationOp(configIds[0], mode, firstPromptTokens));
     }
+    return ops;
+}
+
+/** 按连线拓扑从左到右分层排布节点，互不相连的流程按行分组并可选居中视口。 */
+function autoLayoutOps(input: Record<string, unknown>, state: CanvasSnapshot | null) {
+    const allNodes = state?.nodes || [];
+    const filterIds = Array.isArray(input.nodeIds)
+        ? new Set(input.nodeIds.filter((id): id is string => typeof id === "string" && Boolean(id)))
+        : null;
+    const targetNodes = filterIds && filterIds.size ? allNodes.filter((node) => filterIds.has(node.id)) : [...allNodes];
+    if (!targetNodes.length) return [];
+
+    const colGap = Number(input.colGap ?? 100);
+    const rowGap = Number(input.rowGap ?? 64);
+    const groupGap = Number(input.groupGap ?? 120);
+    const fitViewport = input.fitViewport !== false;
+    const targetById = new Map(targetNodes.map((node) => [node.id, node]));
+
+    const undirected = new Map<string, Set<string>>();
+    const outgoing = new Map<string, string[]>();
+    const indegree = new Map<string, number>();
+    for (const node of targetNodes) {
+        undirected.set(node.id, new Set());
+        outgoing.set(node.id, []);
+        indegree.set(node.id, 0);
+    }
+
+    const seenDirected = new Set<string>();
+    for (const conn of state?.connections || []) {
+        if (!targetById.has(conn.fromNodeId) || !targetById.has(conn.toNodeId) || conn.fromNodeId === conn.toNodeId) continue;
+        undirected.get(conn.fromNodeId)!.add(conn.toNodeId);
+        undirected.get(conn.toNodeId)!.add(conn.fromNodeId);
+        const edgeKey = `${conn.fromNodeId}->${conn.toNodeId}`;
+        if (seenDirected.has(edgeKey)) continue;
+        seenDirected.add(edgeKey);
+        outgoing.get(conn.fromNodeId)!.push(conn.toNodeId);
+        indegree.set(conn.toNodeId, (indegree.get(conn.toNodeId) || 0) + 1);
+    }
+
+    const byPos = (a: CanvasNode, b: CanvasNode) => (a.position.y - b.position.y) || (a.position.x - b.position.x) || a.id.localeCompare(b.id);
+    const visited = new Set<string>();
+    const components: CanvasNode[][] = [];
+    for (const seed of [...targetNodes].sort(byPos)) {
+        if (visited.has(seed.id)) continue;
+        const comp: CanvasNode[] = [];
+        const queue = [seed.id];
+        visited.add(seed.id);
+        while (queue.length) {
+            const id = queue.shift()!;
+            comp.push(targetById.get(id)!);
+            for (const nextId of undirected.get(id)!) {
+                if (!visited.has(nextId)) {
+                    visited.add(nextId);
+                    queue.push(nextId);
+                }
+            }
+        }
+        components.push(comp);
+    }
+    components.sort(
+        (a, b) =>
+            Math.min(...a.map((n) => n.position.y)) - Math.min(...b.map((n) => n.position.y)) ||
+            Math.min(...a.map((n) => n.position.x)) - Math.min(...b.map((n) => n.position.x)),
+    );
+
+    const originX = Math.min(...targetNodes.map((n) => n.position.x));
+    let groupTopY = Math.min(...targetNodes.map((n) => n.position.y));
+    const ops: Array<Record<string, unknown>> = [];
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+
+    for (const comp of components) {
+        const layer = new Map<string, number>();
+        const remaining = new Map(comp.map((n) => [n.id, indegree.get(n.id) || 0]));
+        const kahn = comp.filter((n) => (remaining.get(n.id) || 0) === 0).sort(byPos).map((n) => n.id);
+        for (const id of kahn) layer.set(id, 0);
+
+        for (let i = 0; i < kahn.length; i += 1) {
+            const u = kahn[i];
+            const nextLayer = (layer.get(u) || 0) + 1;
+            for (const v of outgoing.get(u)!) {
+                layer.set(v, Math.max(layer.get(v) || 0, nextLayer));
+                const nextDeg = (remaining.get(v) || 0) - 1;
+                remaining.set(v, nextDeg);
+                if (nextDeg === 0) kahn.push(v);
+            }
+        }
+
+        // 若存在环路导致部分节点入度未归零，则顺延分配至后续列以防止死循环与重叠。
+        let fallbackLayer = layer.size ? Math.max(...layer.values()) + 1 : 0;
+        for (const node of [...comp].sort(byPos)) {
+            if (!layer.has(node.id)) {
+                layer.set(node.id, fallbackLayer);
+                fallbackLayer += 1;
+            }
+        }
+
+        const columns = new Map<number, CanvasNode[]>();
+        for (const node of comp) {
+            const col = layer.get(node.id) || 0;
+            const bucket = columns.get(col) || [];
+            bucket.push(node);
+            columns.set(col, bucket);
+        }
+
+        const colIndexes = [...columns.keys()].sort((a, b) => a - b);
+        let colX = originX;
+        let groupMaxBottom = groupTopY;
+
+        for (const colIdx of colIndexes) {
+            const colNodes = columns.get(colIdx)!.sort(byPos);
+            const colWidth = Math.max(...colNodes.map((n) => n.width || 320));
+            let rowY = groupTopY;
+            for (const node of colNodes) {
+                const w = node.width || 320;
+                const h = node.height || 200;
+                const x = Math.round(colX);
+                const y = Math.round(rowY);
+                ops.push({ type: "update_node", id: node.id, patch: { position: { x, y } } });
+                minX = Math.min(minX, x);
+                minY = Math.min(minY, y);
+                maxX = Math.max(maxX, x + w);
+                maxY = Math.max(maxY, y + h);
+                rowY += h + rowGap;
+            }
+            groupMaxBottom = Math.max(groupMaxBottom, rowY - rowGap);
+            colX += colWidth + colGap;
+        }
+
+        groupTopY = groupMaxBottom + groupGap;
+    }
+
+    if (fitViewport && Number.isFinite(minX)) {
+        const viewW = 1200;
+        const viewH = 760;
+        const pad = 80;
+        const boxW = Math.max(10, maxX - minX);
+        const boxH = Math.max(10, maxY - minY);
+        const k = Number(Math.max(0.25, Math.min(1, Math.min((viewW - pad * 2) / boxW, (viewH - pad * 2) / boxH))).toFixed(3));
+        const cx = (minX + maxX) / 2;
+        const cy = (minY + maxY) / 2;
+        ops.push({ type: "set_viewport", viewport: { x: Math.round(viewW / 2 - cx * k), y: Math.round(viewH / 2 - cy * k), k } });
+    }
+
     return ops;
 }
 

@@ -80,3 +80,57 @@ test("storyboard flow rejects any shot exceeding 10 merged reference nodes", () 
         /第 2 镜参考节点超过 10 个/,
     );
 });
+
+test("canvas_auto_layout layers DAG left-to-right without overlap and centers viewport", () => {
+    const state = {
+        projectId: "p1",
+        nodes: [
+            { id: "img", type: "image" as const, position: { x: 200, y: 10 }, width: 300, height: 200 },
+            { id: "txt", type: "text" as const, position: { x: 210, y: 20 }, width: 320, height: 140 },
+            { id: "cfg", type: "config" as const, position: { x: 220, y: 15 }, width: 340, height: 220 },
+            { id: "vid", type: "video" as const, position: { x: 230, y: 25 }, width: 320, height: 180 },
+        ],
+        connections: [
+            { id: "c1", fromNodeId: "img", toNodeId: "cfg" },
+            { id: "c2", fromNodeId: "txt", toNodeId: "cfg" },
+            { id: "c3", fromNodeId: "cfg", toNodeId: "vid" },
+        ],
+    };
+    const ops = (buildCanvasToolRequest("canvas_auto_layout", {}, state).input as { ops: Array<Record<string, any>> }).ops;
+    const updates = new Map(ops.filter((op) => op.type === "update_node").map((op) => [op.id as string, op.patch.position as { x: number; y: number }]));
+    const viewports = ops.filter((op) => op.type === "set_viewport");
+
+    assert.equal(updates.get("img")?.x, 200);
+    assert.equal(updates.get("txt")?.x, 200);
+    assert.ok((updates.get("txt")?.y ?? 0) >= 10 + 200 + 64);
+    assert.equal(updates.get("cfg")?.x, 200 + 320 + 100);
+    assert.equal(updates.get("vid")?.x, 200 + 320 + 100 + 340 + 100);
+    assert.equal(viewports.length, 1);
+    assert.ok(viewports[0].viewport.k >= 0.25 && viewports[0].viewport.k <= 1);
+});
+
+test("canvas_auto_layout separates disconnected groups vertically, handles cycles safely, and respects nodeIds/fitViewport", () => {
+    const state = {
+        projectId: "p1",
+        nodes: [
+            { id: "a", type: "text" as const, position: { x: 0, y: 0 }, width: 200, height: 100 },
+            { id: "b", type: "text" as const, position: { x: 10, y: 10 }, width: 200, height: 100 },
+            { id: "solo", type: "image" as const, position: { x: 50, y: 500 }, width: 240, height: 180 },
+            { id: "untouched", type: "text" as const, position: { x: 999, y: 999 }, width: 200, height: 100 },
+        ],
+        connections: [
+            { id: "c1", fromNodeId: "a", toNodeId: "b" },
+            { id: "c2", fromNodeId: "b", toNodeId: "a" },
+        ],
+    };
+    const ops = (
+        buildCanvasToolRequest("canvas_auto_layout", { nodeIds: ["a", "b", "solo"], fitViewport: false }, state).input as {
+            ops: Array<Record<string, any>>;
+        }
+    ).ops;
+    const updates = new Map(ops.filter((op) => op.type === "update_node").map((op) => [op.id as string, op.patch.position as { x: number; y: number }]));
+    assert.equal(updates.has("untouched"), false);
+    assert.equal(ops.some((op) => op.type === "set_viewport"), false);
+    assert.notEqual(updates.get("a")?.x, updates.get("b")?.x);
+    assert.ok((updates.get("solo")?.y ?? 0) >= 100 + 120);
+});
