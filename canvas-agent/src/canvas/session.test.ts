@@ -220,7 +220,7 @@ test("SSE 响应写入抛出异常时不会导致桥接进程崩溃", (t) => {
     t.after(() => broken.close());
 
     assert.doesNotThrow(() => {
-        session.updateCodexState({ busy: true, threadId: "t1", turnId: "turn1" });
+        session.beginConversation({ threadId: "t1" });
     });
 });
 
