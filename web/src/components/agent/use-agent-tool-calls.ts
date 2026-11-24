@@ -7,6 +7,7 @@ import { extractCanvasProjectId, isSiteTool, runSiteTool, waitForCanvasProjectRe
 import { postState, postToolResult } from "@/services/api/canvas-agent";
 import { uploadImage } from "@/services/image-storage";
 import { useAgentStore, type AgentCanvasContext, type AgentPendingToolCall } from "@/stores/use-agent-store";
+import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { isCanvasWriteTool, toolName } from "./agent-event-formatters";
 import { rt } from "./agent-panel-utils";
 
@@ -62,8 +63,10 @@ export function useAgentToolCalls({ endpoint, clientIdRef, canvasContextRef, pen
             let appliedOps = input.ops || [];
             if (payload.name === "site_navigate") {
                 const path = input.path || "/";
-                navigate(path);
                 const targetProjectId = extractCanvasProjectId(path);
+                const { projects, hydrated } = useCanvasStore.getState();
+                if (targetProjectId && hydrated && !projects.some((project) => project.id === targetProjectId)) throw new Error(rt("canvasNotFound", { id: targetProjectId }));
+                navigate(path);
                 if (targetProjectId) {
                     const readyContext = await waitForCanvasProjectReady(
                         targetProjectId,

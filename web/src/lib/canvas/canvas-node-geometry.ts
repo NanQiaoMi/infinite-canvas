@@ -161,6 +161,17 @@ export type FocusFrame = {
 // Viewport that centers the node (plus any open overlay above/below) in the usable canvas area, zoomed so the
 // whole thing fits (the node itself is kept within 60% of the viewport). When an overlay is open below the node,
 // the remaining space is split 3:1 so the panel sits closer to the bottom dock (half the usual bottom gap).
+/** 计算让一组节点完整居中显示的视口，缩放不超过 100%。 */
+export function fitViewportToNodes(nodes: Array<Pick<CanvasNodeData, "position" | "width" | "height">>, size: { width: number; height: number }, padding = 80): ViewportTransform | null {
+    if (!nodes.length) return null;
+    const minX = Math.min(...nodes.map((node) => node.position.x));
+    const minY = Math.min(...nodes.map((node) => node.position.y));
+    const maxX = Math.max(...nodes.map((node) => node.position.x + node.width));
+    const maxY = Math.max(...nodes.map((node) => node.position.y + node.height));
+    const k = Math.min(Math.max(Math.min((size.width - padding * 2) / Math.max(maxX - minX, 1), (size.height - padding * 2) / Math.max(maxY - minY, 1)), 0.05), 1);
+    return { x: size.width / 2 - ((minX + maxX) / 2) * k, y: size.height / 2 - ((minY + maxY) / 2) * k, k };
+}
+
 export function focusViewportForNode(node: Pick<CanvasNodeData, "position" | "width" | "height">, size: { width: number; height: number }, frame: FocusFrame = {}): ViewportTransform {
     const above = frame.above ?? 0;
     const below = frame.below ?? 0;

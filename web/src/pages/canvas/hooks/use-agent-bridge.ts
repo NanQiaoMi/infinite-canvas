@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState, type Dispatch, type MutableR
 import i18n from "@/i18n";
 import { useAgentStore } from "@/stores/use-agent-store";
 import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
+import { fitViewportToNodes } from "@/lib/canvas/canvas-node-geometry";
 import type { CanvasNodeGenerationMode } from "@/components/canvas/canvas-node-prompt-panel";
 import type { CanvasConnection, CanvasNodeData, ContextMenuState, ViewportTransform } from "@/types/canvas";
 
@@ -10,6 +11,9 @@ type GenerateNodeRef = MutableRefObject<((nodeId: string, mode: CanvasNodeGenera
 
 type AgentBridgeParams = {
     projectId: string;
+    projectLoaded: boolean;
+    size: { width: number; height: number };
+    isGenerationReady: (node: CanvasNodeData | undefined, mode: CanvasNodeGenerationMode) => boolean;
     title: string | undefined;
     nodes: CanvasNodeData[];
     connections: CanvasConnection[];
@@ -33,7 +37,7 @@ type AgentBridgeParams = {
  * to the Agent store for the local Codex panel. All members except applyAgentOps are internal.
  */
 export function useAgentBridge(params: AgentBridgeParams) {
-    const { projectId, title, nodes, connections, selectedNodeIds, viewport, nodesRef, connectionsRef, selectedNodeIdsRef, viewportRef, generateNodeRef, setNodes, setConnections, setSelectedNodeIds, setSelectedConnectionId, setViewport, setContextMenu } =
+    const { projectId, projectLoaded, size, isGenerationReady, title, nodes, connections, selectedNodeIds, viewport, nodesRef, connectionsRef, selectedNodeIdsRef, viewportRef, generateNodeRef, setNodes, setConnections, setSelectedNodeIds, setSelectedConnectionId, setViewport, setContextMenu } =
         params;
     const setAgentCanvasContext = useAgentStore((state) => state.setCanvasContext);
     const [agentUndoSnapshot, setAgentUndoSnapshot] = useState<CanvasAgentSnapshot | null>(null);
@@ -49,6 +53,16 @@ export function useAgentBridge(params: AgentBridgeParams) {
                 before,
                 safeOps.filter((op) => op.type !== "run_generation"),
             );
+            const blocked = generationOps.find((op) => {
+                const target = next.nodes.find((node) => node.id === op.nodeId);
+                return !isGenerationReady(target, op.mode || target?.metadata?.generationMode || "image");
+            });
+            if (blocked) throw new Error(i18n.t("agent.runtime.generationNotConfigured"));
+            const fitOp = safeOps.filter((op): op is Extract<CanvasAgentOp, { type: "fit_view" }> => op.type === "fit_view").pop();
+            if (fitOp) {
+                const ids = fitOp.ids?.length ? new Set(fitOp.ids) : null;
+                next.viewport = fitViewportToNodes(ids ? next.nodes.filter((node) => ids.has(node.id)) : next.nodes, size) || next.viewport;
+            }
             nodesRef.current = next.nodes;
             connectionsRef.current = next.connections;
             selectedNodeIdsRef.current = new Set(next.selectedNodeIds);
@@ -71,7 +85,7 @@ export function useAgentBridge(params: AgentBridgeParams) {
             }
             return { ...next, projectId, title: projectTitle };
         },
-        [projectTitle, projectId],
+        [projectTitle, projectId, isGenerationReady, size],
     );
     const undoAgentOps = useCallback(() => {
         if (!agentUndoSnapshot) return null;
@@ -89,10 +103,12 @@ export function useAgentBridge(params: AgentBridgeParams) {
         return { ...agentUndoSnapshot, projectId, title: projectTitle };
     }, [agentUndoSnapshot, projectTitle, projectId]);
 
+    // 项目加载完成前不向 Agent 发布画布，避免误报就绪或操作被随后的项目恢复覆盖。
     useEffect(() => {
+        if (!projectLoaded) return;
         setAgentCanvasContext({ snapshot: agentSnapshot, applyOps: applyAgentOps, undoOps: undoAgentOps, canUndo: Boolean(agentUndoSnapshot) });
         return () => setAgentCanvasContext(null);
-    }, [agentSnapshot, applyAgentOps, agentUndoSnapshot, setAgentCanvasContext, undoAgentOps]);
+    }, [agentSnapshot, applyAgentOps, agentUndoSnapshot, projectLoaded, setAgentCanvasContext, undoAgentOps]);
 
     return { applyAgentOps };
 }

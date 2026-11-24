@@ -7,6 +7,11 @@ description: Implemented changes that still need manual verification
 
 The current release needs manual verification in these areas:
 
+- MCP 端到端联调发现问题修复（画布就绪误报、未配置 AI 时静默不生成、自动布局视口适配）：
+  1. 画布就绪判断：调用 `site_navigate({ path: "/canvas/不存在的ID" })` 直接返回「画布不存在」错误并提示用 `canvas_list_projects` 或让用户新建画布，页面不跳转；打开真实画布时，回传的 `nodeCount` 与画布实际节点数一致；
+  2. 未配置 AI 接口时触发生成：在未填写 API Key 的浏览器中调用 `canvas_generate_text` / `canvas_run_generation`，工具直接返回「AI 接口未配置完整」错误，画布不新增半成品节点；不带自动运行的流程类工具不受影响；已配置时生成照常启动；
+  3. 自动布局视口：左侧面板展开或收起、窗口大小不同的情况下调用 `canvas_auto_layout`，整理后的节点在画布可见区域内居中且完整可见，不再偏到一侧或被裁切。
+
 - Antigravity / 本地 MCP 诊断命令、端口占用修复与顶部栏连接状态提示：
   1. 执行 `node canvas-agent/dist/index.js doctor`：检查 Antigravity MCP 配置及入口脚本是否有效、本地 HTTP 桥接与 `/auth/check` Token 是否正常、已连接浏览器标签页清单，并在无已连接标签页时输出一键连接地址；
   2. 桥接运行中再次启动 `node canvas-agent/dist/index.js`：确认只打印「Infinite Canvas Agent is already running.」与一键连接地址并正常退出，不再提前输出「Canvas Agent started」；

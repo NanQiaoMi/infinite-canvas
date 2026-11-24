@@ -5,6 +5,7 @@ description: Planned follow-up work
 
 # TODO
 
+- Add an MCP tool to create a new canvas project; today an agent in a browser with no canvas can only ask the user to click "New canvas" (found during MCP end-to-end testing). Also make `video_inspect_frames` / `canvas_extract_video_frame` / `canvas_continue_video_shot` reject non-video nodes with a clear message instead of "Failed to read video frame".
 - Publish canvas-agent 0.7.0 (protocol 7, Claude runtime, `install-mcp`) and update `~/.infinite-canvas/runtime`; until then npx users get 0.6.0, which the new web panel rejects as outdated. After publishing, add an `install-mcp` entry to the Agent connect tab.
 - Claude runtime does not load plugin-provided Skills (the SDK only supports an allow-list); evaluate whether to list and enable plugin Skills in the Skills tab.
 - Add Skill installation from web search, Skill resource-file management, and controlled local-memory persistence.

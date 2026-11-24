@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { focusViewportForNode } from "../src/lib/canvas/canvas-node-geometry";
+import { fitViewportToNodes, focusViewportForNode } from "../src/lib/canvas/canvas-node-geometry";
 
 // Mirrors the canvas transform: screen = viewport.offset + world * viewport.k, origin at top-left.
 function projectPoint(world: { x: number; y: number }, viewport: { x: number; y: number; k: number }) {
@@ -57,4 +57,23 @@ test("keeps the panel clear of the bottom dock, leaving a smaller gap below it",
     const usableBottom = size.height - bottomInset;
     expect(bottom).toBeLessThanOrEqual(usableBottom);
     expect(usableBottom - bottom).toBeCloseTo(top / 3, 6);
+});
+
+test("fitViewportToNodes keeps a tall layout fully visible inside the real canvas size", () => {
+    const size = { width: 580, height: 600 };
+    const nodes = Array.from({ length: 8 }, (_, index) => ({ position: { x: index % 2 ? 440 : 0, y: index * 360 }, width: 340, height: 240 }));
+    const viewport = fitViewportToNodes(nodes, size)!;
+    for (const node of nodes) {
+        const topLeft = projectPoint(node.position, viewport);
+        const bottomRight = projectPoint({ x: node.position.x + node.width, y: node.position.y + node.height }, viewport);
+        expect(topLeft.x).toBeGreaterThanOrEqual(0);
+        expect(topLeft.y).toBeGreaterThanOrEqual(0);
+        expect(bottomRight.x).toBeLessThanOrEqual(size.width);
+        expect(bottomRight.y).toBeLessThanOrEqual(size.height);
+    }
+});
+
+test("fitViewportToNodes never zooms past 100% and returns null for no nodes", () => {
+    expect(fitViewportToNodes([{ position: { x: 0, y: 0 }, width: 100, height: 80 }], { width: 1600, height: 900 })!.k).toBe(1);
+    expect(fitViewportToNodes([], { width: 800, height: 600 })).toBeNull();
 });

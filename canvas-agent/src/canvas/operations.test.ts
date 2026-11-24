@@ -98,15 +98,16 @@ test("canvas_auto_layout layers DAG left-to-right without overlap and centers vi
     };
     const ops = (buildCanvasToolRequest("canvas_auto_layout", {}, state).input as { ops: Array<Record<string, any>> }).ops;
     const updates = new Map(ops.filter((op) => op.type === "update_node").map((op) => [op.id as string, op.patch.position as { x: number; y: number }]));
-    const viewports = ops.filter((op) => op.type === "set_viewport");
+    const fits = ops.filter((op) => op.type === "fit_view");
 
     assert.equal(updates.get("img")?.x, 200);
     assert.equal(updates.get("txt")?.x, 200);
     assert.ok((updates.get("txt")?.y ?? 0) >= 10 + 200 + 64);
     assert.equal(updates.get("cfg")?.x, 200 + 320 + 100);
     assert.equal(updates.get("vid")?.x, 200 + 320 + 100 + 340 + 100);
-    assert.equal(viewports.length, 1);
-    assert.ok(viewports[0].viewport.k >= 0.25 && viewports[0].viewport.k <= 1);
+    assert.equal(ops.some((op) => op.type === "set_viewport"), false);
+    assert.equal(fits.length, 1);
+    assert.deepEqual([...fits[0].ids].sort(), ["cfg", "img", "txt", "vid"]);
 });
 
 test("canvas_auto_layout separates disconnected groups vertically, handles cycles safely, and respects nodeIds/fitViewport", () => {
@@ -130,7 +131,7 @@ test("canvas_auto_layout separates disconnected groups vertically, handles cycle
     ).ops;
     const updates = new Map(ops.filter((op) => op.type === "update_node").map((op) => [op.id as string, op.patch.position as { x: number; y: number }]));
     assert.equal(updates.has("untouched"), false);
-    assert.equal(ops.some((op) => op.type === "set_viewport"), false);
+    assert.equal(ops.some((op) => op.type === "fit_view"), false);
     assert.notEqual(updates.get("a")?.x, updates.get("b")?.x);
     assert.ok((updates.get("solo")?.y ?? 0) >= 100 + 120);
 });
