@@ -7,6 +7,11 @@ description: Implemented changes that still need manual verification
 
 The current release needs manual verification in these areas:
 
+- Antigravity / 本地 MCP 诊断命令、端口占用修复与顶部栏连接状态提示：
+  1. 执行 `node canvas-agent/dist/index.js doctor`：检查 Antigravity MCP 配置及入口脚本是否有效、本地 HTTP 桥接与 `/auth/check` Token 是否正常、已连接浏览器标签页清单，并在无已连接标签页时输出一键连接地址；
+  2. 桥接运行中再次启动 `node canvas-agent/dist/index.js`：确认只打印「Infinite Canvas Agent is already running.」与一键连接地址并正常退出，不再提前输出「Canvas Agent started」；
+  3. 顶部栏助手图标状态与工具事件文案：本地 Agent 连接成功后，顶部栏右上角机器人图标旁显示绿色已连接状态点且悬停提示带「已连接」；在 Agent 对话触发 `canvas_create_storyboard_flow`、`canvas_auto_layout`、`canvas_create_asset_nodes` 与 `canvas_continue_video_shot` 时显示对应中文标题与摘要。
+
 - 画布节点防重叠与一键整理布局（`canvas_auto_layout`）：
   1. 拓扑分层与分组排布：在多轮生图或分镜连线混乱的画布上调用 `canvas_auto_layout`，同组流程按连线依赖从左到右分层展开且同列不重叠，不同孤立分组按行纵向排开，并自动调整视口居中框选；
   2. 局部整理与仅改坐标：传入 `nodeIds` 可只整理指定节点子集，传入 `fitViewport: false` 只更新节点位置不移动当前视口。
