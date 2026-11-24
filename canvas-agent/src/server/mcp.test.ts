@@ -177,7 +177,18 @@ test("getConnectionStatus reports bridge/browser readiness and builds oneClickCo
         (req, res) => {
             if (req.url === "/health") {
                 res.writeHead(200, { "content-type": "application/json" });
-                res.end(JSON.stringify({ ok: true, protocolVersion: 7, hasCanvas: true, clients: 1, codexBusy: false }));
+                res.end(JSON.stringify({
+                    ok: true,
+                    protocolVersion: 7,
+                    hasCanvas: true,
+                    clients: 2,
+                    activeClientId: "tab-video",
+                    connectedTabs: [
+                        { clientId: "tab-video", active: true, hasCanvas: false, projectId: null, title: null, nodeCount: 0 },
+                        { clientId: "tab-canvas", active: false, hasCanvas: true, projectId: "p1", title: "Demo", nodeCount: 4 },
+                    ],
+                    codexBusy: false,
+                }));
                 return;
             }
             res.writeHead(404).end();
@@ -190,7 +201,10 @@ test("getConnectionStatus reports bridge/browser readiness and builds oneClickCo
             assert.equal(status.ok, true);
             assert.equal(status.ready, true);
             assert.equal(status.bridgeReachable, true);
-            assert.equal(status.connectedClients, 1);
+            assert.equal(status.connectedClients, 2);
+            assert.equal(status.activeClientId, "tab-video");
+            assert.equal(status.connectedTabs.length, 2);
+            assert.equal(status.connectedTabs[1]?.projectId, "p1");
             assert.equal(status.hasCanvas, true);
             assert.equal(status.protocolVersion, 7);
             assert.equal(

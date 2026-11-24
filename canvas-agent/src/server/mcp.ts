@@ -11,7 +11,16 @@ export type McpImageBlock = { mimeType: string; data: string; label?: string };
 export type McpToolContent =
     | { type: "text"; text: string }
     | { type: "image"; data: string; mimeType: string };
-export type BridgeHealth = { ok?: boolean; protocolVersion?: number; hasCanvas?: boolean; clients?: number; codexBusy?: boolean };
+export type ConnectedTabInfo = { clientId: string; active: boolean; hasCanvas: boolean; projectId: string | null; title: string | null; nodeCount: number };
+export type BridgeHealth = {
+    ok?: boolean;
+    protocolVersion?: number;
+    hasCanvas?: boolean;
+    clients?: number;
+    activeClientId?: string | null;
+    connectedTabs?: ConnectedTabInfo[];
+    codexBusy?: boolean;
+};
 
 type ToolBridgeOptions = {
     readConfig?: () => CanvasAgentConfig;
@@ -168,6 +177,8 @@ export async function getConnectionStatus(
         bridgeUrl: config.url,
         protocolVersion: health?.protocolVersion ?? null,
         connectedClients,
+        activeClientId: health?.activeClientId ?? null,
+        connectedTabs: health?.connectedTabs ?? [],
         hasCanvas: Boolean(health?.hasCanvas),
         codexBusy: Boolean(health?.codexBusy),
         oneClickConnectUrl,

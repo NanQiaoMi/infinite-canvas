@@ -41,6 +41,11 @@ const SITE_TOOLS = new Set<ToolName>([
     "canvas_extract_video_frame",
     "canvas_create_asset_nodes",
 ]);
+const CANVAS_SITE_TOOLS = new Set<ToolName>([
+    "canvas_inspect_node_visual",
+    "canvas_extract_video_frame",
+    "canvas_create_asset_nodes",
+]);
 
 /** 管理网页画布连接、状态、附件和工具请求。 */
 export class CanvasSession {
@@ -73,7 +78,12 @@ export class CanvasSession {
 
     /** 获取当前目标网页的画布状态。 */
     private get canvasState() {
-        return this.clients.has(this.targetClientId) ? this.canvasStates.get(this.targetClientId) || null : null;
+        return this.canvasStateFor(this.targetClientId);
+    }
+
+    /** 获取指定客户端的画布快照（仅限当前仍连接的客户端）。 */
+    private canvasStateFor(clientId: string) {
+        return this.clients.has(clientId) ? this.canvasStates.get(clientId) || null : null;
     }
 
     /** 获取当前 turn 绑定或最近激活的网页客户端。 */
@@ -81,9 +91,44 @@ export class CanvasSession {
         return this.boundClientId || this.activeClientId;
     }
 
-    /** 返回 Canvas Agent 当前连接状态。 */
+    /** 解析工具目标网页；当需要画布而当前焦点页无画布时，按最近焦点回退到已打开画布的标签页。 */
+    private resolveTargetClientId(requireCanvas = false) {
+        const primary = this.targetClientId;
+        if (!requireCanvas || this.boundClientId || (primary && this.clients.has(primary) && this.canvasStates.has(primary))) {
+            return primary;
+        }
+        const canvasClient = [...this.clients.keys()]
+            .sort((a, b) => (this.clientFocusOrder.get(b) || 0) - (this.clientFocusOrder.get(a) || 0))
+            .find((id) => this.canvasStates.has(id));
+        return canvasClient || primary;
+    }
+
+    /** 返回 Canvas Agent 当前连接状态与多标签页画布清单。 */
     health() {
-        return { ok: true, protocolVersion: AGENT_PROTOCOL_VERSION, hasCanvas: Boolean(this.canvasState), clients: this.clients.size, codexBusy: this.codexState.busy, conversation: this.conversationStateSnapshot };
+        const orderedTabs = [...this.clients.keys()]
+            .sort((a, b) => (this.clientFocusOrder.get(b) || 0) - (this.clientFocusOrder.get(a) || 0))
+            .map((clientId) => {
+                const state = this.canvasStates.get(clientId);
+                return {
+                    clientId,
+                    active: clientId === this.targetClientId,
+                    hasCanvas: Boolean(state),
+                    projectId: state?.projectId || null,
+                    title: state?.title || null,
+                    nodeCount: state?.nodes?.length || 0,
+                };
+            });
+        const resolvedCanvas = this.canvasStateFor(this.resolveTargetClientId(true));
+        return {
+            ok: true,
+            protocolVersion: AGENT_PROTOCOL_VERSION,
+            hasCanvas: Boolean(resolvedCanvas),
+            clients: this.clients.size,
+            activeClientId: this.targetClientId || null,
+            connectedTabs: orderedTabs,
+            codexBusy: this.codexState.busy,
+            conversation: this.conversationStateSnapshot,
+        };
     }
 
     /** 返回 Codex 是否正在执行任务。 */
@@ -309,11 +354,17 @@ export class CanvasSession {
         return snapshot;
     }
 
-    /** 保存指定网页上报的最新画布快照。 */
+    /** 保存指定网页上报的最新画布快照；若该标签页已离开画布则清除其画布缓存。 */
     updateState(body: unknown, clientId?: string) {
         const targetClientId = clientId || this.activeClientId;
         if (!targetClientId || !this.clients.has(targetClientId)) return;
-        const state = { ...((body && typeof body === "object" && !Array.isArray(body) ? body : {}) as Record<string, unknown>), clientId: targetClientId } as CanvasSnapshot;
+        const record = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : null;
+        if (!record || record.hasCanvas === false || (!Array.isArray(record.nodes) && !record.projectId)) {
+            this.canvasStates.delete(targetClientId);
+            logger.debug("Canvas state cleared", { clientId: targetClientId });
+            return;
+        }
+        const state = { ...record, clientId: targetClientId } as CanvasSnapshot;
         this.canvasStates.set(targetClientId, state);
         logger.debug("Canvas state updated", { clientId: targetClientId, nodes: state.nodes?.length || 0, connections: state.connections?.length || 0 });
     }
@@ -440,26 +491,31 @@ export class CanvasSession {
         });
     }
 
-    /** 校验工具参数并将调用分派到当前目标网页。 */
+    /** 校验工具参数并将调用分派到当前目标网页（画布工具自动命中打开画布的标签页）。 */
     async callTool(name: unknown, rawInput: unknown) {
         if (!isToolName(name)) throw new Error(`未知工具：${String(name)}`);
-        logger.info("MCP tool called", { name, input: rawInput, targetClientId: this.targetClientId });
         const input = parseToolInput(name, rawInput) as Record<string, unknown>;
         if (SITE_TOOLS.has(name)) {
             if (!this.clients.size) throw new Error("当前没有已连接网页");
-            return await this.requestCanvasTool(name, input);
+            const requireCanvas = CANVAS_SITE_TOOLS.has(name);
+            logger.info("MCP tool called", { name, input: rawInput, targetClientId: this.resolveTargetClientId(requireCanvas) });
+            return await this.requestCanvasTool(name, input, requireCanvas);
         }
         const readTool = ["canvas_get_state", "canvas_get_selection", "canvas_export_snapshot"].includes(name);
-        if (readTool && (!this.clients.size || !this.canvasState)) throw new Error("当前没有已连接画布");
-        if (name === "canvas_get_state" || name === "canvas_export_snapshot") return compactCanvasState(this.canvasState);
-        if (name === "canvas_get_selection") {
-            const ids = new Set(this.canvasState?.selectedNodeIds || []);
-            return { nodes: (this.canvasState?.nodes || []).filter((node) => ids.has(node.id)).map(compactNode) };
+        if (readTool) {
+            const state = this.canvasStateFor(this.resolveTargetClientId(true));
+            if (!this.clients.size || !state) throw new Error("当前没有已连接画布");
+            if (name === "canvas_get_state" || name === "canvas_export_snapshot") return compactCanvasState(state);
+            const ids = new Set(state.selectedNodeIds || []);
+            return { nodes: (state.nodes || []).filter((node) => ids.has(node.id)).map(compactNode) };
         }
         if (name === "canvas_create_attachment_nodes") return await this.createAttachmentNodes(input as { attachmentIds: string[]; x?: number; y?: number; gap?: number; direction?: "row" | "column" });
-        if (!this.clients.size) throw new Error("当前没有已连接画布");
-        const request = buildCanvasToolRequest(name, input, this.canvasState);
-        return await this.requestCanvasTool(request.name, request.input);
+        const targetId = this.resolveTargetClientId(true);
+        const state = this.canvasStateFor(targetId);
+        if (!this.clients.size || !this.clients.has(targetId)) throw new Error("当前没有已连接画布");
+        logger.info("MCP tool called", { name, input: rawInput, targetClientId: targetId });
+        const request = buildCanvasToolRequest(name, input, state);
+        return await this.requestCanvasTool(request.name, request.input, true);
     }
 
     /** 将当前 turn 的附件转换为画布图片节点。 */
@@ -490,9 +546,9 @@ export class CanvasSession {
     }
 
     /** 向目标网页发送工具请求并等待调用结果。 */
-    private async requestCanvasTool(name: ToolName, input: Record<string, unknown>) {
+    private async requestCanvasTool(name: ToolName, input: Record<string, unknown>, requireCanvas = false) {
         const requestId = crypto.randomUUID();
-        const clientId = this.targetClientId;
+        const clientId = this.resolveTargetClientId(requireCanvas);
         const client = this.clients.get(clientId);
         if (!client) throw new Error("当前没有已连接画布");
         sendEvent(client, "tool_call", { requestId, name, input });
@@ -545,9 +601,14 @@ function recordValue(value: unknown) {
     return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
-/** 向 SSE 连接写入一个事件。 */
+/** 向 SSE 连接写入一个事件（客户端瞬断时安全忽略写入异常）。 */
 function sendEvent(res: ServerResponse, type: string, payload: unknown) {
-    res.write(`event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`);
+    if (res.writableEnded || res.destroyed) return;
+    try {
+        res.write(`event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`);
+    } catch {
+        // 交由 close 监听器清理断开的客户端。
+    }
 }
 /** 将未知数值转换为正数，否则使用默认值。 */
 function positiveNumber(value: unknown, fallback: number) {
