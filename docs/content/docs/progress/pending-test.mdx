@@ -7,6 +7,9 @@ description: Implemented changes that still need manual verification
 
 The current release needs manual verification in these areas:
 
+- 多标签页 MCP 智能路由与断连稳定性：
+  1. 多标签页自动回退画布页：同时在浏览器打开两个标签页——Tab A 打开画布工程，Tab B 切到视频创作台或素材页并作为当前焦点标签页；通过 MCP 调用 `canvas_get_state`、`canvas_create_text_node` 或 `canvas_inspect_node_visual` 时自动操作 Tab A 画布（不报错「当前没有已连接画布」），而 `generation_get_status` 仍正常查询当前活跃标签页；
+  2. 多标签状态可视化：`canvas_connection_status` 返回 `activeClientId` 与 `connectedTabs`（包含各标签页是否打开画布、项目 ID、标题与节点数）。
 - 画布多镜头分镜批量编排（`canvas_create_storyboard_flow`）：
   1. 批量生成分镜节点与共享定妆照连线：传 2–4 镜分镜提示词并设置 `sharedReferenceNodeIds`（角色定妆照/场景图），画布上按行纵排生成对应提示词节点和配置节点、自动完成连线并选中所有配置节点；当单镜去重合并后超过 2 个参考节点时自动使用 `reference` 模式，超过 10 个则报错拦截；
   2. 串行首镜触发（`autoRunFirst: true`）：只自动启动第 1 镜生成，其余镜头保持待命状态，待首镜质检并截取尾帧连线后再逐镜运行。
