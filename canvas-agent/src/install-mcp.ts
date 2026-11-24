@@ -90,10 +90,17 @@ export function writeAntigravityConfig(home: string, spec: LaunchSpec) {
     let config: { mcpServers?: Record<string, unknown> } = {};
     if (existed) {
         const raw = fs.readFileSync(file, "utf8");
-        try {
-            config = JSON.parse(raw);
-        } catch {
-            throw new Error(`Antigravity MCP 配置不是有效 JSON：${file}`);
+        if (raw.trim()) {
+            let parsed: unknown;
+            try {
+                parsed = JSON.parse(raw);
+            } catch {
+                throw new Error(`Antigravity MCP 配置不是有效 JSON：${file}`);
+            }
+            if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+                throw new Error(`Antigravity MCP 配置不是有效 JSON：${file}`);
+            }
+            config = parsed as { mcpServers?: Record<string, unknown> };
         }
         if (!fs.existsSync(`${file}.bak`)) fs.copyFileSync(file, `${file}.bak`);
     }
