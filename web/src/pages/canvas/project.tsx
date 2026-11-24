@@ -824,8 +824,18 @@ function InfiniteCanvasPage() {
         return map;
     }, [connections, nodeById]);
     const referenceConnectedNodeIds = useMemo(() => new Set([referencePickerNodeId, ...(referencePickerNodeId ? connectedNodesByNodeId.get(referencePickerNodeId)?.flatMap((node) => node.type === CanvasNodeType.Group ? [node.id, ...getGroupResourceNodes(node.id, nodes).map((child) => child.id)] : [node.id]) || [] : [])].filter((id): id is string => Boolean(id))), [connectedNodesByNodeId, nodes, referencePickerNodeId]);
+    const isGenerationReady = useCallback(
+        (node: CanvasNodeData | undefined, mode: CanvasNodeGenerationMode) => {
+            const generationConfig = buildGenerationConfig(effectiveConfig, node, mode);
+            return isAiConfigReady(generationConfig, generationConfig.model);
+        },
+        [effectiveConfig, isAiConfigReady],
+    );
     const { applyAgentOps } = useAgentBridge({
         projectId,
+        projectLoaded,
+        size,
+        isGenerationReady,
         title: currentProject?.title,
         nodes,
         connections,

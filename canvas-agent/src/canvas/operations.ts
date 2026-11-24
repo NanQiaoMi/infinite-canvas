@@ -275,10 +275,6 @@ function autoLayoutOps(input: Record<string, unknown>, state: CanvasSnapshot | n
     const originX = Math.min(...targetNodes.map((n) => n.position.x));
     let groupTopY = Math.min(...targetNodes.map((n) => n.position.y));
     const ops: Array<Record<string, unknown>> = [];
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
 
     for (const comp of components) {
         const layer = new Map<string, number>();
@@ -323,16 +319,8 @@ function autoLayoutOps(input: Record<string, unknown>, state: CanvasSnapshot | n
             const colWidth = Math.max(...colNodes.map((n) => n.width || 320));
             let rowY = groupTopY;
             for (const node of colNodes) {
-                const w = node.width || 320;
-                const h = node.height || 200;
-                const x = Math.round(colX);
-                const y = Math.round(rowY);
-                ops.push({ type: "update_node", id: node.id, patch: { position: { x, y } } });
-                minX = Math.min(minX, x);
-                minY = Math.min(minY, y);
-                maxX = Math.max(maxX, x + w);
-                maxY = Math.max(maxY, y + h);
-                rowY += h + rowGap;
+                ops.push({ type: "update_node", id: node.id, patch: { position: { x: Math.round(colX), y: Math.round(rowY) } } });
+                rowY += (node.height || 200) + rowGap;
             }
             groupMaxBottom = Math.max(groupMaxBottom, rowY - rowGap);
             colX += colWidth + colGap;
@@ -341,17 +329,8 @@ function autoLayoutOps(input: Record<string, unknown>, state: CanvasSnapshot | n
         groupTopY = groupMaxBottom + groupGap;
     }
 
-    if (fitViewport && Number.isFinite(minX)) {
-        const viewW = 1200;
-        const viewH = 760;
-        const pad = 80;
-        const boxW = Math.max(10, maxX - minX);
-        const boxH = Math.max(10, maxY - minY);
-        const k = Number(Math.max(0.25, Math.min(1, Math.min((viewW - pad * 2) / boxW, (viewH - pad * 2) / boxH))).toFixed(3));
-        const cx = (minX + maxX) / 2;
-        const cy = (minY + maxY) / 2;
-        ops.push({ type: "set_viewport", viewport: { x: Math.round(viewW / 2 - cx * k), y: Math.round(viewH / 2 - cy * k), k } });
-    }
+    // 视口适配交给网页按真实画布尺寸计算。
+    if (fitViewport) ops.push({ type: "fit_view", ids: targetNodes.map((node) => node.id) });
 
     return ops;
 }

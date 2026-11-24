@@ -61,6 +61,7 @@ export const canvasOpSchema = z.discriminatedUnion("type", [
     z.object({ type: z.literal("connect_nodes"), id: z.string().optional(), fromNodeId: z.string(), toNodeId: z.string() }).passthrough(),
     z.object({ type: z.literal("set_viewport"), viewport: viewportSchema }).passthrough(),
     z.object({ type: z.literal("select_nodes"), ids: z.array(z.string()) }).passthrough(),
+    z.object({ type: z.literal("fit_view"), ids: z.array(z.string()).optional() }).passthrough(),
     z.object({ type: z.literal("run_generation"), nodeId: z.string(), mode: generationModeSchema.optional(), prompt: z.string().optional() }).passthrough(),
 ]);
 
@@ -200,7 +201,7 @@ export const toolDescriptions: Record<ToolName, string> = {
     canvas_get_state: "读取当前网页画布的节点、连线、选区和视口。",
     canvas_get_selection: "读取当前网页画布选中的节点。",
     canvas_export_snapshot: "导出当前画布快照，用于理解布局。",
-    canvas_apply_ops: "批量操作当前网页画布。ops 支持 add_node、update_node、delete_node、delete_connections、connect_nodes、set_viewport、select_nodes、run_generation。",
+    canvas_apply_ops: "批量操作当前网页画布。ops 支持 add_node、update_node、delete_node、delete_connections、connect_nodes、set_viewport、select_nodes、fit_view（按网页真实画布尺寸让指定节点或全部节点完整可见）、run_generation。",
     canvas_create_node: "创建任意类型节点：text、image、config、video、audio。适合创建占位图、媒体占位、配置节点或自定义 metadata 节点。",
     canvas_create_attachment_nodes: "把当前对话中用户上传的图片附件创建成真实画布图片节点。attachmentIds 使用本轮附件清单中的 ID；返回的节点 ID 可传给 canvas_create_generation_flow.referenceNodeIds 作为生成参考图。",
     canvas_create_asset_nodes: "把「我的素材」中的图片素材（通过 assets_list 获取 assetIds，单次最多 10 张）创建为当前画布的图片节点，返回节点 ID 列表；返回的节点 ID 可直接传给 canvas_generate_video.referenceNodeIds 作为人物定妆照或场景参考图。",
