@@ -61,6 +61,22 @@ test("writeAntigravityConfig rejects invalid JSON and leaves the file unchanged"
     }
 });
 
+test("writeAntigravityConfig treats an existing empty or whitespace-only file as {}", () => {
+    const home = makeTempHome();
+    const file = antigravityConfigFile(home);
+    try {
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, "");
+        writeAntigravityConfig(home, launchSpec(entry));
+        assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")), {
+            mcpServers: { "infinite-canvas": { command: process.execPath, args: [entry, "mcp"], env: {} } },
+        });
+        assert.equal(fs.readFileSync(`${file}.bak`, "utf8"), "");
+    } finally {
+        fs.rmSync(home, { recursive: true, force: true });
+    }
+});
+
 test("codexPluginEnabled detects an enabled infinite-canvas plugin section", () => {
     const home = makeTempHome();
     const file = path.join(home, ".codex", "config.toml");
