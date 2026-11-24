@@ -162,6 +162,68 @@ test("活动网页关闭后回退到仍连接的画布", async (t) => {
     assert.equal(field(await session.callTool("canvas_get_state", {}), "projectId"), "canvas-first");
 });
 
+test("当前激活标签页未打开画布时，画布工具自动路由到有画布的最近标签页且健康检查返回多标签清单", async (t) => {
+    const session = new CanvasSession();
+    const first = connect(session, "first");
+    const second = connect(session, "second");
+    t.after(() => {
+        first.close();
+        second.close();
+    });
+    session.updateState(snapshot("canvas-first"), "first");
+    session.updateState({ hasCanvas: false }, "second");
+    session.activateClient("second");
+
+    const health = session.health();
+    assert.equal(health.hasCanvas, true);
+    assert.equal(health.activeClientId, "second");
+    assert.equal(health.connectedTabs.length, 2);
+    assert.equal(health.connectedTabs[0]?.clientId, "second");
+    assert.equal(health.connectedTabs[0]?.hasCanvas, false);
+    assert.equal(health.connectedTabs[1]?.clientId, "first");
+    assert.equal(health.connectedTabs[1]?.hasCanvas, true);
+    assert.equal(health.connectedTabs[1]?.projectId, "canvas-first");
+
+    assert.equal(field(await session.callTool("canvas_get_state", {}), "projectId"), "canvas-first");
+
+    const textWrite = session.callTool("canvas_create_text_node", { text: "路由到画布页" });
+    const textCall = first.event("tool_call");
+    assert.equal(second.event("tool_call"), undefined);
+    session.resolveResult("first", { requestId: String(field(textCall, "requestId")), result: { ok: true } });
+    assert.deepEqual(await textWrite, { ok: true });
+
+    const inspectCallPromise = session.callTool("canvas_inspect_node_visual", { nodeId: "img-1" });
+    const inspectCalls = first.events("tool_call");
+    const inspectCall = inspectCalls[inspectCalls.length - 1];
+    assert.equal(field(inspectCall, "name"), "canvas_inspect_node_visual");
+    assert.equal(second.event("tool_call"), undefined);
+    session.resolveResult("first", { requestId: String(field(inspectCall, "requestId")), result: { ok: true } });
+    assert.deepEqual(await inspectCallPromise, { ok: true });
+
+    const statusPromise = session.callTool("generation_get_status", { scope: "all" });
+    const statusCall = second.event("tool_call");
+    assert.equal(field(statusCall, "name"), "generation_get_status");
+    session.resolveResult("second", { requestId: String(field(statusCall, "requestId")), result: { total: 0 } });
+    assert.deepEqual(await statusPromise, { total: 0 });
+});
+
+test("SSE 响应写入抛出异常时不会导致桥接进程崩溃", (t) => {
+    const session = new CanvasSession();
+    const broken = new FakeSseResponse();
+    let calls = 0;
+    broken.write = (chunk: string) => {
+        calls += 1;
+        if (calls > 1) throw new Error("EPIPE");
+        return FakeSseResponse.prototype.write.call(broken, chunk);
+    };
+    session.openEvents(new URL("http://127.0.0.1/events?clientId=broken"), broken as unknown as ServerResponse);
+    t.after(() => broken.close());
+
+    assert.doesNotThrow(() => {
+        session.beginConversation({ threadId: "t1" });
+    });
+});
+
 test("closing the active client falls back to the most recently focused client", async (t) => {
     const session = new CanvasSession();
     const first = connect(session, "first");
