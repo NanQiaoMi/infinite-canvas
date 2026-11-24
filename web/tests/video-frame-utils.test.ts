@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 
-import { computeContactSheetLayout, computeSampleTimestamps, fitMaxEdge } from "../src/lib/canvas/canvas-video-frame";
+import { computeContactSheetLayout, computeSampleTimestamps, fitMaxEdge, normalizeFocusTimestamps } from "../src/lib/canvas/canvas-video-frame";
 
 describe("video contact sheet and frame utilities", () => {
     it("samples evenly spaced timestamps clamped to 3-9 frames", () => {
@@ -26,5 +26,11 @@ describe("video contact sheet and frame utilities", () => {
         expect(tenPortrait.cols).toBe(4);
         expect(tenPortrait.rows).toBe(3);
         expect(Math.max(tenPortrait.canvasWidth, tenPortrait.canvasHeight)).toBeLessThanOrEqual(1280);
+    });
+
+    it("normalizes focusTimestamps by filtering invalid entries, clamping to duration, deduplicating, and capping at 4", () => {
+        expect(normalizeFocusTimestamps([-1, "bad", 0, 2.345, 2.349, 10, 99, 1.5, 3.2], 6)).toEqual([0, 2.35, 5.95, 1.5]);
+        expect(normalizeFocusTimestamps("not-an-array", 6)).toEqual([]);
+        expect(normalizeFocusTimestamps([1, 2], 0)).toEqual([0]);
     });
 });

@@ -13,7 +13,7 @@ import { imageAspectOptions, imageQualityOptions, imageScaleOptions } from "@/co
 import { videoResolutionOptions, videoSecondsRange, videoSizeOptions } from "@/components/video-settings-panel";
 import { imageMetadata } from "@/lib/canvas/canvas-node-factory";
 import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
-import { buildReferenceContactSheet, captureVideoContactSheet, captureVideoFrame, encodeImageToMcpJpeg } from "@/lib/canvas/canvas-video-frame";
+import { buildReferenceContactSheet, captureVideoContactSheet, captureVideoFocusFrames, captureVideoFrame, encodeImageToMcpJpeg } from "@/lib/canvas/canvas-video-frame";
 import type { CanvasAgentOp, CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
 import { clampVideoSeconds } from "@/lib/media-size";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
@@ -31,6 +31,7 @@ export const SITE_TOOL_NAMES = [
     "canvas_inspect_node_visual",
     "video_inspect_frames",
     "canvas_extract_video_frame",
+    "canvas_continue_video_shot",
     "canvas_create_asset_nodes",
     "workbench_image_get_config",
     "workbench_image_generate",
@@ -57,6 +58,7 @@ export const SITE_TOOL_LABELS: Record<SiteToolName, string> = {
     get canvas_inspect_node_visual() { return siteText("inspectNodeVisual"); },
     get video_inspect_frames() { return siteText("inspectVideoFrames"); },
     get canvas_extract_video_frame() { return siteText("extractVideoFrame"); },
+    get canvas_continue_video_shot() { return siteText("continueVideoShot"); },
     get canvas_create_asset_nodes() { return siteText("createAssetNodes"); },
     get workbench_image_get_config() { return siteText("imageConfig"); },
     get workbench_image_generate() { return siteText("imageGenerate"); },
@@ -105,6 +107,8 @@ export async function runSiteTool(name: SiteToolName, input: SiteToolInput, navi
             return inspectVideoFrames(input, context);
         case "canvas_extract_video_frame":
             return extractVideoFrameToCanvas(input, context);
+        case "canvas_continue_video_shot":
+            return continueVideoShotOnCanvas(input, context);
         case "canvas_create_asset_nodes":
             return createAssetNodesOnCanvas(input, context);
         case "workbench_image_get_config":
@@ -767,6 +771,18 @@ async function inspectVideoFrames(input: SiteToolInput, context: SiteToolContext
         label: `成片 ${frameCount} 帧抽帧接触表（时长 ${sheet.durationSeconds}s，分辨率 ${sheet.videoWidth}x${sheet.videoHeight}）`,
     });
 
+    const rawFocusTimestamps = Array.isArray(input.focusTimestamps)
+        ? input.focusTimestamps.slice(0, 4).map((val) => Number(val)).filter((val) => Number.isFinite(val) && val >= 0)
+        : [];
+    const focusFrames = rawFocusTimestamps.length ? await captureVideoFocusFrames(videoUrl, rawFocusTimestamps, maxEdge) : [];
+    for (const frame of focusFrames) {
+        mcpImages.push({
+            mimeType: frame.mimeType,
+            data: frame.dataBase64,
+            label: `高清放大复检帧 @ ${frame.timestamp.toFixed(2)}s (${frame.width}x${frame.height})`,
+        });
+    }
+
     return {
         ok: true,
         source: sourceKind,
@@ -778,6 +794,7 @@ async function inspectVideoFrames(input: SiteToolInput, context: SiteToolContext
         resolution: `${sheet.videoWidth}x${sheet.videoHeight}`,
         frameCount,
         timestamps: sheet.timestamps,
+        ...(focusFrames.length ? { focusTimestamps: focusFrames.map((item) => item.timestamp) } : {}),
         referenceCount: referenceItems.length,
         referenceCollageIncluded,
         qaDimensions: VIDEO_QA_DIMENSIONS,
@@ -926,4 +943,113 @@ async function createAssetNodesOnCanvas(input: SiteToolInput, context: SiteToolC
     const nextSnapshot = canvasContext.applyOps([...addOps, { type: "select_nodes", ids: created.map((item) => item.id) }]);
     context.syncCanvasState?.(nextSnapshot);
     return { ok: true, count: created.length, nodes: created };
+}
+
+async function continueVideoShotOnCanvas(input: SiteToolInput, context: SiteToolContext) {
+    const canvasContext = getLiveCanvasContext(context);
+    if (!canvasContext) throw new Error(siteText("openCanvasFirst"));
+    const sourceVideoNodeId = String(input.sourceVideoNodeId || "").trim();
+    const prompt = String(input.prompt || "").trim();
+    if (!prompt) throw new Error("请提供续拍提示词 prompt");
+
+    const sourceNode = canvasContext.snapshot.nodes.find((item) => item.id === sourceVideoNodeId);
+    if (!sourceNode) throw new Error(siteText("nodeNotFound", { id: sourceVideoNodeId }));
+
+    const charIds = Array.isArray(input.characterReferenceNodeIds)
+        ? Array.from(new Set(input.characterReferenceNodeIds.map((id) => String(id || "").trim()).filter(Boolean)))
+        : [];
+    if (1 + charIds.length > VIDEO_MAX_REFERENCES) {
+        throw new Error(siteText("videoMaxReferences", { max: VIDEO_MAX_REFERENCES, count: 1 + charIds.length }));
+    }
+    for (const charId of charIds) {
+        if (!canvasContext.snapshot.nodes.some((item) => item.id === charId)) {
+            throw new Error(siteText("nodeNotFound", { id: charId }));
+        }
+    }
+
+    const videoUrl = await resolveNodeVideoUrl(sourceNode);
+    if (!videoUrl) throw new Error(siteText("nodeNoMedia", { title: sourceNode.title || sourceNode.id }));
+
+    const position = input.position === "first" || input.position === "time" ? input.position : "last";
+    const seconds = Math.max(0, Number(input.seconds) || 0);
+    const blob = await captureVideoFrame(videoUrl, position, seconds);
+    const uploaded = await uploadImage(blob);
+    const frameSize = fitNodeSize(uploaded.width, uploaded.height, 480, 480);
+
+    const frameNodeId = `image-${nanoid(10)}`;
+    const textNodeId = `text-${nanoid(10)}`;
+    const configNodeId = `config-${nanoid(10)}`;
+    const rowY = sourceNode.position.y;
+    const frameX = sourceNode.position.x + sourceNode.width + 80;
+    const textX = frameX + frameSize.width + 80;
+    const configX = textX + 380;
+
+    const mergedRefs = [frameNodeId, ...charIds];
+    const tokens = [`@[node:${textNodeId}]`, ...mergedRefs.map((id) => `@[node:${id}]`)].join("\n");
+    const resolvedVideoMode = input.videoMode === "frames" || input.videoMode === "reference"
+        ? input.videoMode
+        : mergedRefs.length > 2
+          ? "reference"
+          : undefined;
+    const configTitle = typeof input.title === "string" && input.title.trim() ? input.title.trim() : `${sourceNode.title || "视频"} · 续拍`;
+    const autoRun = input.autoRun !== false;
+
+    const ops: CanvasAgentOp[] = [
+        {
+            type: "add_node",
+            id: frameNodeId,
+            nodeType: CanvasNodeType.Image,
+            title: `${sourceNode.title || "视频"} (${position === "first" ? "首帧" : position === "time" ? `${seconds}s` : "尾帧"})`,
+            position: { x: frameX, y: rowY },
+            width: frameSize.width,
+            height: frameSize.height,
+            metadata: imageMetadata(uploaded),
+        },
+        {
+            type: "add_node",
+            id: textNodeId,
+            nodeType: CanvasNodeType.Text,
+            title: `${configTitle} 提示词`,
+            position: { x: textX, y: rowY },
+            metadata: { content: prompt, status: "success", fontSize: 14 },
+        },
+        {
+            type: "add_node",
+            id: configNodeId,
+            nodeType: CanvasNodeType.Config,
+            title: configTitle,
+            position: { x: configX, y: rowY },
+            metadata: {
+                generationMode: "video",
+                composerContent: tokens,
+                prompt: tokens,
+                status: "idle",
+                ...(typeof input.model === "string" && input.model ? { model: input.model } : {}),
+                ...(typeof input.size === "string" && input.size ? { size: input.size } : {}),
+                ...(typeof input.durationSeconds === "string" && input.durationSeconds ? { seconds: input.durationSeconds } : {}),
+                ...(typeof input.vquality === "string" && input.vquality ? { vquality: input.vquality } : {}),
+                ...(typeof input.generateAudio === "string" && input.generateAudio ? { generateAudio: input.generateAudio } : {}),
+                ...(typeof input.watermark === "string" && input.watermark ? { watermark: input.watermark } : {}),
+                ...(resolvedVideoMode ? { videoMode: resolvedVideoMode } : {}),
+            },
+        },
+        { type: "connect_nodes", fromNodeId: sourceNode.id, toNodeId: frameNodeId },
+        { type: "connect_nodes", fromNodeId: textNodeId, toNodeId: configNodeId },
+        ...mergedRefs.map((fromNodeId) => ({ type: "connect_nodes" as const, fromNodeId, toNodeId: configNodeId })),
+        { type: "select_nodes", ids: [configNodeId] },
+        ...(autoRun ? [{ type: "run_generation" as const, nodeId: configNodeId, mode: "video" as const, prompt: tokens }] : []),
+    ];
+
+    const nextSnapshot = canvasContext.applyOps(ops);
+    context.syncCanvasState?.(nextSnapshot);
+    return {
+        ok: true,
+        sourceVideoNodeId,
+        frameNodeId,
+        textNodeId,
+        configNodeId,
+        referenceNodeIds: mergedRefs,
+        videoMode: resolvedVideoMode || "frames",
+        autoRun,
+    };
 }

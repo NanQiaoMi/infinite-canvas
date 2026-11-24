@@ -39,11 +39,13 @@ const SITE_TOOLS = new Set<ToolName>([
     "canvas_inspect_node_visual",
     "video_inspect_frames",
     "canvas_extract_video_frame",
+    "canvas_continue_video_shot",
     "canvas_create_asset_nodes",
 ]);
 const CANVAS_SITE_TOOLS = new Set<ToolName>([
     "canvas_inspect_node_visual",
     "canvas_extract_video_frame",
+    "canvas_continue_video_shot",
     "canvas_create_asset_nodes",
 ]);
 
@@ -570,7 +572,7 @@ function requestTimeoutMs(name: ToolName, input: Record<string, unknown>) {
         const waitSeconds = Math.max(0, Math.min(30, Number(input.waitSeconds) || 0));
         if (waitSeconds > 0) return waitSeconds * 1000 + 15000;
     }
-    if (name === "video_inspect_frames" || name === "canvas_inspect_node_visual" || name === "canvas_extract_video_frame" || name === "canvas_create_asset_nodes") {
+    if (name === "video_inspect_frames" || name === "canvas_inspect_node_visual" || name === "canvas_extract_video_frame" || name === "canvas_continue_video_shot" || name === "canvas_create_asset_nodes") {
         return 45000;
     }
     return 30000;
