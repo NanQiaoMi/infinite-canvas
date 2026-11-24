@@ -19,6 +19,7 @@ afterAll(() => {
 
 const { extractCanvasProjectId, waitForCanvasProjectReady, runSiteTool } = await import("../src/lib/agent/agent-site-tools");
 const { useAssetStore } = await import("../src/stores/use-asset-store");
+const { CanvasNodeType } = await import("../src/types/canvas");
 
 function fakeCanvasContext(projectId: string): AgentCanvasContext {
     const snapshot: CanvasAgentSnapshot = {
@@ -114,5 +115,54 @@ describe("canvas_create_asset_nodes validation", () => {
         } finally {
             useAssetStore.setState({ hydrated: prev.hydrated, assets: prev.assets });
         }
+    });
+});
+
+describe("canvas_continue_video_shot validation", () => {
+    const noopNavigate = (() => {}) as unknown as Parameters<typeof runSiteTool>[2];
+
+    it("requires an active canvas context and valid source/character nodes within 10 total references", async () => {
+        await expect(
+            runSiteTool("canvas_continue_video_shot", { sourceVideoNodeId: "v1", prompt: "next shot" }, noopNavigate, {}),
+        ).rejects.toThrow();
+
+        const ctx = fakeCanvasContext("p1");
+        ctx.snapshot.nodes = [
+            {
+                id: "v1",
+                type: CanvasNodeType.Video,
+                title: "Shot 1",
+                position: { x: 0, y: 0 },
+                width: 320,
+                height: 180,
+                metadata: { content: "https://example.com/v1.mp4", status: "success" },
+            },
+        ];
+
+        await expect(
+            runSiteTool("canvas_continue_video_shot", { sourceVideoNodeId: "missing", prompt: "next shot" }, noopNavigate, { canvasContext: ctx }),
+        ).rejects.toThrow(/missing/);
+
+        await expect(
+            runSiteTool(
+                "canvas_continue_video_shot",
+                {
+                    sourceVideoNodeId: "v1",
+                    prompt: "next shot",
+                    characterReferenceNodeIds: Array.from({ length: 10 }, (_, i) => `char-${i + 1}`),
+                },
+                noopNavigate,
+                { canvasContext: ctx },
+            ),
+        ).rejects.toThrow(/10/);
+
+        await expect(
+            runSiteTool(
+                "canvas_continue_video_shot",
+                { sourceVideoNodeId: "v1", prompt: "next shot", characterReferenceNodeIds: ["missing-char"] },
+                noopNavigate,
+                { canvasContext: ctx },
+            ),
+        ).rejects.toThrow(/missing-char/);
     });
 });

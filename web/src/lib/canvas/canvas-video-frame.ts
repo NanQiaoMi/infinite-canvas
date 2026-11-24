@@ -139,6 +139,57 @@ export async function captureVideoContactSheet(source: string, options: { frameC
     }
 }
 
+/** 归一化放大复检时间点：过滤非法/负数并限制在视频有效时长内、去重并最多保留 4 个。 */
+export function normalizeFocusTimestamps(raw: unknown, duration: number, maxCount = 4): number[] {
+    if (!Array.isArray(raw)) return [];
+    const endTime = Number.isFinite(duration) && duration > 0 ? Math.max(0, duration - Math.min(0.05, duration * 0.05)) : 0;
+    const seen = new Set<number>();
+    const out: number[] = [];
+    for (const item of raw) {
+        const num = Number(item);
+        if (!Number.isFinite(num) || num < 0) continue;
+        const clamped = Number(Math.min(num, endTime).toFixed(2));
+        if (seen.has(clamped)) continue;
+        seen.add(clamped);
+        out.push(clamped);
+        if (out.length >= maxCount) break;
+    }
+    return out;
+}
+
+/** 按指定秒数抽取最多 4 张高清独立复检帧（保持原画比例，长边最高 maxEdge）。 */
+export async function captureVideoFocusFrames(
+    source: string,
+    rawTimestamps: number[],
+    maxEdge = 1280,
+): Promise<Array<EncodedMcpImage & { timestamp: number }>> {
+    if (!rawTimestamps.length) return [];
+    const limit = Math.max(512, Math.min(1280, Math.floor(maxEdge || 1280)));
+    const video = createOffscreenVideo(source);
+    try {
+        await waitForVideo(video, "loadedmetadata");
+        const duration = Number.isFinite(video.duration) ? video.duration : 0;
+        const timestamps = normalizeFocusTimestamps(rawTimestamps, duration, 4);
+        if (!timestamps.length) return [];
+
+        const { width, height } = fitMaxEdge(video.videoWidth || 1280, video.videoHeight || 720, limit);
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d")!;
+
+        const frames: Array<EncodedMcpImage & { timestamp: number }> = [];
+        for (const timestamp of timestamps) {
+            await seekVideoTo(video, timestamp);
+            ctx.drawImage(video, 0, 0, width, height);
+            frames.push({ ...canvasToJpegBase64(canvas), timestamp });
+        }
+        return frames;
+    } finally {
+        disposeOffscreenVideo(video);
+    }
+}
+
 /** 将单张图片按长边限制压缩编码为 JPEG Base64。 */
 export async function encodeImageToMcpJpeg(source: string, maxEdge = 1280): Promise<EncodedMcpImage> {
     const img = await loadImageElement(source);
