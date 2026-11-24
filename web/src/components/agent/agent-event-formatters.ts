@@ -342,7 +342,7 @@ export function toolName(name: string) {
 }
 
 const toolTranslationKeys: Record<string, string> = {
-    canvas_apply_ops: "canvasOps", canvas_get_state: "readCanvas", canvas_get_selection: "readSelection", canvas_export_snapshot: "exportSnapshot", canvas_create_node: "createNode", canvas_create_attachment_nodes: "addAttachments", canvas_create_text_node: "createText", canvas_create_text_nodes: "createTexts", canvas_create_config_node: "createConfig", canvas_create_image_prompt_flow: "createImageFlow", canvas_create_generation_flow: "createGenerationFlow", canvas_generate_text: "generateText", canvas_generate_image: "generateImage", canvas_generate_video: "generateVideo", canvas_generate_audio: "generateAudio", canvas_update_node: "updateNode", canvas_update_node_text: "updateText", canvas_move_nodes: "moveNodes", canvas_resize_node: "resizeNode", canvas_delete_nodes: "deleteNodes", canvas_connect_nodes: "connectNodes", canvas_select_nodes: "selectNodes", canvas_set_viewport: "setViewport", canvas_run_generation: "runGeneration", site_navigate: "openPage",
+    canvas_apply_ops: "canvasOps", canvas_get_state: "readCanvas", canvas_get_selection: "readSelection", canvas_export_snapshot: "exportSnapshot", canvas_create_node: "createNode", canvas_create_attachment_nodes: "addAttachments", canvas_create_text_node: "createText", canvas_create_text_nodes: "createTexts", canvas_create_config_node: "createConfig", canvas_create_image_prompt_flow: "createImageFlow", canvas_create_generation_flow: "createGenerationFlow", canvas_create_storyboard_flow: "createStoryboard", canvas_auto_layout: "autoLayout", canvas_generate_text: "generateText", canvas_generate_image: "generateImage", canvas_generate_video: "generateVideo", canvas_generate_audio: "generateAudio", canvas_update_node: "updateNode", canvas_update_node_text: "updateText", canvas_move_nodes: "moveNodes", canvas_resize_node: "resizeNode", canvas_delete_nodes: "deleteNodes", canvas_connect_nodes: "connectNodes", canvas_select_nodes: "selectNodes", canvas_set_viewport: "setViewport", canvas_run_generation: "runGeneration", site_navigate: "openPage",
 };
 
 function siteToolSummary(name: string, result: unknown, input: unknown) {
@@ -360,6 +360,8 @@ function siteToolSummary(name: string, result: unknown, input: unknown) {
     if (name === "workbench_image_get_config" || name === "workbench_video_get_config") return tr("workbenchConfigRead");
     if (name === "video_inspect_frames" || name === "canvas_inspect_node_visual") return typeof data.summary === "string" ? data.summary : "";
     if (name === "canvas_extract_video_frame") return typeof data.nodeId === "string" ? data.nodeId : "";
+    if (name === "canvas_create_asset_nodes") return typeof data.count === "number" ? String(data.count) : "";
+    if (name === "canvas_continue_video_shot") return typeof data.configNodeId === "string" ? data.configNodeId : "";
     return "";
 }
 
