@@ -30,7 +30,7 @@ AI 请求由浏览器直接发往你配置的 OpenAI 兼容接口，画布、资
   <sub>无限画布 · 系列海报网格排布，左侧元素面板可检索、定位与显隐</sub>
 </p>
 
-## 核心功能
+## 核心功能与界面预览
 
 - **画布工作流**：文本、图片、视频、音频、生成配置与分组节点，连线传递提示词与参考图，结果保留参数，可重试与二次编辑。
 - **AI 生成**：多渠道 OpenAI 兼容接口，图片张数、比例、参考图、透明背景与自定义调用脚本；任务排队、自动重试、刷新后恢复。
@@ -42,6 +42,58 @@ AI 请求由浏览器直接发往你配置的 OpenAI 兼容接口，画布、资
 - **同步与插件**：WebDAV 同步画布与资产；画布插件可扩展节点类型、渲染与工具栏动作。
 
 完整功能说明见 [features.mdx](docs/content/docs/overview/features.mdx)。
+
+### 功能模块展示
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <img src="docs/public/screenshots/home.webp" alt="首页概览" />
+      <br />
+      <sub><b>首页工作台</b> · 统一入口、今日额度与提示词精选</sub>
+    </td>
+    <td width="50%" align="center">
+      <img src="docs/public/screenshots/chat.webp" alt="AI 对话与画布助手" />
+      <br />
+      <sub><b>AI 对话助手</b> · 拆解多步任务并自动调用工具排布画布</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <img src="docs/public/screenshots/image-workbench.webp" alt="生图工作台" />
+      <br />
+      <sub><b>生图工作台</b> · 提示词润色、参考图、批量出图与参数记录</sub>
+    </td>
+    <td width="50%" align="center">
+      <img src="docs/public/screenshots/prompts.webp" alt="提示词中心" />
+      <br />
+      <sub><b>提示词库</b> · 多源聚合、标签检索、一键复制与加入资产</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <img src="docs/public/screenshots/assets.webp" alt="我的资产" />
+      <br />
+      <sub><b>我的资产</b> · 统一收藏图片/文本/视频，支持标签筛选与导入导出</sub>
+    </td>
+    <td width="50%" align="center">
+      <img src="docs/public/screenshots/admin.webp" alt="管理后台" />
+      <br />
+      <sub><b>服务端管理后台</b> · 渠道托管、按能力与 IP 的额度策略配置</sub>
+    </td>
+  </tr>
+</table>
+
+### 整体架构
+
+```mermaid
+flowchart LR
+  User["浏览器工作台 (React + Vite)"] -->|直连模式| API["OpenAI 兼容接口"]
+  User -->|可选服务端模式| Server["Server (渠道托管 / 额度 / 审计)"]
+  Server --> API
+  User <-->|WebSocket + Token| Agent["Canvas Agent (Codex / Claude)"]
+  Agent <-->|MCP| CLI["Claude Code / Codex / Antigravity"]
+```
 
 ## 快速开始
 
